@@ -2,7 +2,7 @@
   "name": "xcerpt-app",
   "private": true,
   "version": "0.0.0",
-  "main": "main.cjs", 
+  "main": "main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@tailwindcss/vite": "^4.2.2",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
