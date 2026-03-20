@@ -33,3 +33,13 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-border-subtle;
 }
+
+.monaco-skip-block-line {
+  background-color: rgba(127, 29, 29, 0.2) !important;
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.monaco-skip-block-margin {
+  background-color: rgba(239, 68, 68, 0.5) !important;
+}

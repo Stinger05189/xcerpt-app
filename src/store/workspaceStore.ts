@@ -2,33 +2,52 @@
 import { create } from 'zustand';
 import type { FileNode } from '../types/ipc';
 
+export interface CompressionRule {
+  id: string;
+  startLine: number;
+  endLine: number;
+  type: 'SKIP' | 'GHOST';
+}
+
 interface WorkspaceState {
   // Data
   rootPaths: string[];
-  rawTrees: Record<string, FileNode>; // Map of rootPath to its scanned tree
-  
+  rawTrees: Record<string, FileNode>; 
+
   // Rules
   includes: string[];
   excludes: string[];
-  
-  // UI State (Using stable relative paths)
+
+  // Compressions Map: Record<RelativePath, CompressionRule[]>
+  compressions: Record<string, CompressionRule[]>;
+
+  // UI State
   activeTab: string | null;
+  activeFile: string | null; // The relative path of the selected file
+  isExportStaging: boolean;  // Toggles right pane between Editor and Export Preview
   expandedFolders: Set<string>;
-  
+
   // Actions
   addRootPath: (path: string) => Promise<void>;
   setActiveTab: (path: string) => void;
+  setActiveFile: (path: string | null) => void;
+  setExportStaging: (val: boolean) => void;
   toggleFolderExpansion: (relativePath: string) => void;
   addExcludeRule: (pattern: string) => void;
   removeExcludeRule: (pattern: string) => void;
+  addCompression: (relativePath: string, rule: Omit<CompressionRule, 'id'>) => void;
+  removeCompression: (relativePath: string, id: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   rootPaths: [],
   rawTrees: {},
   includes: [],
-  excludes: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'], // Sensible defaults
+  excludes: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+  compressions: {},
   activeTab: null,
+  activeFile: null,
+  isExportStaging: false,
   expandedFolders: new Set<string>(),
 
   addRootPath: async (rootPath: string) => {
@@ -71,5 +90,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => ({
       excludes: state.excludes.filter((p) => p !== pattern)
     }));
+  },
+
+  setActiveFile: (path: string | null) => set({ activeFile: path, isExportStaging: false }),
+  setExportStaging: (val: boolean) => set({ isExportStaging: val }),
+
+  addCompression: (relativePath, rule) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    set((state) => {
+      const existing = state.compressions[relativePath] || [];
+      return {
+        compressions: {
+          ...state.compressions,
+          [relativePath]: [...existing, { ...rule, id }]
+        }
+      };
+    });
+  },
+
+  removeCompression: (relativePath, id) => {
+    set((state) => {
+      const existing = state.compressions[relativePath] || [];
+      return {
+        compressions: {
+          ...state.compressions,
+          [relativePath]: existing.filter(c => c.id !== id)
+        }
+      };
+    });
   }
 }));

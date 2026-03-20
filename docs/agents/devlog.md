@@ -1,3 +1,5 @@
+# devlog.md
+
 # Project Dev Log & Core Memory
 
 > **[IMMUTABLE AI DIRECTIVE]**
@@ -27,10 +29,35 @@
   - `package.json`, `vite.config.ts`, `main.cjs`, `preload.cjs`
   - `agents/conventions.md`, `agents/plan.md`, `agents/devlog.md`
 
+## Active Epoch: 02 - Context Compression & Export Staging
+
+### Session 002
+
+- **Focus Area:** Integrating Monaco Editor for Context Compression and building the Export Staging chunking logic.
+- **Key Decisions:**
+  - Decided to use `@monaco-editor/react` for the code viewer. We will mount it conditionally in a right-hand split pane to preserve performance.
+  - Context compression markers (`startLine`, `endLine`) will be stored in Zustand mapped to the stable relative path of the file.
+  - Added `fs:readFile` IPC endpoint to allow the Renderer to lazily load file contents into Monaco only when selected, keeping memory usage low.
+- **Roadblocks Resolved:**
+  - Resolved Vite/Tailwind v4 CSS compilation issue by explicitly installing and configuring the `@tailwindcss/vite` plugin.
+- **Core Files Modified:**
+  - `src/store/workspaceStore.ts`, `src/components/layout/MainStage.tsx`
+  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+
+---
+
+### Session 003
+
+- **Focus Area:** Implemented Context Editor (Monaco) and Export Staging preview; resolved critical React/Monaco integration bugs.
+- **Key Decisions:**
+  - Shifted away from Tailwind utility classes inside Monaco configuration. Monaco's virtualized DOM fails to parse classes with special characters (like `/`). We now use standard global CSS classes (e.g., `.monaco-skip-block-line`) for editor decorations.
+- **Roadblocks Resolved:**
+  - **Stale Closures:** The `xcerpt-skip-block` context menu was trapping the initial `relativePath` in a stale closure. Fixed by forcing a React unmount/remount of the `<ContextEditor>` using `key={activeFile}`.
+  - **React Strict Mode Artifacts:** Identified and safely ignored the `Uncaught {type: 'cancelation'}` error thrown by Monaco during React 18's strict mode double-mount.
+
 ---
 
 ## Archived Epochs
 
-_(Older epochs will be compressed and summarized here to preserve the AI context window as the project scales.)_
-
-- **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow, established the hybrid manual-merge constraints, and set up the blank repository state.
+- **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.
+- **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

@@ -15,6 +15,8 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
   const { 
     expandedFolders, 
     toggleFolderExpansion, 
+    setActiveFile,
+    activeFile,
     includes, 
     excludes, 
     addExcludeRule, 
@@ -23,29 +25,24 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
 
   const isExpanded = expandedFolders.has(relativePath);
   const isDirectory = node.type === 'directory';
-  
-  // Calculate visual state
+  const isSelected = activeFile === relativePath && !isDirectory;
+
   const status = getFileStatus(relativePath, isDirectory, includes, excludes);
   const isExcluded = status === 'excluded';
 
-  const handleToggleExpand = (e: React.MouseEvent) => {
+  const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isDirectory) {
       toggleFolderExpansion(relativePath);
+    } else {
+      setActiveFile(relativePath);
     }
   };
 
   const handleCheckboxChange = () => {
-    // If it's a directory, append a slash to the glob pattern
     const pattern = isDirectory ? `${relativePath}/` : relativePath;
-    
-    if (isExcluded) {
-      // It's currently excluded, so the user wants to re-include it
-      removeExcludeRule(pattern);
-    } else {
-      // It's included, user wants to exclude it
-      addExcludeRule(pattern);
-    }
+    if (isExcluded) removeExcludeRule(pattern);
+    else addExcludeRule(pattern);
   };
 
   // Prevent rendering the root node itself as a foldable item, just render its children
@@ -69,8 +66,10 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
     <div>
       <div 
         className={`flex items-center py-1 hover:bg-bg-hover rounded cursor-pointer group pr-2
-          ${isExcluded ? 'opacity-40' : 'opacity-100'} transition-opacity`}
-        onClick={handleToggleExpand}
+          ${isExcluded ? 'opacity-40' : 'opacity-100'} 
+          ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle' : ''} 
+          transition-all`}
+        onClick={handleClick}
         style={{ paddingLeft: `${(depth - 1) * 16 + 4}px` }}
       >
         {/* Expand/Collapse Icon */}

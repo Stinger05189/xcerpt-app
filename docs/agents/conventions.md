@@ -1,3 +1,5 @@
+# conventions.md
+
 # Project Conventions & Architecture
 
 > **[IMMUTABLE AI DIRECTIVE]**
@@ -44,3 +46,6 @@
 - **Stable Relative Paths (CRITICAL):** To prevent the selection/scroll reset bugs present in the legacy Python application, React `key` props and Zustand state identifiers (e.g., `selectedFiles`, `expandedFolders`) MUST use the file's Stable Relative Path from the project root (e.g., `src/components/Button.tsx`). Never use array indexes or volatile UI IDs.
 - **Visual State Filtering:** Excluded files must NOT be removed from the DOM/Tree data structure. Instead, the Renderer applies an "excluded" status flag, and the UI responds by rendering the item with opacity (dimmed) and a disabled state.
 - **Context Compression Coordinates:** Skip markers in Monaco must be mapped to specific line numbers (`startLine`, `endLine`) relative to the original file, saved immutably in the workspace state under the specific file's relative path.
+- **React/Monaco Lifecycle (Stale Closures):** When wrapping imperative libraries like Monaco, always use a changing `key` prop (e.g., `key={activeFile}`) on the React wrapper component. This forces a clean unmount/remount, preventing context menus and event listeners from trapping stale state (like old file paths) in closures.
+- **Monaco Styling Constraints:** Do NOT use Tailwind utility classes containing special characters (like `/`, `[`, or `]`) inside Monaco Editor configurations (e.g., `glyphMarginClassName`). Monaco's customized virtual DOM parses these incorrectly. Always define and use standard global CSS classes (e.g., `.monaco-skip-line`) for editor decorations.
+- **React Strict Mode Ignorables:** `Uncaught (in promise) {type: 'cancelation'}` errors originating from Monaco during development are harmless artifacts of React 18's Strict Mode double-mounting. They can be safely ignored.

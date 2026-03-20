@@ -16,6 +16,7 @@ export interface ElectronAPI {
   ping: () => Promise<string>;
   selectDirectory: () => Promise<string | null>;
   scanDirectory: (path: string) => Promise<ScanResult>;
+  readFile: (path: string) => Promise<string>;
 }
 
 declare global {

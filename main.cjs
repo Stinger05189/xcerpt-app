@@ -1,3 +1,4 @@
+// main.cjs
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
@@ -110,6 +111,15 @@ ipcMain.handle('fs:scanDirectory', async (_, dirPath) => {
     return await scanDirectory(dirPath);
   } catch (error) {
     console.error('Error scanning directory:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('fs:readFile', async (_, filePath) => {
+  try {
+    return await fs.readFile(filePath, 'utf-8');
+  } catch (error) {
+    console.error('Error reading file:', error);
     throw error;
   }
 });
