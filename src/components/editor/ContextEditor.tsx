@@ -2,9 +2,8 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { FileCode2 } from 'lucide-react';
+import { FileCode2, Undo2, Trash2, Eye, Code2 } from 'lucide-react';
 
-// Extract the exact type of the Monaco Editor instance
 type MonacoEditor = Parameters<OnMount>[0];
 type EditorDecorationsCollection = ReturnType<MonacoEditor['createDecorationsCollection']>;
 
@@ -16,94 +15,178 @@ interface ContextEditorProps {
 export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+
   const editorRef = useRef<MonacoEditor | null>(null);
   const decorationsCollectionRef = useRef<EditorDecorationsCollection | null>(null);
   const monaco = useMonaco();
 
-  const { addCompression, compressions } = useWorkspaceStore();
+  const { 
+    addCompressions, 
+    removeCompression, 
+    clearCompressions, 
+    undoLastCompression, 
+    compressions, 
+    compressionHistory,
+    setCompressions 
+  } = useWorkspaceStore();
 
-  // Memoize the array to prevent useEffect dependency infinite loops
   const rawCompressions = compressions[relativePath];
   const fileCompressions = useMemo(() => rawCompressions || [], [rawCompressions]);
+  const hasHistory = (compressionHistory[relativePath]?.length || 0) > 0;
 
-  // Load File Content
+  // Load File and Auto-Heal Drift
   useEffect(() => {
     let isMounted = true;
-    
     const loadFile = async () => {
       setLoading(true);
       const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
-      
       try {
         const text = await window.api.readFile(absolutePath);
         if (isMounted) {
           setContent(text);
           setLoading(false);
+          
+          // Drift Reconciliation: Check if external edits shifted our skip markers
+          if (fileCompressions.length > 0) {
+            const lines = text.split('\n');
+            let needsUpdate = false;
+            
+            const healedCompressions = fileCompressions.map(comp => {
+              const expectedLine = lines[comp.startLine - 1];
+              if (expectedLine === comp.signature) return comp; // Perfect match
+            
+              // Drift detected, search +/- 50 lines for the exact signature
+              let foundOffset = 0;
+              for (let i = 1; i <= 50; i++) {
+                if (lines[comp.startLine - 1 + i] === comp.signature) { foundOffset = i; break; }
+                if (lines[comp.startLine - 1 - i] === comp.signature) { foundOffset = -i; break; }
+              }
+            
+              if (foundOffset !== 0) {
+                needsUpdate = true;
+                return { 
+                  ...comp, 
+                  startLine: comp.startLine + foundOffset, 
+                  endLine: comp.endLine + foundOffset 
+                };
+              }
+              return comp; // Signature lost (block was likely deleted entirely)
+            });
+            
+            if (needsUpdate) {
+              setCompressions(relativePath, healedCompressions);
+            }
+          }
         }
       } catch (err: unknown) {
         if (isMounted) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          setContent(`Error reading file:\n${errorMessage}`);
+          setContent(`Error reading file:\n${err instanceof Error ? err.message : String(err)}`);
           setLoading(false);
         }
       }
     };
-    
     loadFile();
-    
     return () => { isMounted = false; };
   }, [rootPath, relativePath]);
 
-  // Setup Monaco Context Menu Action
-  const handleEditorMount: OnMount = (editor) => {
+  // Compute the compressed text for preview mode
+  const previewContent = useMemo(() => {
+    if (!isPreviewMode) return content;
+    const lines = content.split('\n');
+    const sortedComps = [...fileCompressions].sort((a, b) => b.startLine - a.startLine);
+    
+    const resultLines = [...lines];
+    sortedComps.forEach(comp => {
+      const skipCount = comp.endLine - comp.startLine + 1;
+      const marker = `// ... [Skipped ${skipCount} lines] ...`;
+      resultLines.splice(comp.startLine - 1, skipCount, marker);
+    });
+    
+    return resultLines.join('\n');
+  }, [content, fileCompressions, isPreviewMode]);
+
+  const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
+    
+    // Turn off Typescript Diagnostics (No Red Squiggles)
+    monacoInstance.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: true,
+      noSyntaxValidation: true,
+    });
     
     editor.addAction({
       id: 'xcerpt-skip-block',
       label: 'Skip Block (Context Compression)',
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 1.5,
+      keybindings: [monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Backspace],
       run: (ed: MonacoEditor) => {
-        const selection = ed.getSelection();
-        if (selection && !selection.isEmpty()) {
-          addCompression(relativePath, {
-            startLine: selection.startLineNumber,
-            endLine: selection.endLineNumber,
-            type: 'SKIP'
-          });
-          // Clear selection after skip
-          ed.setSelection({ startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 });
+        const selections = ed.getSelections();
+        const model = ed.getModel();
+        if (selections && selections.length > 0 && model) {
+          const rules = selections
+            .filter(sel => !sel.isEmpty())
+            .map(sel => ({
+              startLine: sel.startLineNumber,
+              endLine: sel.endLineNumber,
+              type: 'SKIP' as const,
+              signature: model.getLineContent(sel.startLineNumber),
+              lineCount: sel.endLineNumber - sel.startLineNumber + 1
+            }));
+            
+          if (rules.length > 0) {
+            addCompressions(relativePath, rules);
+            ed.setSelection({ startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 });
+          }
+        }
+      }
+    });
+    
+    editor.addAction({
+      id: 'xcerpt-unskip-block',
+      label: 'Un-Skip Block',
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.6,
+      run: (ed: MonacoEditor) => {
+        const position = ed.getPosition();
+        if (position) {
+          const target = useWorkspaceStore.getState().compressions[relativePath]?.find(
+            c => position.lineNumber >= c.startLine && position.lineNumber <= c.endLine
+          );
+          if (target) removeCompression(relativePath, target.id);
         }
       }
     });
   };
 
-  // Apply Visual Decorations when compressions change
+  // Apply Visual Decorations safely when content and rules are synced
   useEffect(() => {
-    if (!editorRef.current || !monaco) return;
-    
+    if (!editorRef.current || !monaco || isPreviewMode || !content) return;
     const editor = editorRef.current;
+    
+    // Safety check: ensure Monaco has actually loaded the string content
+    if (editor.getModel()?.getValue() !== content) return;
     
     const newDecorations = fileCompressions.map(comp => ({
       range: new monaco.Range(comp.startLine, 1, comp.endLine, 1),
       options: {
         isWholeLine: true,
-        className: 'monaco-skip-block-line', // Changed from Tailwind
-        glyphMarginClassName: 'monaco-skip-block-margin', // Changed from Tailwind
-        hoverMessage: { value: 'This block will be skipped during export.' }
+        className: 'monaco-skip-block-line',
+        glyphMarginClassName: 'monaco-skip-block-margin',
       }
     }));
     
-    // Instead of editor.deltaDecorations, we use the decorations collection:
     if (!decorationsCollectionRef.current) {
-      // Initialize the collection the first time
       decorationsCollectionRef.current = editor.createDecorationsCollection(newDecorations);
     } else {
-      // Update the existing collection
       decorationsCollectionRef.current.set(newDecorations);
     }
-
-  }, [fileCompressions, monaco]);
+    
+    return () => {
+      if (decorationsCollectionRef.current) decorationsCollectionRef.current.clear();
+    };
+  }, [fileCompressions, monaco, isPreviewMode, content]);
 
   const fileName = relativePath.split(/[/\\]/).pop();
 
@@ -113,10 +196,37 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         <FileCode2 size={16} className="text-accent" />
         <span className="text-sm font-medium">{fileName}</span>
         {fileCompressions.length > 0 && (
-          <span className="ml-auto text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full">
+          <span className="ml-2 text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full">
             {fileCompressions.length} Skips Applied
           </span>
         )}
+      </div>
+    
+      <div className="h-9 bg-bg-panel flex items-center px-4 border-b border-border-subtle shrink-0 gap-3 text-xs text-text-muted">
+        <button 
+          onClick={() => undoLastCompression(relativePath)}
+          disabled={!hasHistory || isPreviewMode}
+          className="flex items-center gap-1.5 hover:text-text-primary disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
+          title="Undo last skip action"
+        >
+          <Undo2 size={14} /> Undo Skip
+        </button>
+        <button 
+          onClick={() => clearCompressions(relativePath)}
+          disabled={fileCompressions.length === 0 || isPreviewMode}
+          className="flex items-center gap-1.5 hover:text-red-400 disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
+        >
+          <Trash2 size={14} /> Clear All
+        </button>
+        <div className="w-px h-4 bg-border-subtle mx-1" />
+        <button 
+          onClick={() => setIsPreviewMode(!isPreviewMode)}
+          className={`flex items-center gap-1.5 transition-colors px-2 py-1 rounded ${isPreviewMode ? 'bg-accent/20 text-accent' : 'hover:text-text-primary'}`}
+        >
+          {isPreviewMode ? <Code2 size={14} /> : <Eye size={14} />}
+          {isPreviewMode ? 'Exit Preview' : 'Preview Output'}
+        </button>
+        <span className="ml-auto opacity-50 text-[10px]">Ctrl/Cmd + Backspace to Skip</span>
       </div>
       
       <div className="flex-1 relative">
@@ -129,16 +239,18 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
           height="100%"
           defaultLanguage="typescript"
           theme="vs-dark"
-          value={content}
+          value={isPreviewMode ? previewContent : content}
           onMount={handleEditorMount}
           options={{
-            readOnly: true,
-            minimap: { enabled: false },
-            glyphMargin: true,
+            readOnly: true, // App operates assuming external edits only
+            minimap: { enabled: true, scale: 0.75, renderCharacters: false },
+            glyphMargin: !isPreviewMode,
             lineNumbersMinChars: 4,
             scrollBeyondLastLine: false,
             wordWrap: 'on',
-            padding: { top: 16 }
+            padding: { top: 16 },
+            hover: { enabled: false },
+            matchBrackets: 'never'
           }}
         />
       </div>

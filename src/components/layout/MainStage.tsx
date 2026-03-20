@@ -3,10 +3,20 @@ import { useWorkspaceStore } from '../../store/workspaceStore';
 import { FileTree } from '../tree/FileTree';
 import { ContextEditor } from '../editor/ContextEditor';
 import { ExportStage } from '../export/ExportStage';
-import { Plus, FolderOpen, Send } from 'lucide-react';
+import { Plus, FolderOpen, Send, X } from 'lucide-react';
 
 export function MainStage() {
-  const { rootPaths, activeTab, activeFile, isExportStaging, setExportStaging, addRootPath, setActiveTab, rawTrees } = useWorkspaceStore();
+  const { 
+    rootPaths, 
+    activeTab, 
+    activeFile, 
+    isExportStaging, 
+    setExportStaging, 
+    addRootPath, 
+    removeRootPath,
+    setActiveTab, 
+    rawTrees 
+  } = useWorkspaceStore();
 
   const handleAddRoot = async () => {
     const dir = await window.api.selectDirectory();
@@ -21,17 +31,27 @@ export function MainStage() {
       <div className="h-14 flex bg-bg-panel border-b border-border-subtle items-end px-2 gap-1 overflow-x-auto shrink-0 justify-between">
         <div className="flex items-end gap-1">
           {rootPaths.map((path) => (
-            <button
+            <div
               key={path}
               onClick={() => setActiveTab(path)}
-              className={`px-4 py-2 text-sm rounded-t-md border border-b-0 max-w-50 truncate transition-colors
+              className={`group flex items-center gap-2 px-3 py-2 text-sm rounded-t-md border border-b-0 max-w-64 cursor-pointer transition-colors
                 ${activeTab === path 
                   ? 'bg-bg-base border-border-subtle text-text-primary' 
                   : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover'}`}
               title={path}
             >
-              {path.split(/[/\\]/).pop()}
-            </button>
+              <span className="truncate flex-1">{path.split(/[/\\]/).pop()}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeRootPath(path);
+                }}
+                className="p-0.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-border-subtle text-text-muted hover:text-red-400 transition-all"
+                title="Remove Root"
+              >
+                <X size={14} />
+              </button>
+            </div>
           ))}
           <button 
             onClick={handleAddRoot}
@@ -41,15 +61,25 @@ export function MainStage() {
           </button>
         </div>
         
-        {/* Stage Export Button */}
+        {/* Stage Export / Cancel Buttons */}
         {rootPaths.length > 0 && (
-          <button 
-            onClick={() => setExportStaging(true)}
-            className={`px-4 py-1.5 mb-2 mr-2 rounded text-sm font-medium flex items-center gap-2 transition-colors
-              ${isExportStaging ? 'bg-accent text-white' : 'bg-bg-hover text-text-primary hover:bg-border-subtle'}`}
-          >
-            <Send size={14} /> Stage Export
-          </button>
+          <div className="flex items-center gap-2 mb-2 mr-2">
+            {isExportStaging && (
+              <button 
+                onClick={() => setExportStaging(false)}
+                className="px-4 py-1.5 rounded text-sm font-medium text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+            <button 
+              onClick={() => setExportStaging(true)}
+              className={`px-4 py-1.5 rounded text-sm font-medium flex items-center gap-2 transition-colors
+                ${isExportStaging ? 'bg-accent text-white' : 'bg-bg-hover text-text-primary hover:bg-border-subtle'}`}
+            >
+              <Send size={14} /> Stage Export
+            </button>
+          </div>
         )}
       </div>
     

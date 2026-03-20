@@ -9,9 +9,10 @@ interface TreeNodeProps {
   rootPath: string;
   relativePath: string;
   depth?: number;
+  visiblePaths?: Set<string> | null;
 }
 
-export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodeProps) {
+export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths }: TreeNodeProps) {
   const { 
     expandedFolders, 
     toggleFolderExpansion, 
@@ -23,7 +24,12 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
     removeExcludeRule 
   } = useWorkspaceStore();
 
-  const isExpanded = expandedFolders.has(relativePath);
+  // Search filter bailout
+  if (visiblePaths && depth > 0 && !visiblePaths.has(relativePath)) {
+    return null;
+  }
+
+  const isExpanded = expandedFolders.has(relativePath) || (visiblePaths !== null && visiblePaths !== undefined);
   const isDirectory = node.type === 'directory';
   const isSelected = activeFile === relativePath && !isDirectory;
 
@@ -48,7 +54,7 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
   // Prevent rendering the root node itself as a foldable item, just render its children
   if (depth === 0) {
     return (
-      <div className="pl-1">
+      <div className="pl-1 pb-4">
         {node.children.map(child => (
           <TreeNode 
             key={child.path} 
@@ -56,6 +62,7 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
             rootPath={rootPath} 
             relativePath={child.path.replace(`${rootPath}\\`, '').replace(`${rootPath}/`, '')}
             depth={depth + 1} 
+            visiblePaths={visiblePaths}
           />
         ))}
       </div>
@@ -116,7 +123,8 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0 }: TreeNodePr
                 node={child} 
                 rootPath={rootPath} 
                 relativePath={childRelative}
-                depth={depth + 1} 
+                depth={depth + 1}
+                visiblePaths={visiblePaths} 
               />
             );
           })}

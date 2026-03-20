@@ -9,14 +9,17 @@ export interface FileNode {
 
 export interface ScanResult {
   node: FileNode;
-  rules: string[]; // Aggregated .gitignore rules
+  rules: string[]; 
 }
 
 export interface ElectronAPI {
   ping: () => Promise<string>;
   selectDirectory: () => Promise<string | null>;
-  scanDirectory: (path: string) => Promise<ScanResult>;
+  scanDirectory: (path: string, blacklist: string[]) => Promise<ScanResult>;
   readFile: (path: string) => Promise<string>;
+  minimizeWindow: () => Promise<void>;
+  maximizeWindow: () => Promise<void>;
+  closeWindow: () => Promise<void>;
 }
 
 declare global {

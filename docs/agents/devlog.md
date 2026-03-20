@@ -57,6 +57,24 @@
 
 ---
 
+### Session 004
+
+- **Focus Area:** Workflow Refinement, Context Resiliency, & Frameless Shell formatting.
+- **Key Decisions:**
+  - Implemented a custom frameless Electron shell (`frame: false`) utilizing `WebkitAppRegion` in React and IPC window controls.
+  - Moved the `HARD_BLACKLIST` (`.git`, `node_modules`) to global state. Passing this array over IPC to the Node.js scanner entirely bypassed the massive performance hit of reading dependency directories.
+  - **Drift Management:** Upgraded the `CompressionRule` schema to capture the exact string `signature` of the skipped block. Xcerpt now assumes files are edited externally; upon file load, it automatically scans +/- 50 lines to detect offset changes and heals the skip coordinates in Zustand.
+  - Locked the Monaco editor to `readOnly: true`, disabled TS diagnostics, enabled the minimap, and added a `Ctrl/Cmd + Backspace` quick-skip shortcut.
+- **Roadblocks Resolved:**
+  - Fixed the Monaco style-persistence bug. Decorations were disappearing because React fired the `useEffect` before Monaco had fully ingested the new file content. Bound decoration updates to a strict content matching check.
+  - Fixed Export Stage rendering lag by wrapping the batch limit numeric input in a local React debounce effect.
+- **Core Files Modified:**
+  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+  - `src/components/layout/TitleBar.tsx`, `src/App.tsx`, `src/components/layout/Sidebar.tsx`
+  - `src/store/workspaceStore.ts`, `src/components/editor/ContextEditor.tsx`, `src/components/export/ExportStage.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.

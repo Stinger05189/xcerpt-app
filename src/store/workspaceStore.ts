@@ -7,63 +7,88 @@ export interface CompressionRule {
   startLine: number;
   endLine: number;
   type: 'SKIP' | 'GHOST';
+  signature: string; // The exact text of the first line skipped (for drift healing)
+  lineCount: number; // Total lines skipped
 }
 
 interface WorkspaceState {
-  // Data
   rootPaths: string[];
   rawTrees: Record<string, FileNode>; 
 
-  // Rules
+  hardBlacklist: string[];
   includes: string[];
   excludes: string[];
 
-  // Compressions Map: Record<RelativePath, CompressionRule[]>
   compressions: Record<string, CompressionRule[]>;
+  compressionHistory: Record<string, CompressionRule[][]>; 
 
-  // UI State
+  maxFilesPerChunk: number;
+
   activeTab: string | null;
-  activeFile: string | null; // The relative path of the selected file
-  isExportStaging: boolean;  // Toggles right pane between Editor and Export Preview
+  activeFile: string | null;
+  isExportStaging: boolean;
   expandedFolders: Set<string>;
 
-  // Actions
+  setMaxFilesPerChunk: (val: number) => void;
   addRootPath: (path: string) => Promise<void>;
+  removeRootPath: (path: string) => void;
   setActiveTab: (path: string) => void;
   setActiveFile: (path: string | null) => void;
   setExportStaging: (val: boolean) => void;
   toggleFolderExpansion: (relativePath: string) => void;
+
+  addBlacklistRule: (pattern: string) => void;
+  removeBlacklistRule: (pattern: string) => void;
   addExcludeRule: (pattern: string) => void;
   removeExcludeRule: (pattern: string) => void;
-  addCompression: (relativePath: string, rule: Omit<CompressionRule, 'id'>) => void;
+
+  addCompressions: (relativePath: string, rules: Omit<CompressionRule, 'id'>[]) => void;
   removeCompression: (relativePath: string, id: string) => void;
+  setCompressions: (relativePath: string, rules: CompressionRule[]) => void; // Used for auto-healing drift
+  clearCompressions: (relativePath: string) => void;
+  undoLastCompression: (relativePath: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   rootPaths: [],
   rawTrees: {},
+  hardBlacklist: ['.git', 'node_modules', '__pycache__', 'dist', 'build', '.next', '.svelte-kit'],
   includes: [],
   excludes: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
   compressions: {},
+  compressionHistory: {},
+  maxFilesPerChunk: 10,
+
   activeTab: null,
   activeFile: null,
   isExportStaging: false,
   expandedFolders: new Set<string>(),
 
+  setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
+
   addRootPath: async (rootPath: string) => {
-    // Prevent duplicates
     if (get().rootPaths.includes(rootPath)) return;
-
-    // Scan the directory via IPC
-    const { node, rules } = await window.api.scanDirectory(rootPath);
-
+    const { node, rules } = await window.api.scanDirectory(rootPath, get().hardBlacklist);
     set((state) => ({
       rootPaths: [...state.rootPaths, rootPath],
       rawTrees: { ...state.rawTrees, [rootPath]: node },
       activeTab: rootPath,
-      // Automatically add discovered .gitignore rules to our exclusions
       excludes: Array.from(new Set([...state.excludes, ...rules]))
     }));
+  },
+
+  removeRootPath: (pathToRemove: string) => {
+    set((state) => {
+      const newPaths = state.rootPaths.filter(p => p !== pathToRemove);
+      const newRawTrees = { ...state.rawTrees };
+      delete newRawTrees[pathToRemove];
+    
+      return {
+        rootPaths: newPaths,
+        rawTrees: newRawTrees,
+        activeTab: state.activeTab === pathToRemove ? (newPaths[0] || null) : state.activeTab
+      };
+    });
   },
 
   setActiveTab: (path: string) => set({ activeTab: path }),
@@ -71,51 +96,73 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   toggleFolderExpansion: (relativePath: string) => {
     set((state) => {
       const newSet = new Set(state.expandedFolders);
-      if (newSet.has(relativePath)) {
-        newSet.delete(relativePath);
-      } else {
-        newSet.add(relativePath);
-      }
+      if (newSet.has(relativePath)) newSet.delete(relativePath);
+      else newSet.add(relativePath);
       return { expandedFolders: newSet };
     });
   },
 
-  addExcludeRule: (pattern: string) => {
-    set((state) => ({
-      excludes: Array.from(new Set([...state.excludes, pattern]))
-    }));
-  },
+  addBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: Array.from(new Set([...state.hardBlacklist, pattern])) })),
+  removeBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: state.hardBlacklist.filter(p => p !== pattern) })),
 
-  removeExcludeRule: (pattern: string) => {
-    set((state) => ({
-      excludes: state.excludes.filter((p) => p !== pattern)
-    }));
-  },
+  addExcludeRule: (pattern: string) => set((state) => ({ excludes: Array.from(new Set([...state.excludes, pattern])) })),
+  removeExcludeRule: (pattern: string) => set((state) => ({ excludes: state.excludes.filter((p) => p !== pattern) })),
 
   setActiveFile: (path: string | null) => set({ activeFile: path, isExportStaging: false }),
   setExportStaging: (val: boolean) => set({ isExportStaging: val }),
 
-  addCompression: (relativePath, rule) => {
-    const id = Math.random().toString(36).substr(2, 9);
+  addCompressions: (relativePath, rules) => {
     set((state) => {
       const existing = state.compressions[relativePath] || [];
+      const history = state.compressionHistory[relativePath] || [];
+      
+      const newRules = rules.map(r => ({ ...r, id: Math.random().toString(36).substr(2, 9) }));
+      const newState = [...existing, ...newRules];
+    
       return {
-        compressions: {
-          ...state.compressions,
-          [relativePath]: [...existing, { ...rule, id }]
-        }
+        compressions: { ...state.compressions, [relativePath]: newState },
+        compressionHistory: { ...state.compressionHistory, [relativePath]: [...history, existing] }
       };
     });
+  },
+
+  setCompressions: (relativePath, rules) => {
+    set((state) => ({ compressions: { ...state.compressions, [relativePath]: rules } }));
   },
 
   removeCompression: (relativePath, id) => {
     set((state) => {
       const existing = state.compressions[relativePath] || [];
+      const history = state.compressionHistory[relativePath] || [];
       return {
-        compressions: {
-          ...state.compressions,
-          [relativePath]: existing.filter(c => c.id !== id)
-        }
+        compressions: { ...state.compressions, [relativePath]: existing.filter(c => c.id !== id) },
+        compressionHistory: { ...state.compressionHistory, [relativePath]: [...history, existing] }
+      };
+    });
+  },
+
+  clearCompressions: (relativePath) => {
+    set((state) => {
+      const existing = state.compressions[relativePath] || [];
+      if (existing.length === 0) return state;
+      const history = state.compressionHistory[relativePath] || [];
+      return {
+        compressions: { ...state.compressions, [relativePath]: [] },
+        compressionHistory: { ...state.compressionHistory, [relativePath]: [...history, existing] }
+      };
+    });
+  },
+
+  undoLastCompression: (relativePath) => {
+    set((state) => {
+      const history = state.compressionHistory[relativePath] || [];
+      if (history.length === 0) return state;
+      
+      const newHistory = [...history];
+      const previousState = newHistory.pop()!;
+      return {
+        compressions: { ...state.compressions, [relativePath]: previousState },
+        compressionHistory: { ...state.compressionHistory, [relativePath]: newHistory }
       };
     });
   }

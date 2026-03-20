@@ -16,30 +16,27 @@
 
 ## Current Macro-Objective
 
-**Workflow Refinement, Frameless Shell, and Context Enhancements**
-_Context: The core UI and IPC bridge are functional. We are now addressing workflow friction, performance bottlenecks (hard blacklists), editor features (un-skipping, multi-cursor), and customizing the Electron shell before finalizing the drag-and-drop export engine._
+**Export Execution Engine & OS Integration**
+_Context: The application shell, performance optimizations, and context compression UI are fully hardened. We are now moving into the core backend functionality: actually parsing the files, executing the skip commands, and preparing the files for native drag-and-drop._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Frameless Shell & Branding**
-  - _Details:_ Remove the default OS title bar. Build a custom, draggable window header. Code a custom SVG brand icon.
-  - _Target Files:_ `main.cjs`, `src/components/layout/TitleBar.tsx` (New)
-- [ ] **Task 2: Performance & Workspace Management**
-  - _Details:_ Implement a hard "blacklist" in the `chokidar` scanner to completely bypass heavy directories (`.git`, `node_modules`) for instant loading. Add the ability to remove a root path from the workspace.
-  - _Target Files:_ `main.cjs`, `src/store/workspaceStore.ts`, `src/components/layout/MainStage.tsx`
-- [ ] **Task 3: Context Compression Overhaul**
-  - _Details:_ Fix the styling persistence bug between file switches. Add UI to "Un-skip" specific blocks, "Clear All Skips", and support Undo/Redo. Ensure multi-cursor (alt+click) skips function properly.
-  - _Target Files:_ `src/components/editor/ContextEditor.tsx`, `src/store/workspaceStore.ts`
-- [ ] **Task 4: Export Staging UI/UX Overhaul**
-  - _Details:_ Add a "Cancel" button to return to the editor. Make batch size configurable (e.g., 25 vs unlimited). Add metadata (files per chunk, total tokens/size). Fix nested scrollbar layout issues. Add a way to preview the modified/compressed file output.
-  - _Target Files:_ `src/components/export/ExportStage.tsx`, `src/components/layout/MainStage.tsx`
+- [ ] **Task 1: Main Process Export Execution**
+  - _Details:_ Write the Node.js file writer logic. When "Stage Export" is triggered, Node should create a temporary OS folder, iterate through the included files, physically splice out the skipped blocks based on `compressions` state, and write the compressed output.
+  - _Target Files:_ `main.cjs`, `preload.cjs`, `src/components/export/ExportStage.tsx`
+- [ ] **Task 2: ExportedFileTree.md Generation**
+  - _Details:_ Alongside the generated files, write a script to generate a highly optimized markdown representation of the project structure, annotating skipped vs. included files to give the LLM spatial awareness.
+  - _Target Files:_ `main.cjs`
+- [ ] **Task 3: OS Native Drag & Drop**
+  - _Details:_ Wire the UI chunk icons to Electron's `webContents.startDrag` API via IPC so users can drag the generated temp folders directly into ChatGPT/Claude.
+  - _Target Files:_ `main.cjs`, `preload.cjs`, `src/components/export/ExportStage.tsx`
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 5: Stats, History, & Fuzzy Search**
-  - _Details:_ Populate the remaining Sidebar tabs. Implement fuzzy searching for the file tree and rules list.
-- [ ] **Task 6: Main Process Export Execution & OS Drag/Drop**
-  - _Details:_ Write the physical file splicing logic, generate `ExportedFileTree.md`, and wire the chunk icons to Electron's `startDrag` API.
+- [ ] **Task 4: Stats & History Data Wiring**
+  - _Details:_ Replace the mockup UI in the Sidebar Stats & History tabs with real data calculated from the `workspaceStore` and past export payloads.
+- [ ] **Task 5: Save/Load Workspace (`.xcerpt` files)**
+  - _Details:_ Implement IPC calls to serialize the Zustand store, save it to disk as a custom `.xcerpt` JSON file, and load it back.
 
 ## Blockers / Unresolved Constraints
 
