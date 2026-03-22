@@ -75,6 +75,24 @@
 
 ---
 
+### Session 005
+
+- **Focus Area:** Export Engine, Native Drag & Drop, Tertiary "Tree-Only" State, and Curation UI enhancements.
+- **Key Decisions:**
+  - Implemented a session-scoped OS temp directory (`xcerpt_session_<pid>`) that wipes and rebuilds on every payload generation to prevent disk bloat.
+  - Flattened all exported files and encoded their relative paths into the filename (e.g., `src_components_Button.tsx`) to prevent naming collisions and support LLM chat interfaces that reject folder uploads.
+  - Introduced a tertiary `tree-only` state. These files are skipped during physical export but are injected into the generated `ExportedFileTree.md` as `[Content Omitted]`, preserving structural context for the LLM.
+  - Built a marquee-style "paint" selection system with a contextual action bar and global keyboard shortcuts (A, S, D, Esc) to drastically speed up curation.
+  - Decoupled the React `useEffect` auto-build pipeline to mark payloads as `isStale` instantly, while deferring the Node.js disk write via a 1.5s debounce.
+- **Roadblocks Resolved:**
+  - `startDrag` failed on directories; refactored the UI to map chunk folders into an array of absolute file paths.
+  - Addressed React rendering bottlenecks during bulk selections by creating a single-pass `applyRuleToSelection` Zustand mutation.
+- **Remaining Roadblocks:**
+  - Chokidar watcher is still locking up Node on massive roots and not consistently triggering the payload refresh.
+  - Needs a much more aggressive default blacklist (Unreal Engine, Obsidian, etc.) and smart predictions for tree-only files (`package-lock.json`, `.env`).
+
+---
+
 ## Archived Epochs
 
 - **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.

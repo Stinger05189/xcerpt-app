@@ -16,26 +16,32 @@
 
 ## Current Macro-Objective
 
-**Export Execution Engine & OS Integration**
-_Context: The application shell, performance optimizations, and context compression UI are fully hardened. We are now moving into the core backend functionality: actually parsing the files, executing the skip commands, and preparing the files for native drag-and-drop._
+**Performance Stabilization, Smart Defaults, & Sync Resiliency**
+_Context: The export engine and UI interactions are built, but the application struggles with massive project directories (Unreal Engine, large Node apps). We need to implement aggressive default blacklisting, smart tree-only predictions, and resolve the remaining Chokidar sync bugs._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Main Process Export Execution**
-  - _Details:_ Write the Node.js file writer logic. When "Stage Export" is triggered, Node should create a temporary OS folder, iterate through the included files, physically splice out the skipped blocks based on `compressions` state, and write the compressed output.
-  - _Target Files:_ `main.cjs`, `preload.cjs`, `src/components/export/ExportStage.tsx`
-- [ ] **Task 2: ExportedFileTree.md Generation**
-  - _Details:_ Alongside the generated files, write a script to generate a highly optimized markdown representation of the project structure, annotating skipped vs. included files to give the LLM spatial awareness.
-  - _Target Files:_ `main.cjs`
-- [ ] **Task 3: OS Native Drag & Drop**
-  - _Details:_ Wire the UI chunk icons to Electron's `webContents.startDrag` API via IPC so users can drag the generated temp folders directly into ChatGPT/Claude.
-  - _Target Files:_ `main.cjs`, `preload.cjs`, `src/components/export/ExportStage.tsx`
+- [ ] **Task 1: Aggressive Auto-Blacklist Engine**
+  - _Details:_ Expand the hard blacklist to comprehensively cover massive directories (Unreal Engine `Intermediate`/`Saved`, Unity `Library`, iOS `Pods`, Android `build`, Obsidian `.obsidian`, etc.).
+  - _Target Files:_ `src/store/workspaceStore.ts`, `main.cjs`
+- [ ] **Task 2: Expose Blacklist to Sidebar UI**
+  - _Details:_ Update the Rules Sidebar to display these auto-blacklisted paths, allowing the user to explicitly un-blacklist them if they actually need to export them.
+  - _Target Files:_ `src/components/layout/Sidebar.tsx`
+- [ ] **Task 3: Smart "Tree-Only" Predictions**
+  - _Details:_ Automatically flag certain files as `tree-only` upon scanning (e.g., `package-lock.json`, `yarn.lock`, `.env`, `.DS_Store`, binary images) so they provide context but don't consume LLM tokens.
+  - _Target Files:_ `src/store/workspaceStore.ts`, `main.cjs`
+- [ ] **Task 4: Fix Chokidar File Watcher Sync**
+  - _Details:_ Debug and fix the issue where external file edits are not consistently triggering the React auto-build pipeline. Ensure `isStale` correctly forces a rebuild of the chunk payloads.
+  - _Target Files:_ `main.cjs`, `src/components/layout/MainStage.tsx`
+- [ ] **Task 5: Paint Selection Performance**
+  - _Details:_ Optimize the `onMouseEnter` painting logic. It currently causes slight hangs on large trees due to excessive React renders.
+  - _Target Files:_ `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 4: Stats & History Data Wiring**
-  - _Details:_ Replace the mockup UI in the Sidebar Stats & History tabs with real data calculated from the `workspaceStore` and past export payloads.
-- [ ] **Task 5: Save/Load Workspace (`.xcerpt` files)**
+- [ ] **Task 6: Stats & History Data Wiring**
+  - _Details:_ Replace the mockup UI in the Sidebar Stats & History tabs with real token calculations using a lightweight token estimator (e.g., `js-tiktoken`).
+- [ ] **Task 7: Save/Load Workspace (`.xcerpt` files)**
   - _Details:_ Implement IPC calls to serialize the Zustand store, save it to disk as a custom `.xcerpt` JSON file, and load it back.
 
 ## Blockers / Unresolved Constraints

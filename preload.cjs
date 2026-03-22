@@ -12,9 +12,17 @@ contextBridge.exposeInMainWorld('api', {
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
 
-  // Stubs for future phases
-  onFileChange: (callback) => {},
-  saveWorkspace: (data) => {},
-  stageExport: (config) => {},
-  startDrag: (tempFilePath) => {}
+  // Export Engine & Native OS
+  stageExport: (payload) => ipcRenderer.invoke('fs:stageExport', payload),
+  startDrag: (filePaths) => ipcRenderer.send('drag:start', filePaths),
+  openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
+
+  // Listeners
+  onFileChange: (callback) => {
+    const handler = (_, eventType, path) => callback(eventType, path);
+    ipcRenderer.on('fs:file-changed', handler);
+    return () => ipcRenderer.removeListener('fs:file-changed', handler);
+  },
+
+  saveWorkspace: (data) => {}
 });

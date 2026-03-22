@@ -1,8 +1,10 @@
 // src/components/tree/TreeNode.tsx
+import { useState } from 'react';
 import { ChevronRight, ChevronDown, File, Folder } from 'lucide-react';
 import type { FileNode } from '../../types/ipc';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { getFileStatus } from '../../utils/filterEngine';
+import { ContextMenu } from './ContextMenu';
 
 interface TreeNodeProps {
   node: FileNode;
@@ -18,40 +20,70 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
     toggleFolderExpansion, 
     setActiveFile,
     activeFile,
+    selectedFiles,
+    setSelectedFiles,
     includes, 
     excludes, 
-    addExcludeRule, 
-    removeExcludeRule 
+    treeOnly,
+    isPainting,
+    startPainting,
+    continuePainting
   } = useWorkspaceStore();
 
-  // Search filter bailout
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
+
   if (visiblePaths && depth > 0 && !visiblePaths.has(relativePath)) {
     return null;
   }
 
   const isExpanded = expandedFolders.has(relativePath) || (visiblePaths !== null && visiblePaths !== undefined);
   const isDirectory = node.type === 'directory';
-  const isSelected = activeFile === relativePath && !isDirectory;
+  const pattern = isDirectory ? `${relativePath}/` : relativePath;
 
-  const status = getFileStatus(relativePath, isDirectory, includes, excludes);
+  const isPrimarySelected = activeFile === relativePath && !isDirectory;
+  const isMultiSelected = selectedFiles.has(pattern);
+  const isSelected = isPrimarySelected || isMultiSelected;
+
+  const status = getFileStatus(relativePath, isDirectory, includes, excludes, treeOnly);
   const isExcluded = status === 'excluded';
+  const isTreeOnly = status === 'tree-only';
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Left clicks only
     e.stopPropagation();
-    if (isDirectory) {
-      toggleFolderExpansion(relativePath);
-    } else {
-      setActiveFile(relativePath);
+    
+    // Start painting selection
+    const mode = selectedFiles.has(pattern) ? 'remove' : 'add';
+    startPainting(pattern, mode);
+    
+    if (!isDirectory) setActiveFile(relativePath);
+  };
+
+  const handleMouseEnter = () => {
+    if (isPainting) continuePainting(pattern);
+  };
+
+  const handleChevronClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleFolderExpansion(relativePath);
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDirectory) toggleFolderExpansion(relativePath);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If right-clicking an unselected item, make it the only selection
+    if (!selectedFiles.has(pattern)) {
+      setSelectedFiles(new Set([pattern]));
     }
+    setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
 
-  const handleCheckboxChange = () => {
-    const pattern = isDirectory ? `${relativePath}/` : relativePath;
-    if (isExcluded) removeExcludeRule(pattern);
-    else addExcludeRule(pattern);
-  };
-
-  // Prevent rendering the root node itself as a foldable item, just render its children
   if (depth === 0) {
     return (
       <div className="pl-1 pb-4">
@@ -72,47 +104,41 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
   return (
     <div>
       <div 
-        className={`flex items-center py-1 hover:bg-bg-hover rounded cursor-pointer group pr-2
-          ${isExcluded ? 'opacity-40' : 'opacity-100'} 
-          ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle' : ''} 
+        className={`flex items-center py-1 rounded cursor-pointer group pr-2 border-l-2 select-none
+          ${isExcluded ? 'opacity-40 border-transparent hover:bg-bg-hover' : 'opacity-100'} 
+          ${isTreeOnly ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20' : 'border-transparent hover:bg-bg-hover'}
+          ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle border-border-subtle' : ''} 
           transition-all`}
-        onClick={handleClick}
+        onMouseDown={handleMouseDown}
+        onMouseEnter={handleMouseEnter}
+        onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${(depth - 1) * 16 + 4}px` }}
       >
-        {/* Expand/Collapse Icon */}
-        <span className="w-5 flex justify-center text-text-muted">
+        <div 
+          onClick={handleChevronClick}
+          className="w-5 h-full flex justify-center items-center text-text-muted hover:text-text-primary"
+        >
           {isDirectory && (
             isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
           )}
-        </span>
-
-        {/* Checkbox for quick-exclude */}
-        <input 
-          type="checkbox" 
-          checked={!isExcluded}
-          onChange={handleCheckboxChange}
-          onClick={(e) => e.stopPropagation()}
-          className="w-3.5 h-3.5 mr-2 accent-accent bg-bg-base border-border-subtle rounded cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100"
-          title={isExcluded ? 'Un-exclude this item' : 'Exclude this item'}
-        />
-
-        {/* File/Folder Icon */}
-        <span className="mr-2 text-text-muted">
+        </div>
+        
+        <span className="mr-2 text-text-muted opacity-80">
           {isDirectory ? <Folder size={14} /> : <File size={14} />}
         </span>
-
-        {/* Name */}
-        <span className="truncate flex-1 select-none">{node.name}</span>
         
-        {/* Size Badge (Optional, files only) */}
-        {!isDirectory && !isExcluded && (
+        <span className={`truncate flex-1 ${isTreeOnly ? 'italic font-medium' : ''}`}>
+          {node.name}
+        </span>
+        
+        {!isDirectory && !isExcluded && !isTreeOnly && (
           <span className="text-[10px] text-text-muted opacity-0 group-hover:opacity-100">
             {(node.size / 1024).toFixed(1)}kb
           </span>
         )}
       </div>
-
-      {/* Children */}
+    
       {isDirectory && isExpanded && (
         <div>
           {node.children.map(child => {
@@ -129,6 +155,14 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
             );
           })}
         </div>
+      )}
+    
+      {contextMenuPos && (
+        <ContextMenu 
+          x={contextMenuPos.x} 
+          y={contextMenuPos.y} 
+          onClose={() => setContextMenuPos(null)} 
+        />
       )}
     </div>
   );

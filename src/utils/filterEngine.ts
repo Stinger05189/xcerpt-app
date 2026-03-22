@@ -1,43 +1,39 @@
 // src/utils/filterEngine.ts
 import ignore from 'ignore';
 
-/**
- * Translates the legacy Python FilterEngine to TypeScript.
- * Evaluates whether a file is included or excluded based on the current rules.
- */
+export type FileStatus = 'included' | 'excluded' | 'tree-only';
+
 export function getFileStatus(
   relativePath: string,
   isDirectory: boolean,
   includes: string[],
-  excludes: string[]
-): 'included' | 'excluded' {
-  // Normalize path for the ignore package (forward slashes, no leading slash)
+  excludes: string[],
+  treeOnly: string[]
+): FileStatus {
   const cleanPath = relativePath.replace(/\\/g, '/').replace(/^\//, '');
-  if (cleanPath === '') return 'included'; // Root is always included
+  if (cleanPath === '') return 'included';
 
-  // Ensure directories end with a slash for accurate directory matching rules
   const pathToCheck = isDirectory && !cleanPath.endsWith('/') ? `${cleanPath}/` : cleanPath;
 
-  // 1. Exclusions take precedence
+  // 1. Exclusions (Overrides everything)
   if (excludes.length > 0) {
     const igExclude = ignore().add(excludes);
-    if (igExclude.ignores(pathToCheck)) {
-      return 'excluded';
-    }
+    if (igExclude.ignores(pathToCheck)) return 'excluded';
   }
 
-  // 2. Inclusions (If no includes are defined, everything not excluded is included)
+  // 2. Tree-Only (Overrides included files)
+  if (treeOnly.length > 0) {
+    const igTree = ignore().add(treeOnly);
+    // Directories are just visual wrappers; if a directory matches tree-only, we treat it as tree-only
+    // but ultimately it's the file type that determines if it gets written to disk.
+    if (igTree.ignores(pathToCheck)) return 'tree-only';
+  }
+
+  // 3. Inclusions
   if (includes.length > 0) {
     const igInclude = ignore().add(includes);
-    
-    // For UI purposes, we tentatively include directories unless explicitly excluded.
-    // Empty directories will be pruned during the actual export phase.
     if (isDirectory) return 'included';
-    
-    // If the ignore parser "ignores" it, that means it matched our include pattern.
-    if (!igInclude.ignores(pathToCheck)) {
-      return 'excluded'; 
-    }
+    if (!igInclude.ignores(pathToCheck)) return 'excluded'; 
   }
 
   return 'included';
