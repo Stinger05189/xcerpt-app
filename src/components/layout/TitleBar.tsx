@@ -1,51 +1,99 @@
 // src/components/layout/TitleBar.tsx
-import { Minus, Square, X } from 'lucide-react';
+import { Minus, Square, X, Plus, Home } from 'lucide-react';
+import { useAppStore } from '../../store/appStore';
 
 export function TitleBar() {
+  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, addWorkspaceTab } = useAppStore();
+
   const handleMinimize = () => window.api.minimizeWindow();
   const handleMaximize = () => window.api.maximizeWindow();
   const handleClose = () => window.api.closeWindow();
 
+  const handleNewWorkspace = () => {
+    const newId = crypto.randomUUID();
+    addWorkspaceTab(newId, "Untitled Workspace");
+    setActiveWorkspace(newId);
+  };
+
   return (
     <div 
-      className="h-8 flex shrink-0 justify-between items-center bg-bg-base border-b border-border-subtle select-none"
+      className="h-10 flex shrink-0 items-end bg-bg-base border-b border-border-subtle select-none pl-2 pt-2"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
-      <div className="flex items-center gap-2 px-3 text-text-muted">
-        {/* Brand Logo: Document with an 'X' representing excerpt/skipping */}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-accent">
-          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-          <polyline points="14 2 14 8 20 8" />
-          <path d="M9.5 12.5l5 5" />
-          <path d="M14.5 12.5l-5 5" />
-        </svg>
-        <span className="text-xs font-bold tracking-widest uppercase text-text-primary opacity-90">Xcerpt</span>
+      
+      {/* Home / Browser Button */}
+      <div 
+        className="flex items-center h-full px-3 mb-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        onClick={() => console.log('Home / Browser Clicked')}
+        title="Workspace Browser"
+      >
+        <Home size={15} className="text-accent" />
+      </div>
+      
+      <div className="w-px h-5 bg-border-subtle mx-2 mb-2 pointer-events-none" />
+      
+      {/* Global Workspace Tabs Container (Inherits 'drag' for empty space) */}
+      <div className="flex items-end h-full flex-1 overflow-x-hidden gap-0.5">
+        {openTabs.map(tab => {
+          const isActive = activeWorkspaceId === tab.id;
+          return (
+            <div
+              key={tab.id}
+              onClick={() => setActiveWorkspace(tab.id)}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md border border-b-0 cursor-pointer transition-colors max-w-48
+                ${isActive 
+                  ? 'bg-bg-panel border-border-subtle text-text-primary -mb-px pb-1.75 z-20' 
+                  : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover mb-0 pb-1.5'}`}
+            >
+              <span className="truncate select-none font-medium">{tab.title}</span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); removeWorkspaceTab(tab.id); }}
+                className="p-0.5 rounded hover:bg-border-subtle opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+        
+        {/* New Workspace Button */}
+        <button 
+          onClick={handleNewWorkspace} 
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          className="mb-1 ml-1 p-1.5 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
+          title="New Workspace"
+        >
+          <Plus size={14} />
+        </button>
       </div>
     
-      {/* Window Controls (No Drag Region to allow clicking) */}
-      <div className="flex h-full" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      {/* OS Window Controls */}
+      <div className="flex h-full pb-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button 
           onClick={handleMinimize} 
-          className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center"
+          className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md"
           title="Minimize"
         >
           <Minus size={14} />
         </button>
         <button 
           onClick={handleMaximize} 
-          className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center"
+          className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md"
           title="Maximize"
         >
           <Square size={12} />
         </button>
         <button 
           onClick={handleClose} 
-          className="px-3 hover:bg-red-500 hover:text-white text-text-muted transition-colors flex items-center justify-center"
+          className="px-3 hover:bg-red-500 hover:text-white text-text-muted transition-colors flex items-center justify-center rounded-md mr-1"
           title="Close"
         >
           <X size={14} />
         </button>
       </div>
+      
     </div>
   );
 }

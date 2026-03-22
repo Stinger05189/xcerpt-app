@@ -12,6 +12,10 @@ export interface CompressionRule {
 }
 
 interface WorkspaceState {
+  workspaceId: string | null;
+  workspaceName: string | null;
+  createdAt: string | null;
+
   rootPaths: string[];
   rawTrees: Record<string, FileNode>;
 
@@ -42,6 +46,7 @@ interface WorkspaceState {
   chunkPaths: string[];
 
   // Actions
+  hydrateWorkspace: (payload: import('../types/ipc').WorkspacePayload) => void;
   setMaxFilesPerChunk: (val: number) => void;
   setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[] }>) => void;
 
@@ -83,6 +88,10 @@ interface WorkspaceState {
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+  workspaceId: null,
+  workspaceName: null,
+  createdAt: null,
+
   rootPaths: [],
   rawTrees: {},
   hardBlacklist: [
@@ -109,6 +118,32 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isStale: true,
   isBuilding: false,
   chunkPaths: [],
+
+  hydrateWorkspace: (payload) => set({
+    workspaceId: payload.id,
+    workspaceName: payload.metadata.name,
+    createdAt: payload.metadata.createdAt,
+    rootPaths: [], // Wiped; Bootstrapper will call addRootPath to trigger Chokidar
+    rawTrees: {},
+    hardBlacklist: payload.rules.hardBlacklist,
+    pendingBlacklist: [],
+    includes: payload.rules.inclusions,
+    excludes: payload.rules.exclusions,
+    treeOnly: payload.rules.treeOnly,
+    compressions: payload.compressions,
+    compressionHistory: {}, // History is volatile
+    maxFilesPerChunk: payload.settings.maxFilesPerChunk,
+    activeTab: payload.uiState.activeTab,
+    expandedFolders: new Set(payload.uiState.expandedFolders),
+    selectedFiles: new Set(),
+    isPainting: false,
+    paintMode: null,
+    activeFile: null,
+    isExportStaging: false,
+    isStale: true,
+    isBuilding: false,
+    chunkPaths: []
+  }),
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
 

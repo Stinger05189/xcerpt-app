@@ -14,51 +14,39 @@
 
 ---
 
-## 1. Tech Stack & Environment
+## 1. Stack & Formatting
 
-- **Primary Language:** TypeScript (Strict Mode)
-- **Core Frameworks:** Electron (Desktop App Shell), Node.js (Main Process), React 18+ (Renderer Process)
-- **Build Tooling:** Vite
-- **State Management:** Zustand (Global State), LocalStorage (Temporary Workspace persistence)
-- **Styling / UI Tooling:** Tailwind CSS (Utility-first), Lucide React (Icons)
-- **Specialized Libraries:** `@monaco-editor/react` (Code Compression UI), `chokidar` (File Watching), `ignore` / `micromatch` (Glob Filtering)
+- **Stack:** TS (Strict), Electron (Desktop Shell), Node.js (Main Process), React 18+ (Renderer), Vite, Zustand (Global State), LocalStorage (Temp Config), Tailwind CSS v4, Lucide, `@monaco-editor/react`, `chokidar`, `ignore`/`micromatch`.
+- **Naming/Structure:** Feature-grouped in `src/`. `PascalCase.tsx` (Components/Views), `camelCase.ts` (Utils/Hooks), `PascalCase` (Types/Interfaces, no 'I' prefix), `camelCase` (Vars/Functions).
+- **Styling:** Tailwind utility classes directly via `className` (`clsx`/`tailwind-merge` for conditionals). Dark mode primary.
 
-## 2. Architectural Boundaries & Data Flow
+## 2. Architecture & State (Zustand)
 
-- **Separation of Concerns (Main vs. Renderer):**
-  - **Main Process (Node.js):** Handles all OS-level operations (File System scanning with `chokidar`, disk I/O, writing exports, OS drag-and-drop APIs).
-  - **Renderer Process (React):** Handles UI, state management, and visual rule filtering. _Never directly accesses the `fs` module._
-- **IPC Bridge (`preload.cjs`):** All communication between React and Node must pass through typed asynchronous `ipcRenderer.invoke` calls exposed on the `window.api` object.
-- **Data Mutation:** State is managed via Zustand. State updates must be immutable. Complex nested updates should use structured setter functions within the store.
+- **IPC Bridge (`preload.cjs`):** Strict separation. React handles UI; Node handles `fs`/OS. React communicates via typed `ipcRenderer.invoke` (`window.api`). Assign global `mainWindow` in Node to prevent variable shadowing in IPC broadcasts.
+- **Dual-Store & Hydration:** `AppStore` (Global IDE) vs `WorkspaceStore` (Active Project). Xcerpt uses a _Single Re-hydrating Store_. On tab switch: synchronously save outgoing state to disk, wipe memory to prevent V8 crashes, inject incoming JSON payload, and trigger background `chokidar` rescan.
+- **State Identifiers:** React `key` props and Zustand IDs (selected/expanded/excluded) MUST use the file's Stable Relative Path from project root. Never use UI indexes.
+- **Performance Constraints:** - Use strict granular selectors (`useStore(s => s.prop)`) in massive trees to prevent render locks.
+  - Never trigger individual `setState` in loops; use bulk mutations (e.g., `applyRuleToSelection`).
+  - In fast-firing events (drag/marquee), use `useStore.getState()` for early returns to bypass the React queue.
+  - Never call synchronous `setState` in the top-level of a `useEffect`.
 
-## 3. Formatting & Naming Conventions
+## 3. Node.js & I/O
 
-- **File Structure:** Feature-based grouping within `src/` (e.g., `src/components`, `src/store`, `src/ipc`, `src/utils`).
-- **Casing Rules:**
-  - Files (Components/Views): `PascalCase.tsx`
-  - Files (Utils/Stores/Hooks): `camelCase.ts`
-  - Interfaces/Types: `PascalCase` (Do not prefix with 'I').
-  - Variables/Functions: `camelCase`.
-- **Styling:** Use Tailwind utility classes directly in `className`. For complex conditional classes, use template literals or a library like `clsx`/`tailwind-merge`. Dark mode is the primary target.
+- **Chokidar & Filtering:** Watcher will crash on massive roots. Always pass the global blacklist to the `ignored` array (e.g., `node_modules`).
+- **Recursive Opts:** Use `fs.readdir({ withFileTypes: true })` and `dirent.isDirectory()` instead of `fs.stat` loops. Pass a single mutable `Context` object down recursive chains instead of array spreading to prevent GC spikes.
+- **Control Flow:** Never use `try/catch` `fs.readFile` to check file existence; check the `dirents` array first.
+- **Temp Directories:** Use a process-bound directory (`os.tmpdir()/xcerpt_session_<pid>`). Wipe and recreate on payload build instead of generating infinite timestamped folders.
 
-## 4. Execution Patterns & 'Gotchas'
+## 4. UI & Shell
 
-- **Stable Relative Paths (CRITICAL):** To prevent the selection/scroll reset bugs present in the legacy Python application, React `key` props and Zustand state identifiers (e.g., `selectedFiles`, `expandedFolders`) MUST use the file's Stable Relative Path from the project root (e.g., `src/components/Button.tsx`). Never use array indexes or volatile UI IDs.
-- **Visual State Filtering:** Excluded files must NOT be removed from the DOM/Tree data structure. Instead, the Renderer applies an "excluded" status flag, and the UI responds by rendering the item with opacity (dimmed) and a disabled state.
-- **Context Compression Coordinates:** Skip markers in Monaco must be mapped to specific line numbers (`startLine`, `endLine`) relative to the original file, saved immutably in the workspace state under the specific file's relative path.
-- **React/Monaco Lifecycle (Stale Closures):** When wrapping imperative libraries like Monaco, always use a changing `key` prop (e.g., `key={activeFile}`) on the React wrapper component. This forces a clean unmount/remount, preventing context menus and event listeners from trapping stale state (like old file paths) in closures.
-- **Monaco Styling Constraints:** Do NOT use Tailwind utility classes containing special characters (like `/`, `[`, or `]`) inside Monaco Editor configurations (e.g., `glyphMarginClassName`). Monaco's customized virtual DOM parses these incorrectly. Always define and use standard global CSS classes (e.g., `.monaco-skip-line`) for editor decorations.
-- **React Strict Mode Ignorables:** `Uncaught (in promise) {type: 'cancelation'}` errors originating from Monaco during development are harmless artifacts of React 18's Strict Mode double-mounting. They can be safely ignored.
-- **Frameless Window Dragging:** When utilizing a custom React header with `frame: false` in Electron, apply `style={{ WebkitAppRegion: 'drag' }}` to the container, and `WebkitAppRegion: 'no-drag'` to interactive elements (like buttons) to restore OS-level window movement.
-- **Drift Management (External Edits):** Xcerpt operates on the assumption that files are edited externally. Because line numbers are volatile, any feature that relies on line coordinates (like Context Compression) MUST store a `signature` (the exact string text of the target line) in state. On load, the system must search for this signature and auto-heal the coordinates if drift is detected.
-- **Monaco Decoration Syncing:** Never apply Monaco `decorationsCollectionRef.current.set()` immediately when React state changes. Ensure that `editor.getModel()?.getValue() === reactContent` before applying decorations; otherwise, Monaco's internal parsing delay will cause the decorations to map to empty space and silently fail.
-- **Flat File Dragging:** Web interfaces (ChatGPT/Claude) reject native folder drops. When bridging to Electron's `webContents.startDrag`, never pass a directory path. You must construct and pass an array of absolute file paths representing the flat contents of the chunk.
-- **Session-Scoped Temp Directories:** To avoid permanent disk bloat, use a single temporary directory bound to the process ID (`os.tmpdir()/xcerpt_session_<pid>`). Wipe and recreate this exact directory on every payload build rather than generating new timestamped folders.
-- **Bulk Zustand Mutations:** For tree interactions that affect multiple nodes simultaneously (e.g., Marquee Painting, "Include All"), never trigger individual Zustand setters in a loop. Aggregate the state changes and fire a single bulk mutation (e.g., `applyRuleToSelection`) to prevent cascading React render lockups.
-- **Chokidar & Massive Roots:** Never instantiate `chokidar.watch()` without a robust `ignored` array (passing in the global blacklist). Attempting to watch 100,000+ files in directories like `node_modules` or Unreal Engine `Intermediate` will instantly lock up the Node process and crash the IPC bridge.
-- **Zustand Marquee/Drag Performance:** When handling fast-firing DOM events (like `onMouseEnter` during a drag-to-select operation), NEVER blindly dispatch state updates. Use `useStore.getState()` inside the event handler to check if the target state already matches the desired state, and `return state` early. This entirely bypasses the React render queue and prevents dropped frames.
-- **Strict Selector Granularity:** List items in massive virtual/recursive trees (like `TreeNode`) must NEVER destructure the entire Zustand store. You must use strict, granular selector hooks (e.g., `useStore(s => s.selectedFiles.has(pattern))`) to ensure only the exactly mutated nodes re-render.
-- **Recursive I/O Optimization:** Never use `fs.stat` inside a recursive loop to check if a path is a directory. Use `fs.readdir(path, { withFileTypes: true })` and rely on `dirent.isDirectory()`.
-- **Control Flow vs. Exceptions:** Never use `try/catch` file reading (e.g., `fs.readFile('.gitignore')`) as a control flow mechanism to check for file existence in a loop. Check the previously fetched `dirents` array first to drop disk I/O errors to zero.
-- **Mutable Context in Recursion:** To prevent massive Garbage Collection spikes and O(N²) array churn, do not `...spread` arrays up a deep recursive chain. Pass a single, mutable `Context` object down the chain for accumulating results.
-- **Variable Shadowing in IPC:** When instantiating an Electron `BrowserWindow` that is referenced globally for IPC event broadcasting, ensure you assign it to the global variable (`mainWindow = ...`) rather than accidentally declaring a scoped constant (`const mainWindow = ...`).
+- **Visual Filtering:** Excluded items are NOT removed from the DOM. Apply an "excluded" status flag for `opacity: 0.5` and a disabled state.
+- **Frameless Window (`frame: false`):** Apply `WebkitAppRegion: 'drag'` to the layout container. Apply `'no-drag'` ONLY to interactive leaf nodes (buttons/tabs) and use padding on the parent to expose the drag region.
+- **Native Drag-and-Drop:** Chat UI interfaces reject folder drops. `webContents.startDrag` must receive an array of absolute file paths representing a flattened chunk.
+
+## 5. Monaco Editor
+
+- **Compression Coordinates:** Skip markers (`startLine`, `endLine`) map to the file's relative path in workspace state.
+- **Drift Management:** Because of external edits, line numbers are volatile. Store the exact string `signature` of the target line in state and auto-heal coordinates on load if offsets are detected.
+- **Lifecycle & Syncing:** Force React wrapper remount via `key={activeFile}` to prevent stale closures. Before applying `decorationsCollectionRef.current.set()`, verify `editor.getModel()?.getValue() === reactContent` to prevent mapping to empty space.
+- **Styling constraints:** Standard CSS only (e.g., `.monaco-skip-line`). Tailwind utility classes with special characters (`/`, `[`) break Monaco's virtual DOM parser.
+- **Strict Mode:** Harmless `Uncaught (in promise) {type: 'cancelation'}` errors during double-mounts can be ignored.

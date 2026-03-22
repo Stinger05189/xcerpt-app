@@ -6,6 +6,8 @@ const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('ele
 const chokidar = require('chokidar');
 
 const SESSION_TEMP_DIR = path.join(os.tmpdir(), `xcerpt_session_${process.pid}`);
+const SESSIONS_DIR = path.join(app.getPath('userData'), 'XcerptSessions');
+
 let fileWatcher = null;
 let mainWindow = null;
 
@@ -163,7 +165,8 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await fs.mkdir(SESSIONS_DIR, { recursive: true });
   createWindow();
 
   // Initialize Global Watcher (empty at first, relying strictly on our dynamic blacklist)
@@ -249,4 +252,42 @@ ipcMain.on('drag:start', (e, filePaths) => {
   const iconPath = path.join(__dirname, 'public', 'drag-package.png');
   const icon = nativeImage.createFromPath(iconPath);
   e.sender.startDrag({ files: filePaths, icon: icon });
+});
+
+// --- Persistence IPC Handlers ---
+ipcMain.handle('app:loadState', async () => {
+  try {
+    const data = await fs.readFile(path.join(SESSIONS_DIR, 'app.json'), 'utf-8');
+    return JSON.parse(data);
+  } catch (e) { return null; }
+});
+
+ipcMain.handle('app:saveState', async (_, payload) => {
+  await fs.writeFile(path.join(SESSIONS_DIR, 'app.json'), JSON.stringify(payload, null, 2), 'utf-8');
+});
+
+ipcMain.handle('workspace:loadSession', async (_, id) => {
+  try {
+    const data = await fs.readFile(path.join(SESSIONS_DIR, `${id}.json`), 'utf-8');
+    return JSON.parse(data);
+  } catch (e) { return null; }
+});
+
+ipcMain.handle('workspace:saveSession', async (_, id, payload) => {
+  await fs.writeFile(path.join(SESSIONS_DIR, `${id}.json`), JSON.stringify(payload, null, 2), 'utf-8');
+});
+
+ipcMain.handle('workspace:getMetadata', async () => {
+  try {
+    const files = await fs.readdir(SESSIONS_DIR);
+    const metadataList = [];
+    for (const file of files) {
+      if (file === 'app.json' || !file.endsWith('.json')) continue;
+      try {
+        const data = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, file), 'utf-8'));
+        if (data.metadata) metadataList.push(data.metadata);
+      } catch (e) { /* skip malformed */ }
+    }
+    return metadataList.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  } catch (e) { return []; }
 });

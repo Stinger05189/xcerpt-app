@@ -39,6 +39,42 @@ export interface ExportPayload {
   treeMarkdown: string;
 }
 
+// --- Persistence Schemas ---
+export interface AppStatePayload {
+  activeWorkspaceId: string | null;
+  openTabs: { id: string; title: string }[];
+  openWorkspaceIds?: string[]; // Legacy fallback
+}
+
+export interface WorkspaceMetadata {
+  id: string;
+  name: string | null;
+  createdAt: string;
+  updatedAt: string;
+  totalIncludedFiles: number;
+  rootPaths: string[];
+}
+
+export interface WorkspacePayload {
+  id: string;
+  version: string;
+  metadata: WorkspaceMetadata;
+  settings: {
+    maxFilesPerChunk: number;
+  };
+  rules: {
+    hardBlacklist: string[];
+    inclusions: string[];
+    exclusions: string[];
+    treeOnly: string[];
+  };
+  compressions: Record<string, CompressionRuleIPC[]>;
+  uiState: {
+    expandedFolders: string[];
+    activeTab: string | null;
+  };
+}
+
 export interface ElectronAPI {
   ping: () => Promise<string>;
   selectDirectory: () => Promise<string | null>;
@@ -53,6 +89,13 @@ export interface ElectronAPI {
   startDrag: (filePaths: string[]) => void;
   openPath: (path: string) => Promise<string>;
   showItemInFolder: (path: string) => void;
+
+  // Persistence API
+  loadAppState: () => Promise<AppStatePayload | null>;
+  saveAppState: (payload: AppStatePayload) => Promise<void>;
+  loadSession: (id: string) => Promise<WorkspacePayload | null>;
+  saveSession: (id: string, payload: WorkspacePayload) => Promise<void>;
+  getWorkspaceMetadata: () => Promise<WorkspaceMetadata[]>;
 
   // Event Listeners
   onFileChange: (callback: (event: 'add' | 'change' | 'unlink', path: string) => void) => () => void;

@@ -112,6 +112,26 @@
 
 ---
 
+### Session 007
+
+- **Focus Area:** Transition to Multi-Workspace IDE, Implicit Auto-Saving (Phase 6), and UI Header Consolidation (Phase 7).
+- **Key Decisions:**
+  - **Dual-Store Architecture:** Implemented `AppStore` for global IDE state (active tabs, history) and a _Single Re-hydrating_ `WorkspaceStore` for the active project. To prevent V8 memory limits from crashing the app when opening multiple massive workspaces, Xcerpt only holds one `rawTree` in memory at a time. Switching tabs serializes the outgoing state, wipes the store, and hydrates the incoming state.
+  - **Implicit Auto-Saving:** Shifted from a manual "Save As" model to automatic background persistence. Workspaces are tracked via UUIDs in the OS `AppData` folder.
+  - **Aggressive Debouncing:** Lowered the auto-save Zustand subscription debounce from 1500ms to 300ms. This perfectly protects the IPC bridge during rapid 60fps Marquee Dragging but guarantees near-instant persistence when the mouse is released.
+  - **Consolidated Header:** Rebuilt the `TitleBar` to contain the Home Logo, Global Workspace Tabs, and Window Controls in a single horizontal row to maximize vertical screen real estate.
+- **Roadblocks Resolved:**
+  - **Initialization Race Conditions:** Fixed a bug where React 18's Strict Mode double-mounted the Bootstrapper before the Zustand subscription attached, causing infinite "Untitled Workspaces" to spawn without saving to `app.json`. Solved using a strict `useRef` initialization lock.
+  - **Cascading Render Lint Errors:** Resolved `react-hooks/set-state-in-effect` warnings by pushing synchronous state-checks inside the asynchronous context-switching function.
+  - **Electron Drag Regions:** The `TitleBar` lost its draggability because `WebkitAppRegion: 'no-drag'` was applied to a flex wrapper, creating a hard boundary that neutralized the background. Fixed by applying `'no-drag'` _strictly_ to the interactive leaf nodes (buttons/tabs) and using container padding to expose the drag region.
+- **Core Files Modified:**
+  - `docs/0_Excerpt_Overview.md`, `docs/1_Excerpt_Architecture.md`, `docs/2_Excerpt_Workflows.md`, `docs/3_Excerpt_Implementation.md`
+  - `src/types/ipc.d.ts`, `main.cjs`, `preload.cjs`
+  - `src/store/appStore.ts` (NEW), `src/store/workspaceStore.ts`
+  - `src/components/layout/Bootstrapper.tsx` (NEW), `src/components/layout/TitleBar.tsx`, `src/App.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.

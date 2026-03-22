@@ -16,27 +16,27 @@
 
 ## Current Macro-Objective
 
-**Epoch 2, Phase 6: Auto-Save Serialization & AppStore Foundation**
-_Context: We are transitioning from a single-instance volatile workspace to an implicit auto-saving IDE model. Before building the UI tabs or the Workspace Browser, we must establish the base data layer: the `AppStore`, the serialization schema, and the continuous disk-syncing loop in AppData._
+**Epoch 2, Phase 8: The Workspace Browser & Metadata Querying**
+_Context: We have successfully implemented the implicit auto-save persistence engine and the multi-workspace Title Bar. The next critical feature is the "Home" screen—a centralized browser overlay that reads the metadata of all saved sessions in the OS AppData folder, allowing the user to search, filter, and open historical workspaces based on their root paths._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Define `AppStore` & Serialization Schema**
-  - _Details:_ Create `src/store/appStore.ts` to hold global state (active workspace ID, list of open tabs). Extract the serialization and deserialization functions that convert `useWorkspaceStore` state into the `XcerptWorkspace` JSON schema (including the calculation of metadata like `totalIncludedFiles`).
-- [ ] **Task 2: IPC AppData Disk Bridge**
-  - _Details:_ Update `main.cjs` and `preload.cjs` to handle writing to and reading from the OS user data directory (`app.getPath('userData')/Sessions`). Implement `api.saveSession(id, data)` and `api.loadSession(id)`.
-- [ ] **Task 3: The Auto-Save Middleware / Effect**
-  - _Details:_ Implement a React `useEffect` or Zustand middleware that watches for critical changes in the active workspace (rules, compressions, root paths) and debounces a background write to disk.
-- [ ] **Task 4: Session Restoration on Launch**
-  - _Details:_ Ensure that when the app boots, it queries the last active session ID from a master config file and restores it automatically, dropping the user exactly where they left off.
+- [ ] **Task 1: The Browser UI Overlay**
+  - _Details:_ Build a full-screen or large modal component (`WorkspaceBrowser.tsx`) triggered by clicking the Home logo in the `TitleBar`.
+- [ ] **Task 2: IPC Metadata Wiring**
+  - _Details:_ Connect the browser to the `window.api.getWorkspaceMetadata()` endpoint. Ensure the UI can gracefully handle empty states (no history) and loading states.
+- [ ] **Task 3: Path-Based Querying & Sorting**
+  - _Details:_ Implement a search bar that filters workspaces based on their `rootPaths` (e.g., typing "UE_Projects" shows all workspaces containing that path), sorted by `updatedAt` descending.
+- [ ] **Task 4: Browser Actions (Open, Rename, Delete)**
+  - _Details:_ Allow users to click a workspace to open it (adding it to `AppStore` tabs and switching context). Implement inline renaming (updates the JSON metadata) and a delete function (removes the JSON from disk).
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 5: UI Header Consolidation**
-  - _Details:_ Rebuild `TitleBar.tsx` to include the global workspace tabs and the interactive Home Logo.
-- [ ] **Task 6: The Workspace Browser**
-  - _Details:_ Build the Home screen overlay to query metadata across all saved sessions.
+- [ ] **Task 5: Stats & History Data Wiring**
+  - _Details:_ Now that workspaces are persistent, replace the mockup UI in the Sidebar Stats & History tabs with real token calculations (`js-tiktoken`) and track actual export occurrences in the JSON payload.
+- [ ] **Task 6: Performance Optimization & Caching**
+  - _Details:_ While the single re-hydrating store prevents memory crashes, switching between massive workspaces currently takes 3-4 seconds. Investigate caching the `rawTree` in a local IndexedDB or background worker to make tab switching nearly instantaneous.
 
 ## Blockers / Unresolved Constraints
 
-- _Decision Needed:_ We need to decide if we want to use multiple instances of `useWorkspaceStore` (e.g., passing a store context down a React tree) or keep a single global store that we completely wipe and re-hydrate every time the user clicks a different workspace tab. Re-hydrating might cause a slight UI stutter but saves immense memory.
+- None at this time.

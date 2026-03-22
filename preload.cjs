@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld('api', {
   openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
   showItemInFolder: (path) => ipcRenderer.send('shell:showItemInFolder', path),
 
+  // Persistence API
+  loadAppState: () => ipcRenderer.invoke('app:loadState'),
+  saveAppState: (payload) => ipcRenderer.invoke('app:saveState', payload),
+  loadSession: (id) => ipcRenderer.invoke('workspace:loadSession', id),
+  saveSession: (id, payload) => ipcRenderer.invoke('workspace:saveSession', id, payload),
+  getWorkspaceMetadata: () => ipcRenderer.invoke('workspace:getMetadata'),
+
   // Listeners
   onFileChange: (callback) => {
     const handler = (_, eventType, path) => callback(eventType, path);
