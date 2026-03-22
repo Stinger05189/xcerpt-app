@@ -9,17 +9,20 @@ export interface TabData {
 interface AppState {
   activeWorkspaceId: string | null;
   openTabs: TabData[];
+  isBrowserOpen: boolean;
 
   setActiveWorkspace: (id: string | null) => void;
   addWorkspaceTab: (id: string, title?: string) => void;
   removeWorkspaceTab: (id: string) => void;
   updateTabTitle: (id: string, title: string) => void;
   setOpenTabs: (tabs: TabData[]) => void;
+  setBrowserOpen: (isOpen: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
   activeWorkspaceId: null,
   openTabs: [],
+  isBrowserOpen: false,
 
   setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
 
@@ -44,5 +47,7 @@ export const useAppStore = create<AppState>((set) => ({
     openTabs: state.openTabs.map(t => t.id === id ? { ...t, title } : t)
   })),
 
-  setOpenTabs: (tabs) => set({ openTabs: tabs })
+  setOpenTabs: (tabs) => set({ openTabs: tabs }),
+
+  setBrowserOpen: (isOpen) => set({ isBrowserOpen: isOpen })
 }));

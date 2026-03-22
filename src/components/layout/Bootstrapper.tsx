@@ -53,26 +53,30 @@ export function Bootstrapper({ children }: { children: React.ReactNode }) {
       const appState = await window.api.loadAppState();
       const store = useAppStore.getState();
       
-      let targetWorkspaceId = appState?.activeWorkspaceId;
+      let targetWorkspaceId = appState?.activeWorkspaceId ?? null;
       let tabsToRestore = appState?.openTabs || [];
     
       // Legacy fallback or brand new installation
       if (!appState || tabsToRestore.length === 0) {
         if (appState?.openWorkspaceIds && appState.openWorkspaceIds.length > 0) {
           tabsToRestore = appState.openWorkspaceIds.map(id => ({ id, title: "Workspace" }));
-        } else {
-          targetWorkspaceId = crypto.randomUUID();
-          await generateFreshWorkspace(targetWorkspaceId);
-          tabsToRestore = [{ id: targetWorkspaceId, title: "Untitled Workspace" }];
         }
       }
     
-      if (!targetWorkspaceId || !tabsToRestore.some(t => t.id === targetWorkspaceId)) {
+      if (tabsToRestore.length > 0 && (!targetWorkspaceId || !tabsToRestore.some(t => t.id === targetWorkspaceId))) {
         targetWorkspaceId = tabsToRestore[0].id;
+      } else if (tabsToRestore.length === 0) {
+        targetWorkspaceId = null;
       }
     
       store.setOpenTabs(tabsToRestore);
       store.setActiveWorkspace(targetWorkspaceId);
+      
+      // If no tabs exist on boot, open the browser instead of creating a dummy workspace
+      if (tabsToRestore.length === 0) {
+        store.setBrowserOpen(true);
+      }
+      
       setIsBootstrapped(true);
     }
     init();
@@ -83,15 +87,14 @@ export function Bootstrapper({ children }: { children: React.ReactNode }) {
     if (!isBootstrapped) return;
     let isCancelled = false;
     
-    // Auto-create if user closed the very last tab
+    // Auto-open browser if user closed the very last tab
     if (!activeWorkspaceId) {
-      const newId = crypto.randomUUID();
-      generateFreshWorkspace(newId).then(() => {
-        if (!isCancelled) {
-          useAppStore.getState().addWorkspaceTab(newId, "Untitled Workspace");
-          useAppStore.getState().setActiveWorkspace(newId);
-        }
-      });
+      useAppStore.getState().setBrowserOpen(true);
+      currentHydratedIdRef.current = null;
+      // Push state update to the end of the event loop to prevent cascading render warnings
+      setTimeout(() => {
+        if (!isCancelled) setIsSwitching(false);
+      }, 0);
       return;
     }
     

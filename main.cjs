@@ -291,3 +291,19 @@ ipcMain.handle('workspace:getMetadata', async () => {
     return metadataList.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   } catch (e) { return []; }
 });
+
+ipcMain.handle('workspace:rename', async (_, id, newName) => {
+  try {
+    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
+    const data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+    data.metadata.name = newName || null;
+    data.metadata.updatedAt = new Date().toISOString();
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (e) { console.error('Failed to rename workspace:', e); }
+});
+
+ipcMain.handle('workspace:delete', async (_, id) => {
+  try {
+    await fs.unlink(path.join(SESSIONS_DIR, `${id}.json`));
+  } catch (e) { console.error('Failed to delete workspace:', e); }
+});

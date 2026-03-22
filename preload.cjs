@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('api', {
   loadSession: (id) => ipcRenderer.invoke('workspace:loadSession', id),
   saveSession: (id, payload) => ipcRenderer.invoke('workspace:saveSession', id, payload),
   getWorkspaceMetadata: () => ipcRenderer.invoke('workspace:getMetadata'),
+  renameWorkspace: (id, newName) => ipcRenderer.invoke('workspace:rename', id, newName),
+  deleteWorkspace: (id) => ipcRenderer.invoke('workspace:delete', id),
 
   // Listeners
   onFileChange: (callback) => {

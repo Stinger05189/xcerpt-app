@@ -96,6 +96,8 @@ export interface ElectronAPI {
   loadSession: (id: string) => Promise<WorkspacePayload | null>;
   saveSession: (id: string, payload: WorkspacePayload) => Promise<void>;
   getWorkspaceMetadata: () => Promise<WorkspaceMetadata[]>;
+  renameWorkspace: (id: string, newName: string) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
 
   // Event Listeners
   onFileChange: (callback: (event: 'add' | 'change' | 'unlink', path: string) => void) => () => void;

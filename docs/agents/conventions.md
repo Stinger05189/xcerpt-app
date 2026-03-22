@@ -42,6 +42,7 @@
 - **Visual Filtering:** Excluded items are NOT removed from the DOM. Apply an "excluded" status flag for `opacity: 0.5` and a disabled state.
 - **Frameless Window (`frame: false`):** Apply `WebkitAppRegion: 'drag'` to the layout container. Apply `'no-drag'` ONLY to interactive leaf nodes (buttons/tabs) and use padding on the parent to expose the drag region.
 - **Native Drag-and-Drop:** Chat UI interfaces reject folder drops. `webContents.startDrag` must receive an array of absolute file paths representing a flattened chunk.
+- **Modal Overlays & Frameless Windows:** When implementing full-screen overlays (like the Workspace Browser), do not hide or unmount the `TitleBar`. Instead, apply `opacity-30 pointer-events-none` to the specific background UI containers, ensuring the right-aligned OS window controls (Minimize, Maximize, Close) remain accessible and functional at all times.
 
 ## 5. Monaco Editor
 
@@ -50,3 +51,8 @@
 - **Lifecycle & Syncing:** Force React wrapper remount via `key={activeFile}` to prevent stale closures. Before applying `decorationsCollectionRef.current.set()`, verify `editor.getModel()?.getValue() === reactContent` to prevent mapping to empty space.
 - **Styling constraints:** Standard CSS only (e.g., `.monaco-skip-line`). Tailwind utility classes with special characters (`/`, `[`) break Monaco's virtual DOM parser.
 - **Strict Mode:** Harmless `Uncaught (in promise) {type: 'cancelation'}` errors during double-mounts can be ignored.
+
+## 6. React Strict Mode & ESLint
+
+- **Purity & Helpers:** Helper functions that rely on impure data sources (e.g., `Date.now()`, `Math.random()`) must be hoisted completely outside of the React component scope to prevent strict ESLint purity violations.
+- **Nullish Coalescing in Zustand:** Zustand actions strictly enforce the types defined in their interfaces. When passing optional chains (`obj?.id`), always use nullish coalescing (`?? null`) to prevent `undefined` union type mismatches.

@@ -21,22 +21,14 @@ _Context: We have successfully implemented the implicit auto-save persistence en
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: The Browser UI Overlay**
-  - _Details:_ Build a full-screen or large modal component (`WorkspaceBrowser.tsx`) triggered by clicking the Home logo in the `TitleBar`.
-- [ ] **Task 2: IPC Metadata Wiring**
-  - _Details:_ Connect the browser to the `window.api.getWorkspaceMetadata()` endpoint. Ensure the UI can gracefully handle empty states (no history) and loading states.
-- [ ] **Task 3: Path-Based Querying & Sorting**
-  - _Details:_ Implement a search bar that filters workspaces based on their `rootPaths` (e.g., typing "UE_Projects" shows all workspaces containing that path), sorted by `updatedAt` descending.
-- [ ] **Task 4: Browser Actions (Open, Rename, Delete)**
-  - _Details:_ Allow users to click a workspace to open it (adding it to `AppStore` tabs and switching context). Implement inline renaming (updates the JSON metadata) and a delete function (removes the JSON from disk).
+- [ ] **Task 1: Stats & History Data Wiring**
+  - _Details:_ Now that workspaces are fully persistent and queryable, replace the mockup UI in the Sidebar Stats & History tabs. Integrate `js-tiktoken` for real-time token calculations and track actual export occurrences in the JSON payload.
+- [ ] **Task 2: Performance Optimization & Tree Caching**
+  - _Details:_ While the single re-hydrating store prevents memory crashes, switching between massive workspaces currently takes ~3-4 seconds. Investigate caching the `rawTree` in a local IndexedDB or utilizing a background Web Worker to make tab switching nearly instantaneous.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 5: Stats & History Data Wiring**
-  - _Details:_ Now that workspaces are persistent, replace the mockup UI in the Sidebar Stats & History tabs with real token calculations (`js-tiktoken`) and track actual export occurrences in the JSON payload.
-- [ ] **Task 6: Performance Optimization & Caching**
-  - _Details:_ While the single re-hydrating store prevents memory crashes, switching between massive workspaces currently takes 3-4 seconds. Investigate caching the `rawTree` in a local IndexedDB or background worker to make tab switching nearly instantaneous.
-
-## Blockers / Unresolved Constraints
-
-- None at this time.
+- [ ] **Task 3: Dynamic Heuristics & Smart Blacklisting**
+  - _Details:_ Implement an auto-detection engine during directory scanning that suggests or automatically flags common "tree-only" files (`package-lock.json`, `.env`) and heavy dependencies based on project type.
+- [ ] **Task 4: Application Polish & Packaging**
+  - _Details:_ Finalize UI/UX polish, handle empty states across all views, configure Electron Builder for cross-platform distribution (Windows `.exe`, Mac `.dmg`), and finalize app icons.

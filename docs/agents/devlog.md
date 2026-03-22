@@ -132,6 +132,24 @@
 
 ---
 
+### Session 008
+
+- **Focus Area:** The Workspace Browser, Metadata Querying, and UX refinements (Phase 8).
+- **Key Decisions:**
+  - Built the `WorkspaceBrowser.tsx` full-screen modal to parse and display historical session metadata via the `workspace:getMetadata` IPC endpoint.
+  - Implemented inline renaming and deletion of workspaces, backed by new Node.js IPC handlers (`workspace:rename`, `workspace:delete`).
+  - Refactored the `Bootstrapper` to prevent "garbage" JSON file creation. Closing the last workspace tab now opens the Browser rather than auto-generating an "Untitled Workspace."
+  - Enforced a strict modal focus state by locking the background `TitleBar` elements (`opacity-30 pointer-events-none`) when the Browser is open, ensuring users don't accidentally navigate while preserving access to OS window controls.
+- **Roadblocks Resolved:**
+  - **React ESLint Purity Rules:** The `timeAgo` formatter triggered a purity violation due to `Date.now()`. Resolved by hoisting the helper function completely outside the component scope.
+  - **Cascading Render Warnings:** Addressed `react-hooks/set-state-in-effect` errors in the `Bootstrapper` by wrapping the synchronous `setIsSwitching(false)` state update in a `setTimeout(..., 0)` to push it to the end of the event loop.
+  - **TypeScript Union Types:** Fixed `string | null | undefined` assignment errors in Zustand actions by enforcing strict nullish coalescing (`?? null`).
+- **Core Files Modified:**
+  - `src/components/layout/WorkspaceBrowser.tsx` (NEW)
+  - `src/components/layout/Bootstrapper.tsx`, `src/components/layout/TitleBar.tsx`, `src/App.tsx`
+  - `src/store/appStore.ts`
+  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+
 ## Archived Epochs
 
 - **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.
