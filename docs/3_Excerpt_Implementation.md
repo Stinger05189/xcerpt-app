@@ -2,56 +2,50 @@
 
 This is the phased, strict execution plan. **Do not proceed to a subsequent phase until the Validation Criteria of the current phase are entirely met.**
 
-## Phase 0: Project Initialization (Manual Boilerplate)
+## [COMPLETED] Epoch 1: Foundation & Curation Engine
 
-_Because AI tools struggle with initial complex environment scaffolding, this step is performed manually by the user, who then feeds the resulting configuration files back to the AI._
+_Previously executed phases (0-5) established the core application._
 
-- **Action:**
-  1. Run `npm create vite@latest xcerpt-app -- --template react-ts` (or an equivalent Electron-Vite boilerplate).
-  2. Install core dependencies: `electron`, `tailwindcss`, `zustand`, `lucide-react` (icons), `chokidar`, `ignore`.
-  3. Configure `main.js`, `preload.js`, and Vite for Electron.
-  4. Provide the AI with `package.json`, `vite.config.ts`, `main.js`, and `preload.js`.
-- **Validation:** Running `npm run dev` successfully opens an Electron window displaying a basic React "Hello World".
+- **Phase 0 & 1:** Electron/Vite/React scaffolding, IPC bridge, and base Zustand setup.
+- **Phase 2:** Node.js recursive file scanning, `chokidar` integration, and the Unified Visual Tree.
+- **Phase 3:** Monaco Editor integration and the Context Compression (Skip Block) engine.
+- **Phase 4 & 5:** Background payload staging, intelligent markdown tree generation, chunk limitation UI, and native OS Drag-and-Drop capability.
 
-## Phase 1: Shell Architecture & IPC State
+---
 
-- **Action:**
-  - Implement the global layout using Tailwind CSS (Sidebar, Main Stage, Tabs).
-  - Set up the Zustand store (`useWorkspaceStore`) supporting the "Untitled" state.
-  - Establish the IPC Bridge. Create typed endpoints in `preload.js` for pinging the Main process.
-- **Validation:** The UI renders correctly. Clicking a mock "Add Root" button updates the Zustand state, and the UI reacts by rendering a new Tab.
+## [ACTIVE] Epoch 2: The Multi-Workspace IDE Environment
 
-## Phase 2: File System & The Unified Tree
+### Phase 6: Auto-Save Serialization & AppStore Foundation
 
 - **Action:**
-  - **Main Process:** Implement `chokidar` to scan a directory and send a nested JSON tree to the Renderer.
-  - **Renderer:** Build the recursive React Tree component.
-  - Integrate the `ignore` library. Map checkboxes in the tree to an `exclusions` array in Zustand.
-- **Validation:** Pointing the app at a local folder renders the tree instantly. Unchecking a folder adds it to the exclude list and visually dims it in the UI. Expanding folders and scrolling survives React re-renders (using stable relative paths as keys).
+  - Establish the `AppStore` (Zustand) to manage global IDE state (active workspace ID, loaded workspaces).
+  - Define the `XcerptWorkspace` serialization schema.
+  - Create the IPC endpoints for reading/writing JSON payload strings to the OS `AppData/Roaming/Xcerpt/Sessions/` directory.
+  - Implement a debounced middleware or `useEffect` in React that automatically serializes the active `WorkspaceStore` state to disk whenever critical data changes.
+- **Validation:** Creating rules or compressions in the UI writes a `.json` file to the OS AppData folder. Closing and reopening the application restores the exact state of that specific workspace automatically.
 
-## Phase 3: The Context Compression Engine
-
-- **Action:**
-  - Install `@monaco-editor/react`.
-  - Implement the split-pane layout for the editor.
-  - Capture user text selections. Create a context menu or floating toolbar to add `{ startLine, endLine }` coordinates to the Zustand `compressions` state.
-  - Use Monaco's `deltaDecorations` API to visually fold and style the skipped lines.
-- **Validation:** Selecting lines and clicking "Skip" visually collapses the code in the editor. The skipped coordinates are accurately saved in the global state object for that specific file.
-
-## Phase 4: Export Engine & Chunking Logic
+### Phase 7: UI Header Consolidation & Multi-Workspace Tabbing
 
 - **Action:**
-  - **Main Process:** Write the logic to create a temporary directory.
-  - Implement the file reader/writer that splices out skipped lines based on the compression coordinates.
-  - Generate the optimized `ExportedFileTree.md` based on the final payload.
-  - **Renderer:** Build the "Flat List Preview" UI. Implement the logic to divide the flattened file array into chunks based on a `maxFiles` integer.
-- **Validation:** Clicking "Export" successfully creates a temporary folder on the OS containing the correctly modified files, the `.md` tree, and groups them accurately into chunk subfolders.
+  - Overhaul `TitleBar.tsx` to act as the primary navigation header.
+  - Convert the top-left Xcerpt logo into an interactive "Home" button.
+  - Implement Global Workspace Tabs in the Title Bar.
+  - Wire the tabs to the `AppStore`. Clicking a tab must swap the active `WorkspaceStore` ID, thereby entirely replacing the Main Stage context.
+- **Validation:** The user can open Workspace A, define rules, click `+` to open Workspace B, define different rules, and instantly swap between them via the top tabs without losing state in either.
 
-## Phase 5: Native Drag & Drop & Final Polish
+### Phase 8: The Workspace Browser & Metadata Querying
 
 - **Action:**
-  - Connect the UI "draggable icon" to Electron's `webContents.startDrag({ file: tempPath })` API via `preload.js`.
-  - Integrate `tiktoken` in a Web Worker or the Main process to calculate and stream token estimates to the Sidebar Stats tab.
-  - Implement fuzzy search overlays.
-  - Finalize Dark/Light theme toggle.
-- **Validation:** A user can drag a "Chunk" icon from the React UI directly to their desktop or a web browser, and the OS successfully copies the temporary files. Token counts update dynamically as files are checked/unchecked.
+  - Create a full-screen or large modal overlay triggered by the Home logo.
+  - **Main Process:** Create an IPC endpoint `getWorkspaceMetadata()` that lightly reads all JSON files in the Sessions directory and returns only the `metadata` blocks.
+  - **Renderer:** Build the browser UI allowing users to search/filter their history based on `rootPaths` (e.g., querying for "UE_Projects"), sorting by `updatedAt`.
+  - Add "Rename Workspace" and "Delete Workspace" functionalities to the browser.
+- **Validation:** The user clicks the Home button, sees a list of all historical sessions rich with metadata, searches for a specific folder path, and clicks a result to immediately load it into a new Global Workspace Tab.
+
+### Phase 9: Performance Caching & Virtualization
+
+- **Action:**
+  - Address the memory footprint of holding multiple 100,000+ file trees in memory simultaneously.
+  - Implement logic to selectively purge `rawTrees` from inactive `WorkspaceStores` if memory thresholds are exceeded, forcing a fast background `chokidar` rescan only when the tab is re-focused.
+  - Ensure React components belonging to inactive tabs are completely unmounted rather than hidden via CSS `display: none`.
+- **Validation:** Opening 5 massive workspaces simultaneously does not crash the application or cause noticeable interaction latency.

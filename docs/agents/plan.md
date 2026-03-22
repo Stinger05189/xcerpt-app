@@ -16,25 +16,27 @@
 
 ## Current Macro-Objective
 
-**Workspace Persistence & Onboarding UI**
-_Context: The core extraction, filtering, and export engine is fully optimized. The application now needs the ability to save the Zustand state to a `.xcerpt` file, load previous workspaces, and provide a welcoming start screen when no workspace is active._
+**Epoch 2, Phase 6: Auto-Save Serialization & AppStore Foundation**
+_Context: We are transitioning from a single-instance volatile workspace to an implicit auto-saving IDE model. Before building the UI tabs or the Workspace Browser, we must establish the base data layer: the `AppStore`, the serialization schema, and the continuous disk-syncing loop in AppData._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Define `.xcerpt` Serialization Schema**
-  - _Details:_ Write the utility functions to serialize the essential Zustand state (`rootPaths`, `includes`, `excludes`, `treeOnly`, `hardBlacklist`, `compressions`) while discarding transient state (`isPainting`, `isBuilding`, `rawTrees`).
-- [ ] **Task 2: IPC Disk Persistence Bridge**
-  - _Details:_ Implement the Main process `dialog.showSaveDialog` and `dialog.showOpenDialog` handlers. Write the serialization to disk and handle reading/parsing back to the UI.
-- [ ] **Task 3: Workspace Header Actions**
-  - _Details:_ Add "Save", "Save As...", and "Close Workspace" functionality to the Main Stage or Title Bar UI. Update the window title to reflect `WorkspaceName - Xcerpt` or `Untitled Workspace`.
-- [ ] **Task 4: The Welcome/Onboarding Screen**
-  - _Details:_ Build a modern onboarding landing page that displays when no workspace is active. Include "New Workspace", "Open Workspace", and a "Recent Workspaces" list stored in `localStorage` or Electron `store`.
+- [ ] **Task 1: Define `AppStore` & Serialization Schema**
+  - _Details:_ Create `src/store/appStore.ts` to hold global state (active workspace ID, list of open tabs). Extract the serialization and deserialization functions that convert `useWorkspaceStore` state into the `XcerptWorkspace` JSON schema (including the calculation of metadata like `totalIncludedFiles`).
+- [ ] **Task 2: IPC AppData Disk Bridge**
+  - _Details:_ Update `main.cjs` and `preload.cjs` to handle writing to and reading from the OS user data directory (`app.getPath('userData')/Sessions`). Implement `api.saveSession(id, data)` and `api.loadSession(id)`.
+- [ ] **Task 3: The Auto-Save Middleware / Effect**
+  - _Details:_ Implement a React `useEffect` or Zustand middleware that watches for critical changes in the active workspace (rules, compressions, root paths) and debounces a background write to disk.
+- [ ] **Task 4: Session Restoration on Launch**
+  - _Details:_ Ensure that when the app boots, it queries the last active session ID from a master config file and restores it automatically, dropping the user exactly where they left off.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 5: Stats & History Data Wiring**
-  - _Details:_ Replace the mockup UI in the Sidebar Stats & History tabs with real token calculations using a lightweight token estimator (e.g., `js-tiktoken`).
+- [ ] **Task 5: UI Header Consolidation**
+  - _Details:_ Rebuild `TitleBar.tsx` to include the global workspace tabs and the interactive Home Logo.
+- [ ] **Task 6: The Workspace Browser**
+  - _Details:_ Build the Home screen overlay to query metadata across all saved sessions.
 
 ## Blockers / Unresolved Constraints
 
-- None at this time.
+- _Decision Needed:_ We need to decide if we want to use multiple instances of `useWorkspaceStore` (e.g., passing a store context down a React tree) or keep a single global store that we completely wipe and re-hydrate every time the user clicks a different workspace tab. Re-hydrating might cause a slight UI stutter but saves immense memory.
