@@ -16,6 +16,7 @@ interface WorkspaceState {
   rawTrees: Record<string, FileNode>;
 
   hardBlacklist: string[];
+  pendingBlacklist: string[]; // Uncommitted blacklist rules
   includes: string[];
   excludes: string[];
   treeOnly: string[]; // Patterns matching files shown in tree but skipped during physical export
@@ -44,22 +45,27 @@ interface WorkspaceState {
   setMaxFilesPerChunk: (val: number) => void;
   setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[] }>) => void;
 
-  addRootPath: (path: string) => Promise<void>;
+  addRootPath: (path: string, forceRescan?: boolean) => Promise<void>;
   removeRootPath: (path: string) => void;
   setActiveTab: (path: string) => void;
   setActiveFile: (path: string | null) => void;
   setSelectedFiles: (files: Set<string>) => void;
   setExportStaging: (val: boolean) => void;
   toggleFolderExpansion: (relativePath: string) => void;
+  setFoldersExpanded: (relativePaths: string[], expanded: boolean) => void;
 
   // Paint Handlers
-  startPainting: (pattern: string, mode: 'add' | 'remove') => void;
+  startPainting: (pattern: string, mode: 'add' | 'remove', clearFirst?: boolean) => void;
   continuePainting: (pattern: string) => void;
   stopPainting: () => void;
 
   // Rule Management
   addBlacklistRule: (pattern: string) => void;
   removeBlacklistRule: (pattern: string) => void;
+  addPendingBlacklistRule: (pattern: string) => void;
+  removePendingBlacklistRule: (pattern: string) => void;
+  commitBlacklist: () => Promise<void>;
+
   addExcludeRule: (pattern: string) => void;
   removeExcludeRule: (pattern: string) => void;
   addTreeOnlyRule: (pattern: string) => void;
@@ -79,7 +85,11 @@ interface WorkspaceState {
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   rootPaths: [],
   rawTrees: {},
-  hardBlacklist: ['.git', 'node_modules', '__pycache__', 'dist', 'build', '.next', '.svelte-kit'],
+  hardBlacklist: [
+    '.git', 'node_modules', '__pycache__', 'dist', 'build', '.next', '.svelte-kit',
+    '.obsidian', 'Library', 'Intermediate', 'Saved', 'Pods', '.idea', '.vscode'
+  ],
+  pendingBlacklist: [],
   includes: [],
   excludes: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
   treeOnly: [],
@@ -101,17 +111,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   chunkPaths: [],
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
-  
+
   setExportState: (newState) => set((state) => ({ ...state, ...newState })),
 
-  addRootPath: async (rootPath: string) => {
-    if (get().rootPaths.includes(rootPath)) return;
-    const { node, rules } = await window.api.scanDirectory(rootPath, get().hardBlacklist);
+  addRootPath: async (rootPath: string, forceRescan = false) => {
+    if (!forceRescan && get().rootPaths.includes(rootPath)) return;
+    const { node, rules, treeOnly } = await window.api.scanDirectory(rootPath, get().hardBlacklist);
     set((state) => ({
-      rootPaths: [...state.rootPaths, rootPath],
+      rootPaths: Array.from(new Set([...state.rootPaths, rootPath])),
       rawTrees: { ...state.rawTrees, [rootPath]: node },
-      activeTab: rootPath,
-      excludes: Array.from(new Set([...state.excludes, ...rules]))
+      activeTab: state.activeTab || rootPath,
+      excludes: Array.from(new Set([...state.excludes, ...rules])),
+      treeOnly: Array.from(new Set([...state.treeOnly, ...(treeOnly || [])]))
     }));
   },
 
@@ -140,9 +151,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  setFoldersExpanded: (paths: string[], expanded: boolean) => set(state => {
+    const newSet = new Set(state.expandedFolders);
+    paths.forEach(p => expanded ? newSet.add(p) : newSet.delete(p));
+    return { expandedFolders: newSet };
+  }),
+
   // --- Paint Handlers ---
-  startPainting: (pattern, mode) => set(state => {
-    const newSet = new Set(state.selectedFiles);
+  startPainting: (pattern, mode, clearFirst = false) => set(state => {
+    const newSet = clearFirst ? new Set<string>() : new Set(state.selectedFiles);
     if (mode === 'add') {
       newSet.add(pattern);
     } else {
@@ -150,9 +167,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
     return { isPainting: true, paintMode: mode, selectedFiles: newSet };
   }),
-  
+
   continuePainting: (pattern) => set(state => {
     if (!state.isPainting || !state.paintMode) return state;
+    
+    const hasPattern = state.selectedFiles.has(pattern);
+    
+    // BAILOUT: If the state already matches the desired mode, do nothing.
+    // This entirely prevents React from dropping frames during fast mouse drags.
+    if (state.paintMode === 'add' && hasPattern) return state;
+    if (state.paintMode === 'remove' && !hasPattern) return state;
+    
     const newSet = new Set(state.selectedFiles);
     if (state.paintMode === 'add') {
       newSet.add(pattern);
@@ -167,6 +192,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   // --- Rule Management ---
   addBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: Array.from(new Set([...state.hardBlacklist, pattern])) })),
   removeBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: state.hardBlacklist.filter(p => p !== pattern) })),
+
+  addPendingBlacklistRule: (pattern: string) => set((state) => ({ pendingBlacklist: Array.from(new Set([...state.pendingBlacklist, pattern])) })),
+  removePendingBlacklistRule: (pattern: string) => set((state) => ({ pendingBlacklist: state.pendingBlacklist.filter(p => p !== pattern) })),
+  
+  commitBlacklist: async () => {
+    const state = get();
+    if (state.pendingBlacklist.length === 0) return;
+    
+    const merged = Array.from(new Set([...state.hardBlacklist, ...state.pendingBlacklist]));
+    set({ hardBlacklist: merged, pendingBlacklist: [], isStale: true });
+    
+    // Rescan all currently loaded roots with the new blacklist rules
+    for (const root of state.rootPaths) {
+      await get().addRootPath(root, true);
+    }
+  },
 
   addExcludeRule: (pattern: string) => set((state) => ({ excludes: Array.from(new Set([...state.excludes, pattern])) })),
   removeExcludeRule: (pattern: string) => set((state) => ({ excludes: state.excludes.filter((p) => p !== pattern) })),
@@ -241,19 +282,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
-  clearCompressions: (relativePath) => {
-    set((state) => {
-      const existing = state.compressions[relativePath] || [];
-      if (existing.length === 0) return state;
-      const history = state.compressionHistory[relativePath] || [];
-      return {
-        compressions: { ...state.compressions, [relativePath]: [] },
-        compressionHistory: { ...state.compressionHistory, [relativePath]: [...history, existing] },
-        isStale: true
-      };
-    });
-  },
-
   undoLastCompression: (relativePath) => {
     set((state) => {
       const history = state.compressionHistory[relativePath] || [];
@@ -264,6 +292,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return {
         compressions: { ...state.compressions, [relativePath]: previousState },
         compressionHistory: { ...state.compressionHistory, [relativePath]: newHistory },
+        isStale: true
+      };
+    });
+  },
+
+  clearCompressions: (relativePath) => {
+    set((state) => {
+      const existing = state.compressions[relativePath] || [];
+      if (existing.length === 0) return state;
+      const history = state.compressionHistory[relativePath] || [];
+      return {
+        compressions: { ...state.compressions, [relativePath]: [] },
+        compressionHistory: { ...state.compressionHistory, [relativePath]: [...history, existing] },
         isStale: true
       };
     });

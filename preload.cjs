@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   stageExport: (payload) => ipcRenderer.invoke('fs:stageExport', payload),
   startDrag: (filePaths) => ipcRenderer.send('drag:start', filePaths),
   openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
+  showItemInFolder: (path) => ipcRenderer.send('shell:showItemInFolder', path),
 
   // Listeners
   onFileChange: (callback) => {

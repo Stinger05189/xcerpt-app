@@ -10,6 +10,7 @@ export interface FileNode {
 export interface ScanResult {
   node: FileNode;
   rules: string[]; 
+  treeOnly: string[];
 }
 
 export interface CompressionRuleIPC {
@@ -51,6 +52,7 @@ export interface ElectronAPI {
   stageExport: (payload: ExportPayload) => Promise<string[]>;
   startDrag: (filePaths: string[]) => void;
   openPath: (path: string) => Promise<string>;
+  showItemInFolder: (path: string) => void;
 
   // Event Listeners
   onFileChange: (callback: (event: 'add' | 'change' | 'unlink', path: string) => void) => () => void;

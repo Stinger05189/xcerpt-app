@@ -34,6 +34,11 @@ body {
   @apply bg-border-subtle;
 }
 
+/* High-performance cursor override during painting */
+.is-painting * {
+  cursor: crosshair !important;
+}
+
 .monaco-skip-block-line {
   background-color: rgba(127, 29, 29, 0.2) !important;
   text-decoration: line-through;

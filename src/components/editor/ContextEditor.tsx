@@ -27,56 +27,60 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     clearCompressions, 
     undoLastCompression, 
     compressions, 
-    compressionHistory,
-    setCompressions 
+    compressionHistory
   } = useWorkspaceStore();
 
   const rawCompressions = compressions[relativePath];
   const fileCompressions = useMemo(() => rawCompressions || [], [rawCompressions]);
   const hasHistory = (compressionHistory[relativePath]?.length || 0) > 0;
 
-  // Load File and Auto-Heal Drift
+  // Load File, Auto-Heal Drift, and Watch for Live External Edits
   useEffect(() => {
     let isMounted = true;
+    const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
+    
     const loadFile = async () => {
       setLoading(true);
-      const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
       try {
         const text = await window.api.readFile(absolutePath);
-        if (isMounted) {
-          setContent(text);
-          setLoading(false);
+        if (!isMounted) return;
+        
+        setContent(text);
+        setLoading(false);
+        
+        // Use getState() to avoid stale closures when this is triggered by the external watcher
+        const currentStore = useWorkspaceStore.getState();
+        const currentCompressions = currentStore.compressions[relativePath] || [];
+        
+        // Drift Reconciliation: Check if external edits shifted our skip markers
+        if (currentCompressions.length > 0) {
+          const lines = text.split('\n');
+          let needsUpdate = false;
           
-          // Drift Reconciliation: Check if external edits shifted our skip markers
-          if (fileCompressions.length > 0) {
-            const lines = text.split('\n');
-            let needsUpdate = false;
-            
-            const healedCompressions = fileCompressions.map(comp => {
-              const expectedLine = lines[comp.startLine - 1];
-              if (expectedLine === comp.signature) return comp; // Perfect match
-            
-              // Drift detected, search +/- 50 lines for the exact signature
-              let foundOffset = 0;
-              for (let i = 1; i <= 50; i++) {
-                if (lines[comp.startLine - 1 + i] === comp.signature) { foundOffset = i; break; }
-                if (lines[comp.startLine - 1 - i] === comp.signature) { foundOffset = -i; break; }
-              }
-            
-              if (foundOffset !== 0) {
-                needsUpdate = true;
-                return { 
-                  ...comp, 
-                  startLine: comp.startLine + foundOffset, 
-                  endLine: comp.endLine + foundOffset 
-                };
-              }
-              return comp; // Signature lost (block was likely deleted entirely)
-            });
-            
-            if (needsUpdate) {
-              setCompressions(relativePath, healedCompressions);
+          const healedCompressions = currentCompressions.map(comp => {
+            const expectedLine = lines[comp.startLine - 1];
+            if (expectedLine === comp.signature) return comp; // Perfect match
+          
+            // Drift detected, search +/- 50 lines for the exact signature
+            let foundOffset = 0;
+            for (let i = 1; i <= 50; i++) {
+              if (lines[comp.startLine - 1 + i] === comp.signature) { foundOffset = i; break; }
+              if (lines[comp.startLine - 1 - i] === comp.signature) { foundOffset = -i; break; }
             }
+          
+            if (foundOffset !== 0) {
+              needsUpdate = true;
+              return { 
+                ...comp, 
+                startLine: comp.startLine + foundOffset, 
+                endLine: comp.endLine + foundOffset 
+              };
+            }
+            return comp; // Signature lost (block was likely deleted entirely)
+          });
+          
+          if (needsUpdate) {
+            currentStore.setCompressions(relativePath, healedCompressions);
           }
         }
       } catch (err: unknown) {
@@ -86,8 +90,22 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         }
       }
     };
+    
+    // 1. Initial Load
     loadFile();
-    return () => { isMounted = false; };
+    
+    // 2. Attach live watcher for this specific file
+    const cleanupWatcher = window.api.onFileChange((event, changedPath) => {
+      const normalizedChanged = changedPath.replace(/\\/g, '/');
+      if (['change', 'add'].includes(event) && normalizedChanged === absolutePath) {
+        loadFile();
+      }
+    });
+
+    return () => { 
+      isMounted = false; 
+      cleanupWatcher();
+    };
   }, [rootPath, relativePath]);
 
   // Compute the compressed text for preview mode

@@ -15,6 +15,8 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const { selectedFiles, setSelectedFiles, stopPainting, applyRuleToSelection } = useWorkspaceStore();
 
+  const isPainting = useWorkspaceStore(s => s.isPainting);
+
   // Pre-calculate visible paths based on search
   const visiblePaths = useMemo(() => {
     if (!searchQuery.trim()) return null; // Null means everything is visible
@@ -79,7 +81,7 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
     
       {/* Scrollable Tree Container */}
       <div 
-        className="flex-1 overflow-y-auto font-mono text-[13px] text-text-primary relative pb-16"
+        className={`flex-1 overflow-y-auto font-mono text-[13px] text-text-primary relative pb-16 ${isPainting ? 'is-painting' : ''}`}
         onMouseUp={stopPainting}
         onMouseLeave={stopPainting}
         onClick={(e) => {

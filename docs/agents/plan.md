@@ -16,33 +16,24 @@
 
 ## Current Macro-Objective
 
-**Performance Stabilization, Smart Defaults, & Sync Resiliency**
-_Context: The export engine and UI interactions are built, but the application struggles with massive project directories (Unreal Engine, large Node apps). We need to implement aggressive default blacklisting, smart tree-only predictions, and resolve the remaining Chokidar sync bugs._
+**Workspace Persistence & Onboarding UI**
+_Context: The core extraction, filtering, and export engine is fully optimized. The application now needs the ability to save the Zustand state to a `.xcerpt` file, load previous workspaces, and provide a welcoming start screen when no workspace is active._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Aggressive Auto-Blacklist Engine**
-  - _Details:_ Expand the hard blacklist to comprehensively cover massive directories (Unreal Engine `Intermediate`/`Saved`, Unity `Library`, iOS `Pods`, Android `build`, Obsidian `.obsidian`, etc.).
-  - _Target Files:_ `src/store/workspaceStore.ts`, `main.cjs`
-- [ ] **Task 2: Expose Blacklist to Sidebar UI**
-  - _Details:_ Update the Rules Sidebar to display these auto-blacklisted paths, allowing the user to explicitly un-blacklist them if they actually need to export them.
-  - _Target Files:_ `src/components/layout/Sidebar.tsx`
-- [ ] **Task 3: Smart "Tree-Only" Predictions**
-  - _Details:_ Automatically flag certain files as `tree-only` upon scanning (e.g., `package-lock.json`, `yarn.lock`, `.env`, `.DS_Store`, binary images) so they provide context but don't consume LLM tokens.
-  - _Target Files:_ `src/store/workspaceStore.ts`, `main.cjs`
-- [ ] **Task 4: Fix Chokidar File Watcher Sync**
-  - _Details:_ Debug and fix the issue where external file edits are not consistently triggering the React auto-build pipeline. Ensure `isStale` correctly forces a rebuild of the chunk payloads.
-  - _Target Files:_ `main.cjs`, `src/components/layout/MainStage.tsx`
-- [ ] **Task 5: Paint Selection Performance**
-  - _Details:_ Optimize the `onMouseEnter` painting logic. It currently causes slight hangs on large trees due to excessive React renders.
-  - _Target Files:_ `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`
+- [ ] **Task 1: Define `.xcerpt` Serialization Schema**
+  - _Details:_ Write the utility functions to serialize the essential Zustand state (`rootPaths`, `includes`, `excludes`, `treeOnly`, `hardBlacklist`, `compressions`) while discarding transient state (`isPainting`, `isBuilding`, `rawTrees`).
+- [ ] **Task 2: IPC Disk Persistence Bridge**
+  - _Details:_ Implement the Main process `dialog.showSaveDialog` and `dialog.showOpenDialog` handlers. Write the serialization to disk and handle reading/parsing back to the UI.
+- [ ] **Task 3: Workspace Header Actions**
+  - _Details:_ Add "Save", "Save As...", and "Close Workspace" functionality to the Main Stage or Title Bar UI. Update the window title to reflect `WorkspaceName - Xcerpt` or `Untitled Workspace`.
+- [ ] **Task 4: The Welcome/Onboarding Screen**
+  - _Details:_ Build a modern onboarding landing page that displays when no workspace is active. Include "New Workspace", "Open Workspace", and a "Recent Workspaces" list stored in `localStorage` or Electron `store`.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 6: Stats & History Data Wiring**
+- [ ] **Task 5: Stats & History Data Wiring**
   - _Details:_ Replace the mockup UI in the Sidebar Stats & History tabs with real token calculations using a lightweight token estimator (e.g., `js-tiktoken`).
-- [ ] **Task 7: Save/Load Workspace (`.xcerpt` files)**
-  - _Details:_ Implement IPC calls to serialize the Zustand store, save it to disk as a custom `.xcerpt` JSON file, and load it back.
 
 ## Blockers / Unresolved Constraints
 

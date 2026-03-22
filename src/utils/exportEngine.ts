@@ -13,7 +13,17 @@ export function generateExportPayload(
   maxFilesPerChunk: number
 ): ExportPayload {
   const exportFiles: ExportFile[] = [];
-  let mdTree = "# Exported Workspace Context\n\n## File Tree\n```text\n";
+
+  let mdTree = `# Exported Workspace Context
+
+> **Mapping Rule:** The provided codebase has been flattened for export. A file's path corresponds to its exported filename by replacing slashes with underscores (e.g., \`src/utils/api.ts\` is exported as \`src_utils_api.ts\`).
+> **Legend:**
+> \`[-]\` : File is visible in the tree for structural context, but its contents were not exported.
+> \`[X skips]\` : File was exported, but X sections of code were removed to save context.
+
+## File Tree
+\`\`\`text
+`;
 
   rootPaths.forEach(rootPath => {
     const tree = rawTrees[rootPath];
@@ -22,51 +32,80 @@ export function generateExportPayload(
     const rootName = rootPath.split(/[/\\]/).pop() || 'root';
     
     const traverse = (node: FileNode, prefix: string, isLast: boolean, relativePath: string): string => {
-      const isDir = node.type === 'directory';
-      const status = getFileStatus(relativePath, isDir, includes, excludes, treeOnly);
+      let currNode = node;
+      let currRelative = relativePath;
+      let isDir = currNode.type === 'directory';
       
+      // Compute the included children for the current node
+      let includedChildren = isDir && currNode.children ? currNode.children.filter(c => {
+        const childRel = currRelative ? `${currRelative}/${c.name}` : c.name;
+        return getFileStatus(childRel, c.type === 'directory', includes, excludes, treeOnly) !== 'excluded';
+      }) : [];
+    
+      // --- The Single-Child Collapse Algorithm ---
+      // If this is a directory and it only has EXACTLY ONE included child,
+      // we fast-forward and collapse the names together (e.g., "src" + "utils" -> "src/utils")
+      // We do not collapse the very root node (currRelative === "") to keep the top-level distinct.
+      let collapsedName = currNode.name;
+      
+      while (isDir && includedChildren.length === 1 && currRelative !== "") {
+        const singleChild = includedChildren[0];
+        const childRel = currRelative ? `${currRelative}/${singleChild.name}` : singleChild.name;
+        
+        collapsedName += `/${singleChild.name}`;
+        currNode = singleChild;
+        currRelative = childRel;
+        isDir = currNode.type === 'directory';
+        
+        if (isDir && currNode.children) {
+          includedChildren = currNode.children.filter(c => {
+            const nextChildRel = currRelative ? `${currRelative}/${c.name}` : c.name;
+            return getFileStatus(nextChildRel, c.type === 'directory', includes, excludes, treeOnly) !== 'excluded';
+          });
+        } else {
+          includedChildren = [];
+        }
+      }
+      
+      const status = getFileStatus(currRelative, isDir, includes, excludes, treeOnly);
       if (status === 'excluded') return "";
     
       let result = "";
       const connector = isLast ? "└── " : "├── ";
       const newPrefix = prefix + (isLast ? "    " : "│   ");
     
+      // Root Node (Special Formatting)
       if (relativePath === "") {
-        result += `${node.name}/\n`;
+        result += `${collapsedName}/\n`;
       } else {
         if (isDir) {
-          result += `${prefix}${connector}${node.name}/\n`;
+          result += `${prefix}${connector}${collapsedName}/\n`;
         } else {
-          // If tree-only, document it in the Markdown but do not add to physical payload
           if (status === 'tree-only') {
-            result += `${prefix}${connector}${node.name} [Content Omitted]\n`;
+            result += `${prefix}${connector}${collapsedName} [-]\n`;
           } else {
-            const fileRelative = relativePath;
-            const flatFileName = `${rootName}_${fileRelative.replace(/[/\\]/g, '_')}`;
-            const fileComps = compressions[fileRelative] || [];
+            const flatFileName = `${rootName}_${currRelative.replace(/[/\\]/g, '_')}`;
+            const fileComps = compressions[currRelative] || [];
             
             exportFiles.push({
-              absolutePath: `${rootPath}/${fileRelative}`.replace(/\\/g, '/'),
-              relativePath: `${rootName}/${fileRelative}`,
+              absolutePath: `${rootPath}/${currRelative}`.replace(/\\/g, '/'),
+              relativePath: `${rootName}/${currRelative}`,
               flatFileName,
               compressions: fileComps
             });
             
             const compCount = fileComps.length;
-            const compStr = compCount > 0 ? ` *[${compCount} skips]*` : "";
-            result += `${prefix}${connector}${node.name} (Exported as ${flatFileName})${compStr}\n`;
+            const compStr = compCount > 0 ? ` [${compCount} skips]` : "";
+            
+            // We removed the highly verbose (Exported as flatFileName) 
+            result += `${prefix}${connector}${collapsedName}${compStr}\n`;
           }
         }
       }
     
-      if (isDir && node.children) {
-        const includedChildren = node.children.filter(c => {
-          const childRel = relativePath ? `${relativePath}/${c.name}` : c.name;
-          return getFileStatus(childRel, c.type === 'directory', includes, excludes, treeOnly) !== 'excluded';
-        });
-        
+      if (isDir && includedChildren.length > 0) {
         includedChildren.forEach((child, index) => {
-          const childRel = relativePath ? `${relativePath}/${child.name}` : child.name;
+          const childRel = currRelative ? `${currRelative}/${child.name}` : child.name;
           result += traverse(
             child, 
             relativePath === "" ? "" : newPrefix, 

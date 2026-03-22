@@ -15,34 +15,23 @@ interface TreeNodeProps {
 }
 
 export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths }: TreeNodeProps) {
-  const { 
-    expandedFolders, 
-    toggleFolderExpansion, 
-    setActiveFile,
-    activeFile,
-    selectedFiles,
-    setSelectedFiles,
-    includes, 
-    excludes, 
-    treeOnly,
-    isPainting,
-    startPainting,
-    continuePainting
-  } = useWorkspaceStore();
-
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
+
+  const isDirectory = node.type === 'directory';
+  const pattern = isDirectory ? `${relativePath}/` : relativePath;
+
+  // Granular Subscriptions for Performance
+  const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath)) || (visiblePaths !== null && visiblePaths !== undefined);
+  const isActiveFile = useWorkspaceStore(s => s.activeFile === relativePath && !isDirectory);
+  const isSelected = useWorkspaceStore(s => s.selectedFiles.has(pattern));
+
+  const includes = useWorkspaceStore(s => s.includes);
+  const excludes = useWorkspaceStore(s => s.excludes);
+  const treeOnly = useWorkspaceStore(s => s.treeOnly);
 
   if (visiblePaths && depth > 0 && !visiblePaths.has(relativePath)) {
     return null;
   }
-
-  const isExpanded = expandedFolders.has(relativePath) || (visiblePaths !== null && visiblePaths !== undefined);
-  const isDirectory = node.type === 'directory';
-  const pattern = isDirectory ? `${relativePath}/` : relativePath;
-
-  const isPrimarySelected = activeFile === relativePath && !isDirectory;
-  const isMultiSelected = selectedFiles.has(pattern);
-  const isSelected = isPrimarySelected || isMultiSelected;
 
   const status = getFileStatus(relativePath, isDirectory, includes, excludes, treeOnly);
   const isExcluded = status === 'excluded';
@@ -50,36 +39,59 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return; // Left clicks only
+    
+    // Prevent selection logic from triggering if they click inside the exact gutter area (width 32px)
+    // The gutter has its own independent onClick handler.
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (e.clientX - rect.left <= 32) return; 
+    
     e.stopPropagation();
     
-    // Start painting selection
-    const mode = selectedFiles.has(pattern) ? 'remove' : 'add';
-    startPainting(pattern, mode);
+    const store = useWorkspaceStore.getState();
+    const hasPattern = store.selectedFiles.has(pattern);
     
-    if (!isDirectory) setActiveFile(relativePath);
+    let mode: 'add' | 'remove' = 'add';
+    let clearFirst = false;
+    
+    if (e.shiftKey) {
+      mode = 'add';
+    } else if (e.altKey) {
+      mode = 'remove';
+    } else if (e.ctrlKey || e.metaKey) {
+      mode = hasPattern ? 'remove' : 'add';
+    } else {
+      // Standard click: Clear selection, select this item, set as active file
+      mode = 'add';
+      clearFirst = true;
+      if (!isDirectory) store.setActiveFile(relativePath);
+    }
+    
+    store.startPainting(pattern, mode, clearFirst);
   };
 
   const handleMouseEnter = () => {
-    if (isPainting) continuePainting(pattern);
+    // Read directly from state to avoid subscribing the entire tree to the painting boolean
+    const state = useWorkspaceStore.getState();
+    if (state.isPainting) state.continuePainting(pattern);
   };
 
   const handleChevronClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    toggleFolderExpansion(relativePath);
+    useWorkspaceStore.getState().toggleFolderExpansion(relativePath);
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isDirectory) toggleFolderExpansion(relativePath);
+    if (isDirectory) useWorkspaceStore.getState().toggleFolderExpansion(relativePath);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     
-    // If right-clicking an unselected item, make it the only selection
-    if (!selectedFiles.has(pattern)) {
-      setSelectedFiles(new Set([pattern]));
+    const store = useWorkspaceStore.getState();
+    if (!store.selectedFiles.has(pattern)) {
+      store.setSelectedFiles(new Set([pattern]));
     }
     setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
@@ -104,20 +116,22 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
   return (
     <div>
       <div 
-        className={`flex items-center py-1 rounded cursor-pointer group pr-2 border-l-2 select-none
-          ${isExcluded ? 'opacity-40 border-transparent hover:bg-bg-hover' : 'opacity-100'} 
-          ${isTreeOnly ? 'border-accent bg-accent/10 text-accent hover:bg-accent/20' : 'border-transparent hover:bg-bg-hover'}
-          ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle border-border-subtle' : ''} 
-          transition-all`}
+        className={`relative flex items-center py-1 rounded cursor-pointer group select-none transition-all
+          ${isExcluded ? 'opacity-40' : 'opacity-100'} 
+          ${isActiveFile ? 'border-l-2 border-accent bg-accent/5' : 'border-l-2 border-transparent'}
+          ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle' : 'hover:bg-bg-hover'}
+          ${isTreeOnly ? 'text-accent bg-accent/10' : ''}
+        `}
         onMouseDown={handleMouseDown}
         onMouseEnter={handleMouseEnter}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
-        style={{ paddingLeft: `${(depth - 1) * 16 + 4}px` }}
+        style={{ paddingLeft: `${(depth - 1) * 16 + 32}px` }}
       >
+        {/* Absolute Left Gutter for perfectly aligned Chevron Toggles */}
         <div 
           onClick={handleChevronClick}
-          className="w-5 h-full flex justify-center items-center text-text-muted hover:text-text-primary"
+          className="absolute left-0 top-0 bottom-0 w-8 flex justify-center items-center text-text-muted hover:text-text-primary hover:bg-bg-hover/80 z-10 transition-colors"
         >
           {isDirectory && (
             isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
@@ -128,13 +142,13 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
           {isDirectory ? <Folder size={14} /> : <File size={14} />}
         </span>
         
-        <span className={`truncate flex-1 ${isTreeOnly ? 'italic font-medium' : ''}`}>
+        <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium' : ''}`}>
           {node.name}
         </span>
         
         {!isDirectory && !isExcluded && !isTreeOnly && (
-          <span className="text-[10px] text-text-muted opacity-0 group-hover:opacity-100">
-            {(node.size / 1024).toFixed(1)}kb
+          <span className="text-[10px] text-accent font-medium pr-3 whitespace-nowrap">
+            {(node.size / 1024).toFixed(1)} kb
           </span>
         )}
       </div>
@@ -161,6 +175,8 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
         <ContextMenu 
           x={contextMenuPos.x} 
           y={contextMenuPos.y} 
+          targetRelativePath={relativePath}
+          rootPath={rootPath}
           onClose={() => setContextMenuPos(null)} 
         />
       )}

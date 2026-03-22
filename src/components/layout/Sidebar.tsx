@@ -1,20 +1,32 @@
 // src/components/layout/Sidebar.tsx
 import { useState } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock } from 'lucide-react';
+import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock, RefreshCw } from 'lucide-react';
 
 type Tab = 'RULES' | 'STATS' | 'HISTORY';
 
 export function Sidebar() {
-  const { excludes, removeExcludeRule, hardBlacklist, removeBlacklistRule, addBlacklistRule } = useWorkspaceStore();
+  const { 
+    excludes, removeExcludeRule, 
+    hardBlacklist, removeBlacklistRule, addBlacklistRule,
+    pendingBlacklist, removePendingBlacklistRule, commitBlacklist 
+  } = useWorkspaceStore();
+
   const [activeTab, setActiveTab] = useState<Tab>('RULES');
   const [newBlacklist, setNewBlacklist] = useState('');
+  const [isCommitting, setIsCommitting] = useState(false);
 
   const handleAddBlacklist = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && newBlacklist.trim()) {
       addBlacklistRule(newBlacklist.trim());
       setNewBlacklist('');
     }
+  };
+
+  const handleCommit = async () => {
+    setIsCommitting(true);
+    await commitBlacklist();
+    setIsCommitting(false);
   };
 
   return (
@@ -45,7 +57,7 @@ export function Sidebar() {
                   <FolderLock size={14} /> Scanner Blacklist
                 </h2>
                 <p className="text-[10px] text-text-muted mt-1 leading-tight">
-                  Directories fully ignored during OS scan to improve performance. Requires re-adding root to take effect.
+                  Directories fully ignored by OS scanner to massively improve performance.
                 </p>
               </div>
               
@@ -58,9 +70,21 @@ export function Sidebar() {
                 className="w-full bg-bg-base border border-border-subtle rounded px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent mb-2"
               />
               
-              <ul className="space-y-1">
+              <ul className="space-y-1 mb-2">
+                {pendingBlacklist.map((rule) => (
+                  <li key={`pending-${rule}`} className="flex items-center justify-between group px-2 py-1.5 bg-orange-500/10 border border-orange-500/30 border-dashed rounded-md text-sm">
+                    <span className="truncate font-mono text-xs text-orange-400">{rule} (Pending)</span>
+                    <button 
+                      onClick={() => removePendingBlacklistRule(rule)}
+                      className="text-text-muted hover:text-orange-400 transition-opacity"
+                    >
+                      &times;
+                    </button>
+                  </li>
+                ))}
+                
                 {hardBlacklist.map((rule) => (
-                  <li key={rule} className="flex items-center justify-between group px-2 py-1.5 bg-bg-base border border-border-subtle rounded-md text-sm">
+                  <li key={`hard-${rule}`} className="flex items-center justify-between group px-2 py-1.5 bg-bg-base border border-border-subtle rounded-md text-sm">
                     <span className="truncate font-mono text-xs text-red-400">{rule}</span>
                     <button 
                       onClick={() => removeBlacklistRule(rule)}
@@ -71,8 +95,19 @@ export function Sidebar() {
                   </li>
                 ))}
               </ul>
+              
+              {pendingBlacklist.length > 0 && (
+                <button 
+                  onClick={handleCommit}
+                  disabled={isCommitting}
+                  className="w-full flex items-center justify-center gap-2 py-1.5 bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 border border-orange-500/50 rounded text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={isCommitting ? 'animate-spin' : ''} />
+                  {isCommitting ? 'Rescanning Roots...' : 'Apply & Rescan Workspace'}
+                </button>
+              )}
             </div>
-            
+
             {/* Visual Exclusions */}
             <div>
               <h2 className="text-xs uppercase font-semibold text-text-muted mb-3 flex items-center gap-2">

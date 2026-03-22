@@ -93,6 +93,25 @@
 
 ---
 
+### Session 006
+
+- **Focus Area:** Performance Stabilization, High-Fidelity Curation UX, Token Density, and Extreme I/O Optimization.
+- **Key Decisions:**
+  - **Tree Rendering:** Refactored `TreeNode` to use strictly granular Zustand selectors. Utilized `getState()` inside `onMouseEnter` to preemptively halt state mutations if the dragged item already matches the desired selection state, achieving 0 dropped frames during fast dragging.
+  - **I/O Optimization:** Rewrote the Node.js recursive scanner. Eliminated `fs.stat` for directories by relying on `dirent.isDirectory()`. Prevented 10,000+ blind `try/catch` read failures by checking the `dirents` array for `.gitignore` before attempting `fs.readFile`.
+  - **Memory Optimization:** Replaced O(N²) array spreading during recursive scanning with a shared, mutable `Context` object, drastically reducing JS garbage collection churn.
+  - **Markdown Token Density:** Overhauled `ExportedFileTree.md`. Implemented a fast-forward algorithm to dynamically collapse single-child nested directories. Removed verbose export strings in favor of a global header legend and flattened path instructions.
+  - **Curation UX:** Decoupled `activeFile` from `selectedFiles`. Created an absolute-left fixed gutter for collapse chevrons. Implemented a two-tier (`pending` vs `committed`) blacklist engine with a custom hold-to-confirm context menu button to prevent accidental exclusions.
+- **Roadblocks Resolved:**
+  - Diagnosed and fixed a variable shadowing bug in `main.cjs` (`const mainWindow`) that was silently breaking the Chokidar IPC event bridge.
+  - Prevented Chokidar indexing from starving the Node event loop by wrapping `fileWatcher.add()` in a 500ms `setTimeout`, allowing the IPC payload to return to React instantly.
+- **Core Files Modified:**
+  - `main.cjs`, `src/utils/exportEngine.ts`
+  - `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`, `src/components/tree/ContextMenu.tsx`
+  - `src/store/workspaceStore.ts`, `src/components/layout/Sidebar.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.
