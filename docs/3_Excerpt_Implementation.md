@@ -13,39 +13,49 @@ _Previously executed phases (0-5) established the core application._
 
 ---
 
-## [ACTIVE] Epoch 2: The Multi-Workspace IDE Environment
+## [COMPLETED] Epoch 2: The Multi-Workspace IDE Environment
 
-### Phase 6: Auto-Save Serialization & AppStore Foundation
+_Previously executed phases (6-8) established session persistence and workspace management._
 
-- **Action:**
-  - Establish the `AppStore` (Zustand) to manage global IDE state (active workspace ID, loaded workspaces).
-  - Define the `XcerptWorkspace` serialization schema.
-  - Create the IPC endpoints for reading/writing JSON payload strings to the OS `AppData/Roaming/Xcerpt/Sessions/` directory.
-  - Implement a debounced middleware or `useEffect` in React that automatically serializes the active `WorkspaceStore` state to disk whenever critical data changes.
-- **Validation:** Creating rules or compressions in the UI writes a `.json` file to the OS AppData folder. Closing and reopening the application restores the exact state of that specific workspace automatically.
+- **Phase 6:** Auto-Save Serialization & AppStore Foundation.
+- **Phase 7:** UI Header Consolidation & Multi-Workspace Tabbing.
+- **Phase 8:** The Workspace Browser & Metadata Querying.
 
-### Phase 7: UI Header Consolidation & Multi-Workspace Tabbing
+---
 
-- **Action:**
-  - Overhaul `TitleBar.tsx` to act as the primary navigation header.
-  - Convert the top-left Xcerpt logo into an interactive "Home" button.
-  - Implement Global Workspace Tabs in the Title Bar.
-  - Wire the tabs to the `AppStore`. Clicking a tab must swap the active `WorkspaceStore` ID, thereby entirely replacing the Main Stage context.
-- **Validation:** The user can open Workspace A, define rules, click `+` to open Workspace B, define different rules, and instantly swap between them via the top tabs without losing state in either.
+## [ACTIVE] Epoch 3: Advanced Workflows & Customization
 
-### Phase 8: The Workspace Browser & Metadata Querying
+### Phase 9: Selection Stats & Ephemeral Quick Exports
 
 - **Action:**
-  - Create a full-screen or large modal overlay triggered by the Home logo.
-  - **Main Process:** Create an IPC endpoint `getWorkspaceMetadata()` that lightly reads all JSON files in the Sessions directory and returns only the `metadata` blocks.
-  - **Renderer:** Build the browser UI allowing users to search/filter their history based on `rootPaths` (e.g., querying for "UE_Projects"), sorting by `updatedAt`.
-  - Add "Rename Workspace" and "Delete Workspace" functionalities to the browser.
-- **Validation:** The user clicks the Home button, sees a list of all historical sessions rich with metadata, searches for a specific folder path, and clicks a result to immediately load it into a new Global Workspace Tab.
+  - **Root Path Context Menu:** Add a right-click "Reveal in OS" context menu specifically for the Root Path sub-tabs in the Main Stage.
+  - **Selection Stats:** Introduce a fixed bottom bar in the `FileTree` component that displays live metrics strictly for the _current selection_ (Selection Size, Disc Size, Estimated Tokens using a fast byte-to-token heuristic).
+  - **Explicit Quick Export:** Add an explicit "Generate Quick Export" button to the tree's bottom bar.
+  - **Ephemeral Payload Engine:** Wiring the Quick Export button to a new Node.js IPC handler that generates a process-bound, temporary payload _only_ for the selected files, entirely bypassing the background chunking engine used for full workspace exports.
+- **Validation:** User paints a selection of 5 files, views the estimated token count at the bottom of the tree, clicks "Generate Quick Export", waits <1s, and can instantly drag the resulting pill into a chat interface.
 
-### Phase 9: Performance Caching & Virtualization
+### Phase 10: Workspace Presets & Sidebar Overhaul
 
 - **Action:**
-  - Address the memory footprint of holding multiple 100,000+ file trees in memory simultaneously.
-  - Implement logic to selectively purge `rawTrees` from inactive `WorkspaceStores` if memory thresholds are exceeded, forcing a fast background `chokidar` rescan only when the tab is re-focused.
-  - Ensure React components belonging to inactive tabs are completely unmounted rather than hidden via CSS `display: none`.
-- **Validation:** Opening 5 massive workspaces simultaneously does not crash the application or cause noticeable interaction latency.
+  - **Schema Migration:** Refactor the `WorkspacePayload` schema to introduce `presets`. Move `exclusions`, `treeOnly`, `compressions`, and `inclusions` out of the global workspace root and into individual Preset objects.
+  - **Sidebar Restructure:** Overhaul the left sidebar to support Preset CRUD operations (Create, Rename, Delete, Save).
+  - **Compartmentalization:** Clearly separate the UI for Workspace Global Rules (Hard Blacklists, Global Stats) from Preset-Specific Rules (Tree-Only lists, Exclusions, History).
+  - **History Tracking:** Implement an "Export History" specifically for ephemeral quick exports (tracking date, file count, size, tokens) allowing instant re-selection of previous ephemeral payloads.
+- **Validation:** User can create a "Frontend Context" preset and a "Backend Context" preset within the same Workspace, each maintaining completely independent visual exclusions and skipped code blocks.
+
+### Phase 11: Global Application Configuration & Theming
+
+- **Action:**
+  - **AppConfig Persistence:** Create a new `config.json` schema managed by the `AppStore` that operates entirely agnostic of workspaces.
+  - **Theme Engine:** Map UI colors, fonts (size/family), and application scale to CSS variables injected at the `:root` level.
+  - **Settings UI:** Build a global Settings modal/view to allow users to modify Background colors, Foreground/Text colors, Accent colors, Selection states, and global keyboard shortcuts.
+- **Validation:** Modifying the Accent Color in the global settings instantly updates all active UI highlights (buttons, active tabs, Monaco editor margins) across the entire application without requiring a reload.
+
+### Phase 12: Extension Overrides
+
+- **Action:**
+  - **Override Dictionary:** Add an `extensionOverrides` mapping object (e.g., `{ ".uproject": ".json" }`) to the global `AppConfig`.
+  - **Settings UI:** Build a dropdown/editable input interface in the settings for users to define and manage custom extension overrides.
+  - **Export Engine Integration:** Modify `exportEngine.ts` to dynamically rename files matching these extensions during the flattening process.
+  - **Markdown Annotation:** Crucially, update the `ExportedFileTree.md` generation logic to explicitly annotate renamed files in the LLM prompt (e.g., `MyGame.uproject (Exported as MyGame.json)`).
+- **Validation:** Dragging a `.uproject` file to a browser chat uploads it as a `.json` file, and the AI correctly identifies it as the `.uproject` file based on the `ExportedFileTree.md` legend.

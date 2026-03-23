@@ -150,7 +150,25 @@
   - `src/store/appStore.ts`
   - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
 
+---
+
+## Active Epoch: 03 - Advanced Workflows & Customization
+
+### Session 009
+
+- **Focus Area:** Architectural roadmapping, schema redesign, and documentation overhaul for Epoch 3.
+- **Key Decisions:**
+  - **Explicit Quick Exports:** Decoupled selection-based ephemeral exports from the background chunking engine. To protect the React UI thread during rapid marquee drags, "Quick Exports" will require an explicit user click ("Stage Selection") rather than continuous background generation.
+  - **Workspace Presets:** Planned the migration of the `XcerptWorkspace` JSON schema. Global workspace states (like hard blacklists) will be separated from ephemeral configurations (Exclusions, Tree-Only paths), which will now live inside a `presets[]` array to allow multi-context swapping within the same codebase.
+  - **AppConfig & Theming:** Designed a global `config.json` schema managed by the `AppStore` to handle application-agnostic settings. CSS variables will be injected at the `:root` level for real-time, performant theming (colors, fonts, scale).
+  - **Extension Overrides:** Formulated a dictionary-based extension mapping system (e.g., `.uproject` -> `.json`) to bypass AI upload filters, ensuring the physical renaming is strictly documented inside the `ExportedFileTree.md` prompt legend so the LLM retains spatial awareness.
+- **Roadblocks Resolved:**
+  - Mitigated potential performance bottlenecks for the upcoming "Selection Stats" feature by establishing that token estimation will use a fast byte-to-token heuristic (rather than deep file reads) during tree painting.
+- **Core Files Modified:**
+  - `docs/0_Excerpt_Overview.md`, `docs/1_Excerpt_Architecture.md`, `docs/2_Excerpt_Workflows.md`, `docs/3_Excerpt_Implementation.md`
+
 ## Archived Epochs
 
+- **Epoch 02 (Context Compression & Export Staging):** Integrated Monaco Editor for advanced context compression (skipping/ghosting blocks with drift-healing). Implemented the Export Engine with background batch chunking, native OS drag-and-drop, and transitioned the app to a Multi-Workspace IDE with a Dual-Store architecture and implicit auto-saving.
 - **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

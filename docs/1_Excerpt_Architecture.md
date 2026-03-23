@@ -2,105 +2,120 @@
 
 ## Overview
 
-This document defines the technical architecture for **Xcerpt**, a premium Electron-based desktop application. The architecture is designed to resolve the performance, state-management, and UI limitations of the previous Python/PyQt version while enabling advanced features like real-time file watching, Monaco-based code compression, native OS drag-and-drop, and a multi-workspace IDE environment.
+This document defines the technical architecture for **Xcerpt**, a premium Electron-based desktop application. The architecture is designed to resolve the performance, state-management, and UI limitations of the previous Python/PyQt version while enabling advanced features like real-time file watching, Monaco-based code compression, native OS drag-and-drop, workspace presets, and dynamic theming.
 
 ---
 
 ## 1. Technology Stack
 
 - **Application Framework:** Electron + Node.js
-- **Build Tool / Bundler:** Vite (Provides rapid HMR during development and optimized builds).
+- **Build Tool / Bundler:** Vite
 - **Frontend Framework:** React 18+ (Strict functional components with Hooks).
-- **State Management:** Zustand (Lightweight, unopinionated, avoids the boilerplate of Redux, excellent for deep tree structures).
-- **Styling:** Tailwind CSS v4 (Utility-first, highly maintainable for premium/custom dark-mode UI).
-- **Code Editor:** `@monaco-editor/react` (Provides VS Code-level syntax highlighting, line numbers, and selection tracking for Context Compression).
-- **File Watching:** `chokidar` (Industry-standard, highly performant file system watcher).
-- **Pattern Matching:** `ignore` (Standard `.gitignore` semantics) + `micromatch` (for complex globbing).
-- **Token Estimation:** `js-tiktoken` for background token calculation.
+- **State Management:** Zustand (Dual-Store architecture).
+- **Styling:** Tailwind CSS v4 + Native CSS Variables (for dynamic theming).
+- **Code Editor:** `@monaco-editor/react`.
+- **File Watching:** `chokidar`.
+- **Pattern Matching:** `ignore` + `micromatch`.
+- **Token Estimation:** `js-tiktoken` (or fast byte-to-token heuristics for UI threads).
 
 ---
 
 ## 2. Process Model & IPC (Inter-Process Communication)
 
-Electron uses a multi-process architecture. To maintain security and performance, we strictly separate OS-level tasks from UI rendering using a Context Bridge (`preload.cjs`).
+Electron uses a multi-process architecture. We strictly separate OS-level tasks from UI rendering using a Context Bridge (`preload.cjs`).
 
 ### The Main Process (Node.js)
 
-Responsible for heavy lifting, OS integration, and file system access.
-
-- **File Scanner:** Uses `fs.promises` and `chokidar` to read directories and watch for changes. Emits raw tree data to the Renderer.
-- **Export Engine:** Creates temporary directories, flattens structures, applies compression transformations, and writes output files.
-- **Native Drag & Drop:** Handles the `webContents.startDrag` API to allow users to drag files out of the app directly into browsers.
-- **Persistence:** Automatically writes workspace state to the OS `AppData/Roaming/Xcerpt/Sessions/` directory as JSON. Handles querying these files for the Workspace Browser.
+- **File Scanner:** Reads directories and watches for changes. Emits raw tree data.
+- **Dual Export Engines:**
+  - _Workspace Export Engine:_ Batches and chunks the entire active preset configuration for massive, full-context payloads.
+  - _Ephemeral Export Engine:_ Creates isolated, process-bound temporary directories specifically for user-selected "Quick Exports", optimizing for speed.
+- **Native Drag & Drop:** Handles the `webContents.startDrag` API.
+- **Persistence:** Automatically writes workspace and config states to the OS `AppData/Roaming/Xcerpt/` directory.
 
 ### The Renderer Process (React)
 
-Responsible for UI, state, and user interactions.
-
-- **Filter Engine:** Receives the _raw_ tree from Main, applies user-defined `ignore` rules in-memory, and calculates the "dimmed/excluded" visual states.
-- **Tree Rendering:** Renders the unified tree using strict virtualization and granular subscriptions to prevent render lockups on large directories.
-- **Context Compression UI:** Manages the Monaco editor instance and translates user selections into "Skip Rules".
-
-### The IPC Bridge (`window.api`)
-
-Defined in `preload.cjs`, exposing safe, typed methods:
-
-- `api.scanDirectory(path)`
-- `api.onFileChange(callback)`
-- `api.saveWorkspace(id, data)` / `api.loadWorkspace(id)` / `api.getWorkspaceMetadata()`
-- `api.stageExport(config)`
-- `api.startDrag(tempFilePaths)`
+- **Filter Engine:** Applies workspace blacklists and preset exclusion rules in-memory.
+- **Tree Rendering:** Renders the unified tree with fast byte/token estimation for current selections.
+- **Context Compression UI:** Manages the Monaco editor instance.
 
 ---
 
 ## 3. Dual-Store Architecture & Performance Caching
 
-To support multiple open workspaces containing potentially 100,000+ files each without crashing the React render cycle, Xcerpt uses a strict **Dual-Store Architecture**:
-
-1. **The AppStore (`useAppStore`):** Manages the global IDE state. This includes the list of active workspace tabs, the currently focused workspace ID, recent workspaces, global application settings, and the state of the Workspace Browser overlay.
-2. **The WorkspaceStore (`useWorkspaceStore`):** Manages the deep file trees, exclusion rules, and compression coordinates for a _single_ workspace.
-
-**Memory Caching Strategy:**
-When a user switches workspace tabs, the inactive workspace's tree components are fully unmounted from the DOM. However, the `WorkspaceStore` retains the raw tree data in memory (or is serialized to disk and purged from memory if resource limits are reached) to allow instantaneous swapping without triggering a massive `chokidar` rescan.
+1. **The AppStore (`useAppStore`):** Manages the global IDE state (active tabs, global configs, theming, extension overrides).
+2. **The WorkspaceStore (`useWorkspaceStore`):** Manages the deep file trees, hard blacklists, and the active Preset configurations.
 
 ---
 
-## 4. Data Schema: The Implicit `.xcerpt` Workspace
+## 4. Data Schema: Persistence & Configuration
 
-Xcerpt operates on an **Implicit Auto-Save** model. Every session is saved automatically to the OS AppData folder. The schema is designed to expose lightweight metadata for the Workspace Browser so it doesn't have to parse massive file trees just to display a list of recent projects.
+### A. The Global AppConfig (`config.json`)
+
+Agnostic of workspaces, this schema dictates the physical appearance and global rules of the application.
+
+```typescript
+interface AppConfig {
+  theme: {
+    scale: number;
+    font: {
+      size: number;
+      family: string;
+      colors: {
+        text: string;
+        foreground: string;
+        accent: string;
+        fileExtension: string;
+      };
+    };
+    application: {
+      accent: string;
+      bgPrimary: string;
+      bgSecondary: string;
+      selectionStyle: string;
+    };
+  };
+  shortcuts: Record<string, string>;
+  extensionOverrides: Record<string, string>; // e.g., { ".uproject": ".json" }
+}
+```
+
+### B. The Implicit `.xcerpt` Workspace
+
+Workspaces utilize an **Implicit Auto-Save** model. The schema separates global workspace constraints (Hard Blacklists) from ephemeral configurations (Presets).
 
 ```typescript
 interface XcerptWorkspace {
   id: string; // UUID
-  version: "2.0";
+  version: "3.0";
   metadata: {
-    name: string | null; // Null if "Untitled Workspace"
-    createdAt: string; // ISO Date
-    updatedAt: string; // ISO Date
-    totalExports: number;
-    totalIncludedFiles: number;
-    rootPaths: string[]; // Exposed for path-based querying in the browser
-  };
-  settings: {
-    maxFilesPerChunk: number;
+    name: string | null;
+    createdAt: string;
+    updatedAt: string;
+    totalIncludedFiles: number; // Based on active preset
+    rootPaths: string[];
   };
   rules: {
-    hardBlacklist: string[];
+    hardBlacklist: string[]; // Universal scanner exclusions (.git, node_modules)
+  };
+  activePresetId: string;
+  presets: Array<{
+    id: string;
+    name: string;
     inclusions: string[];
     exclusions: string[];
     treeOnly: string[];
-  };
-  compressions: {
-    [filePath: string]: Array<{
+    compressions: Record<string, CompressionRule[]>;
+    history: Array<{
       id: string;
-      startLine: number;
-      endLine: number;
-      type: "SKIP" | "GHOST";
-      signature: string; // Drift-healing text anchor
+      date: string;
+      fileCount: number;
+      totalSize: number;
+      estimatedTokens: number;
     }>;
-  };
+  }>;
   uiState: {
-    expandedFolders: string[]; // Stable relative paths
+    expandedFolders: string[];
     activeTab: string; // Active root path sub-tab
   };
 }

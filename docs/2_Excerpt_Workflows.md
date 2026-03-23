@@ -1,45 +1,58 @@
 # 2_Excerpt_Workflows.md
 
-This document defines the exact step-by-step user journeys for the application's core functions, updated for the multi-workspace paradigm.
+This document defines the exact step-by-step user journeys for the application's core functions.
 
 ## Flow 1: The Workspace Lifecycle & Browser
 
-1. **Launch & Restore:** The user opens Xcerpt. The application instantly restores the exact multi-workspace tabs that were open during their last session, preventing the need to manually reopen projects.
-2. **The Home Button:** The user clicks the Xcerpt logo in the top-left of the consolidated application header. This opens the **Workspace Browser** overlay.
-3. **Querying by Path:** The user is working on several Unreal Engine plugins and wants to find an older context setup. They type `UE_Projects` into the browser's search bar.
-4. **Metadata Inspection:** The browser filters the list, displaying workspaces that share that root path. The user identifies the correct workspace by looking at the exposed metadata: _Created 2 weeks ago • 142 Included Files • 12 Total Exports_.
-5. **Implicit Auto-Save:** The user opens the workspace, makes a few visual tree exclusions, and closes the application. No save prompt appears. The state is implicitly persisted to disk and will be exactly as they left it upon next launch. They can optionally right-click the workspace tab to "Rename" it for better permanent organization.
+1. **Launch & Restore:** The user opens Xcerpt. The app restores the exact multi-workspace tabs open during their last session.
+2. **The Home Button:** The user clicks the Xcerpt logo to open the **Workspace Browser**.
+3. **Querying:** The user types `UE_Projects` into the search bar.
+4. **Metadata Inspection:** The browser filters workspaces. The user opens the desired project.
+5. **Implicit Auto-Save:** The user makes changes and closes the application. The state is implicitly persisted to disk.
 
 ## Flow 2: Multi-Workspace Context Switching
 
-1. **Simultaneous Environments:** The user is currently inside the "Frontend Task" workspace. They suddenly need to reference their "Backend API" context setup.
-2. **Tab Navigation:** Instead of closing the current project, the user clicks the "Backend API" tab located in the consolidated top header (next to the Home logo and window controls).
-3. **Instantaneous Swap:** The Main Stage instantly swaps out the active tree, Monaco editor state, and export staging panel. Memory caching ensures the 100,000+ files in the backend tree do not lock up the React render cycle during the swap.
+1. **Simultaneous Environments:** The user is inside the "Frontend Task" workspace tab.
+2. **Tab Navigation:** They click the "Backend API" tab located in the consolidated top header.
+3. **Instantaneous Swap:** The Main Stage instantly swaps out the active tree and editor.
 
 ## Flow 3: Curation & The Unified Tree
 
-1. **Viewing the Tree:** The Main Stage displays the file tree for the active Root Path sub-tab.
-2. **Fuzzy Searching:** The user types "Auth" in the tree's local search bar. The tree instantly filters to show only files/folders containing "Auth". _(Note: This does not affect the export, only the UI view)._
-3. **Applying Rules:** The user sees a `node_modules` folder. They uncheck the box next to it.
-4. **Visual Feedback:** The `node_modules` folder and all its children instantly dim to 50% opacity.
-5. **Rule Inspection:** The user hovers over the dimmed `node_modules` folder. A tooltip appears: _"Excluded by rule: `node_modules/`"_. This rule is also now visible and toggleable in the Sidebar "Rules" tab.
+1. **Viewing the Tree:** The Main Stage displays the file tree for the active Root Path.
+2. **Fuzzy Searching:** The user types "Auth" in the tree's local search bar.
+3. **Applying Rules:** The user unchecks a folder. It instantly dims to 50% opacity.
 
 ## Flow 4: Context Compression (The Magic Workflow)
 
 1. **Selection:** The user clicks `App.tsx` in the Unified Tree.
-2. **Editor Split:** A right-hand pane opens containing the Monaco Editor, displaying the code with syntax highlighting.
-3. **Marking a Skip:** The user highlights lines 10 through 150 (a massive, irrelevant UI component). They hit `Ctrl/Cmd + Backspace` or use the context menu to select **"Skip Block"**.
-4. **Visual Folding:** The code from lines 10-150 collapses into a stylish, inline UI pill that reads `[ ... Skipped 140 lines ... ]`.
-5. **Previewing:** The user toggles the "Preview Output" switch above the editor. The view changes to a read-only text file showing exactly what the AI will see:
-   ```typescript
-   // ... [Skipped 140 lines] ...
-   export function relevantFunction() { ... }
-   ```
+2. **Editor Split:** A right-hand pane opens containing the Monaco Editor.
+3. **Marking a Skip:** The user highlights lines 10-150 and hits `Ctrl/Cmd + Backspace`.
+4. **Visual Folding:** The code collapses into `[ ... Skipped 140 lines ... ]`.
 
-## Flow 5: Export Staging, Chunking, & Drag-and-Drop
+## Flow 5: Workspace Export Staging & Chunking
 
-1. **Initiate Export:** The user clicks the "Configure" button in the sub-header to open the Export Stage.
-2. **Staging Panel:** The right-hand pane shifts to a visual overview showing all files queued for export.
-3. **Applying Chunk Limits:** Knowing Claude/ChatGPT has a file limit, the user sets the "Batch Size Limit" slider to `10`.
-4. **Batch Generation:** The UI instantly divides the curated files into visual blocks: **Payload Chunk 1** (10 files), **Payload Chunk 2** (10 files). The global export engine automatically builds these in the background to a temporary OS directory.
-5. **Drag to Chat:** In the sub-header, draggable pill buttons appear for each chunk. The user clicks and drags "Chunk 1" completely outside the Xcerpt window and drops it directly into their browser's ChatGPT text area.
+1. **Initiate Export:** The user clicks "Configure" in the sub-header.
+2. **Batch Generation:** The user sets the "Batch Size Limit" slider to `10`. The global export engine builds chunks in the background.
+3. **Drag to Chat:** Draggable pill buttons appear. The user drags "Chunk 1" directly into ChatGPT.
+
+## Flow 6: Workspace Presets
+
+1. **Scenario:** The user is inside their "Web App" workspace. They frequently need context for UI bugs, and separately, context for Database migrations.
+2. **Creating a Preset:** In the Sidebar, the user clicks `+ New Preset` and names it "DB Context".
+3. **Independent Curation:** They exclude the entire `src/components` folder. These exclusions are saved strictly to the "DB Context" preset.
+4. **Swapping:** They select "UI Context" from the Preset dropdown. The tree instantly updates, un-dimming the components folder and hiding the database schemas.
+
+## Flow 7: Quick Export (Ephemeral Payload)
+
+1. **Selection:** The user drags their mouse to paint 4 specific files in the tree.
+2. **Stats Inspection:** At the bottom of the tree, a panel displays: _4 Files Selected | 24 KB | ~6,000 Tokens_.
+3. **Explicit Generation:** The user explicitly clicks the "Stage Selection" button.
+4. **Instant Payload:** The Ephemeral Export Engine generates a temporary payload in <1 second. The button transforms into a draggable pill.
+5. **Drag & Drop:** The user drags the selection pill into their chat interface. The action is logged to the preset's History tab.
+
+## Flow 8: Global Configs & Extension Overrides
+
+1. **The Issue:** The user's AI chat rejects `.uproject` files due to security filters.
+2. **Configuration:** The user opens the Global Application Settings and navigates to "Extension Overrides".
+3. **Mapping:** They add a new rule: Map `.uproject` to `.json`.
+4. **Result:** During export, `MyGame.uproject` is physically written to the OS temp folder as `MyGame.uproject.json`. The generated `ExportedFileTree.md` explicitly annotates this change so the LLM knows the true file type.

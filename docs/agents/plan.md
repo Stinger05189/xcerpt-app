@@ -16,19 +16,23 @@
 
 ## Current Macro-Objective
 
-**Epoch 2, Phase 8: The Workspace Browser & Metadata Querying**
-_Context: We have successfully implemented the implicit auto-save persistence engine and the multi-workspace Title Bar. The next critical feature is the "Home" screen—a centralized browser overlay that reads the metadata of all saved sessions in the OS AppData folder, allowing the user to search, filter, and open historical workspaces based on their root paths._
+**Epoch 3, Phase 9: Selection Stats & Ephemeral Quick Exports**
+_Context: With the multi-workspace architecture stable, we are shifting focus to micro-workflows. Phase 9 introduces the ability to view live token estimates for specific file selections and explicitly generate lightning-fast, process-bound temporary payloads without altering the global workspace export configuration._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Stats & History Data Wiring**
-  - _Details:_ Now that workspaces are fully persistent and queryable, replace the mockup UI in the Sidebar Stats & History tabs. Integrate `js-tiktoken` for real-time token calculations and track actual export occurrences in the JSON payload.
-- [ ] **Task 2: Performance Optimization & Tree Caching**
-  - _Details:_ While the single re-hydrating store prevents memory crashes, switching between massive workspaces currently takes ~3-4 seconds. Investigate caching the `rawTree` in a local IndexedDB or utilizing a background Web Worker to make tab switching nearly instantaneous.
+- [ ] **Task 1: Root Path Context Menu**
+  - _Details:_ Add a right-click `onContextMenu` handler to the Root Path sub-tabs in `MainStage.tsx` that triggers an IPC call to `window.api.showItemInFolder`.
+- [ ] **Task 2: Selection Stats UI & Heuristics**
+  - _Details:_ Implement a fixed bottom bar in `FileTree.tsx`. When `selectedFiles.size > 0`, display the selection count, combined disc size, and an estimated token count calculated via a fast byte-to-token heuristic to prevent UI thread blocking.
+- [ ] **Task 3: Ephemeral Quick Export Engine**
+  - _Details:_ Add an explicit "Stage Selection" button to the new tree bottom bar. Wire this to a new Node.js IPC handler that creates an isolated, temporary directory containing _only_ the selected files and an abbreviated `ExportedFileTree.md`. Once generated, convert the button into a draggable pill.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 3: Dynamic Heuristics & Smart Blacklisting**
-  - _Details:_ Implement an auto-detection engine during directory scanning that suggests or automatically flags common "tree-only" files (`package-lock.json`, `.env`) and heavy dependencies based on project type.
-- [ ] **Task 4: Application Polish & Packaging**
-  - _Details:_ Finalize UI/UX polish, handle empty states across all views, configure Electron Builder for cross-platform distribution (Windows `.exe`, Mac `.dmg`), and finalize app icons.
+- [ ] **Task 4: Workspace Presets & Sidebar Overhaul (Phase 10)**
+  - _Details:_ Migrate the `WorkspacePayload` JSON schema to support a `presets[]` array. Overhaul the Sidebar to include Preset CRUD operations and separate Global Rules from Preset Rules.
+- [ ] **Task 5: Global Application Configuration & Theming (Phase 11)**
+  - _Details:_ Introduce `AppConfig` persistence. Implement dynamic CSS variable injection at the `:root` level for real-time scale, font, and color updates.
+- [ ] **Task 6: Extension Overrides (Phase 12)**
+  - _Details:_ Build a UI to define extension mappings (e.g., `.uproject` -> `.json`). Integrate this into the export engine and ensure `ExportedFileTree.md` explicitly annotates the renames.

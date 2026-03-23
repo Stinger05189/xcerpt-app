@@ -56,3 +56,9 @@
 
 - **Purity & Helpers:** Helper functions that rely on impure data sources (e.g., `Date.now()`, `Math.random()`) must be hoisted completely outside of the React component scope to prevent strict ESLint purity violations.
 - **Nullish Coalescing in Zustand:** Zustand actions strictly enforce the types defined in their interfaces. When passing optional chains (`obj?.id`), always use nullish coalescing (`?? null`) to prevent `undefined` union type mismatches.
+
+## 7. UX, Theming & Data Integrity
+
+- **Explicit over Implicit for Expensive Ephemeral Actions:** Operations that generate physical files on disk strictly for temporary/ephemeral usage (like Quick Selection Exports) must be triggered by an explicit user action (e.g., clicking a "Stage Selection" button). Do not trigger background I/O operations continuously during fast React UI events like marquee drag-selections.
+- **Truth in Prompting (Extension Overrides):** Any structural modifications made to files to bypass OS/AI restrictions (such as renaming `.uproject` to `.json`) MUST be explicitly annotated in the generated `ExportedFileTree.md` legend (e.g., `file.uproject (Exported as file.json)`). The LLM's spatial awareness of the _original_ architecture must never be compromised by application-level formatting tricks.
+- **Theming Strategy:** Dynamic visual properties (App scale, colors, fonts) are strictly handled via CSS variables (`--color-*`) injected at the `:root` DOM level. The `AppStore` manages the config, but we map values to CSS variables to leverage native browser compositing and avoid expensive inline style recalculation overheads in React.
