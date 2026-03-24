@@ -29,6 +29,8 @@
   - Never trigger individual `setState` in loops; use bulk mutations (e.g., `applyRuleToSelection`).
   - In fast-firing events (drag/marquee), use `useStore.getState()` for early returns to bypass the React queue.
   - Never call synchronous `setState` in the top-level of a `useEffect`.
+- **Flat-State Sync Pattern:** To prevent deep selector render locks across the app, nested configuration objects (like `Presets`) must be unpacked into flat Zustand state properties (`includes`, `excludes`) upon activation, and repacked before saving or switching contexts.
+- **Session-Bound Snapshots:** Ephemeral session state that must survive workspace tab switches (like "Revert Changes" snapshots) should be hoisted to the global `AppStore` (`workspaceSnapshots`). The `WorkspaceStore` acts as the active consumer.
 
 ## 3. Node.js & I/O
 
@@ -59,6 +61,8 @@
 
 - **Purity & Helpers:** Helper functions that rely on impure data sources (e.g., `Date.now()`, `Math.random()`) must be hoisted completely outside of the React component scope to prevent strict ESLint purity violations.
 - **Nullish Coalescing in Zustand:** Zustand actions strictly enforce the types defined in their interfaces. When passing optional chains (`obj?.id`), always use nullish coalescing (`?? null`) to prevent `undefined` union type mismatches.
+- **Schema Migration Type Safety:** When handling legacy JSON payloads in Zustand hydration, strictly avoid `any` casts. Use `unknown` type intersections (e.g., `payload as unknown as { myLegacyProp?: string }`) to safely parse older schemas without triggering strict ESLint warnings.
+- **Defensive Array Mapping:** Always provide a fallback array (`?.myArray || []`) before calling `.map()` on properties derived from parsed JSON payloads to prevent crashes on legacy entries.
 
 ## 7. UX, Theming & Data Integrity
 

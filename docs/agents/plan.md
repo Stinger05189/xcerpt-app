@@ -16,21 +16,19 @@
 
 ## Current Macro-Objective
 
-**Epoch 3, Phase 10: Workspace Presets & Sidebar Overhaul**
-_Context: The UI and Ephemeral payload engines are stable. We are now migrating the workspace schema to support isolated "Presets" (e.g., "Frontend Bug", "DB Migration"). This allows users to maintain entirely independent visual exclusion rules and compression states within the same codebase._
+**Epoch 3, Phase 11: Global Application Configuration & Theming**
+_Context: Phase 10 (Presets & History) is complete. We are now shifting to application-wide configuration. We need to introduce a workspace-agnostic `config.json` schema to manage dynamic CSS variable injection for real-time scale, font, and color updates._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Schema Migration & Store Refactor**
-  - _Details:_ Refactor the `WorkspacePayload` JSON schema and `workspaceStore` to introduce the `presets[]` array. Move `exclusions`, `treeOnly`, `compressions`, and `inclusions` out of the global workspace root and into individual Preset objects.
-- [ ] **Task 2: Sidebar UI Restructure**
-  - _Details:_ Overhaul the Sidebar flyout to support Preset CRUD operations (Create, Rename, Delete, Switch).
-- [ ] **Task 3: Global vs. Preset Compartmentalization**
-  - _Details:_ Clearly separate the UI for Workspace Global Rules (Hard Blacklists, Global Stats) from Preset-Specific Rules (Tree-Only lists, Exclusions, History).
+- [ ] **Task 1: AppConfig Schema & Persistence**
+  - _Details:_ Create a new `config.json` schema managed by the Node.js main process. Wire this into the `AppStore` alongside the `AppState` so global settings persist entirely independent of individual workspaces.
+- [ ] **Task 2: Global Settings UI Modal**
+  - _Details:_ Build a centralized Settings modal accessible from the TitleBar or Sidebar. Include controls for Background colors, Foreground/Text colors, Accent colors, Selection states, and global keyboard shortcuts.
+- [ ] **Task 3: Dynamic CSS Variable Injection**
+  - _Details:_ Implement a Theme Engine (likely a `useEffect` hook near the root) that reacts to `AppStore` config changes and maps the settings to `--color-*` CSS variables at the `:root` level for instant, reload-free theming.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 4: Global Application Configuration & Theming (Phase 11)**
-  - _Details:_ Introduce `AppConfig` persistence. Implement dynamic CSS variable injection at the `:root` level for real-time scale, font, and color updates.
-- [ ] **Task 5: Extension Overrides (Phase 12)**
+- [ ] **Task 4: Extension Overrides (Phase 12)**
   - _Details:_ Build a UI to define extension mappings (e.g., `.uproject` -> `.json`). Integrate this into the export engine and ensure `ExportedFileTree.md` explicitly annotates the renames.

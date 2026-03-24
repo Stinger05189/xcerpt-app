@@ -6,13 +6,28 @@ import type { WorkspacePayload } from '../../types/ipc';
 
 // Helper to generate blank payloads for brand new tabs
 const generateFreshWorkspace = async (id: string) => {
+  const defaultPreset = {
+    id: 'default',
+    name: 'Default Context',
+    inclusions: [],
+    exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+    treeOnly: [],
+    compressions: {},
+    history: []
+  };
+
   const freshPayload: WorkspacePayload = {
     id,
-    version: "2.0",
+    version: "3.0",
     metadata: { id, name: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), totalIncludedFiles: 0, rootPaths: [] },
     settings: { maxFilesPerChunk: 100000 },
+    rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist },
+    activePresetId: defaultPreset.id,
+    presets: [defaultPreset],
+    /*
     rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist, inclusions: [], exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'], treeOnly: [] },
     compressions: {},
+    */
     uiState: { expandedFolders: [], activeTab: null }
   };
   await window.api.saveSession(id, freshPayload);
@@ -21,7 +36,7 @@ const generateFreshWorkspace = async (id: string) => {
 // Helper to serialize current state
 const getWorkspacePayload = (state: ReturnType<typeof useWorkspaceStore.getState>): WorkspacePayload => ({
   id: state.workspaceId!,
-  version: "2.0",
+  version: "3.0",
   metadata: {
     id: state.workspaceId!,
     name: state.workspaceName,
@@ -31,8 +46,13 @@ const getWorkspacePayload = (state: ReturnType<typeof useWorkspaceStore.getState
     rootPaths: state.rootPaths
   },
   settings: { maxFilesPerChunk: state.maxFilesPerChunk },
+  rules: { hardBlacklist: state.hardBlacklist },
+  activePresetId: state.activePresetId!,
+  presets: state.getPackedPresets(),
+  /*
   rules: { hardBlacklist: state.hardBlacklist, inclusions: state.includes, exclusions: state.excludes, treeOnly: state.treeOnly },
   compressions: state.compressions,
+  */
   uiState: { expandedFolders: Array.from(state.expandedFolders), activeTab: state.activeTab }
 });
 

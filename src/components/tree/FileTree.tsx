@@ -14,31 +14,22 @@ interface FileTreeProps {
 
 export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [hasLoggedDrag, setHasLoggedDrag] = useState(false);
+
   const { 
     selectedFiles, setSelectedFiles, stopPainting, applyRuleToSelection, 
-    compressions, isEphemeralBuilding, ephemeralDragPaths, setExportState 
+    compressions, isEphemeralBuilding, ephemeralDragPaths, setExportState,
+    addHistoryEntry
   } = useWorkspaceStore();
 
   const isPainting = useWorkspaceStore(s => s.isPainting);
   const hasSelection = selectedFiles.size > 0;
 
-  const handleStageEphemeral = async () => {
-    setExportState({ isEphemeralBuilding: true, ephemeralDragPaths: null });
-    try {
-      const payload = generateEphemeralPayload(rootPath, node, selectedFiles, compressions);
-      const paths = await window.api.stageEphemeralExport(payload);
-      setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
-    } catch (e) {
-      console.error('Failed to generate ephemeral payload', e);
-      setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: null });
-    }
-  };
-
   const selectionStats = useMemo(() => {
     let fileCount = 0;
     let totalBytes = 0;
     
-    if (selectedFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0' };
+    if (selectedFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 };
     
     const traverse = (n: FileNode, currentRelative: string, isParentSelected: boolean) => {
       const isDir = n.type === 'directory';
@@ -60,12 +51,30 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
     
     traverse(node, '', false);
     
+    const rawTokens = Math.round(totalBytes / 4);
+    
     return {
       fileCount,
       kb: (totalBytes / 1024).toFixed(1),
-      tokens: Math.round(totalBytes / 4).toLocaleString()
+      tokens: rawTokens.toLocaleString(),
+      rawBytes: totalBytes,
+      rawTokens: rawTokens
     };
   }, [node, selectedFiles]);
+
+  const handleStageEphemeral = async () => {
+    setExportState({ isEphemeralBuilding: true, ephemeralDragPaths: null });
+    setHasLoggedDrag(false); // Reset logging flag for the new payload
+    
+    try {
+      const payload = generateEphemeralPayload(rootPath, node, selectedFiles, compressions);
+      const paths = await window.api.stageEphemeralExport(payload);
+      setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
+    } catch (e) {
+      console.error('Failed to generate ephemeral payload', e);
+      setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: null });
+    }
+  };
 
   const visiblePaths = useMemo(() => {
     if (!searchQuery.trim()) return null; 
@@ -185,30 +194,40 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
             <X size={14} />
           </button>
         </div>
-      
+        
         <div className="h-px bg-border-subtle my-0.5" />
       
         {isEphemeralBuilding ? (
           <div className="w-full flex items-center justify-center gap-2 py-1.5 text-accent text-xs font-medium">
-            <Loader2 size={14} className="animate-spin" /> Staging Quick Export...
+            <Loader2 size={14} className="animate-spin" /> Packaging Context...
           </div>
         ) : ephemeralDragPaths ? (
           <button
             draggable
             onDragStart={(e) => {
               e.preventDefault();
+              if (!hasLoggedDrag) {
+                addHistoryEntry({
+                  date: new Date().toISOString(),
+                  fileCount: selectionStats.fileCount,
+                  totalSize: selectionStats.rawBytes,
+                  estimatedTokens: selectionStats.rawTokens,
+                  files: Array.from(selectedFiles)
+                });
+                setHasLoggedDrag(true);
+              }
               window.api.startDrag(ephemeralDragPaths);
             }}
             className="w-full flex items-center justify-center gap-2 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 cursor-grab active:cursor-grabbing shadow-sm transition-all"
           >
-            <GripVertical size={14} className="opacity-70" /> Drag Quick Export
+            <GripVertical size={14} className="opacity-70" /> Drag Context Package
           </button>
         ) : (
           <button
             onClick={handleStageEphemeral}
             className="w-full flex items-center justify-center gap-2 py-1.5 bg-bg-hover text-text-primary rounded text-xs font-medium hover:bg-accent/20 hover:text-accent border border-transparent hover:border-accent/30 transition-all"
           >
-            <Zap size={14} /> Stage Selection
+            <Zap size={14} /> Package Context
           </button>
         )}
       </div>

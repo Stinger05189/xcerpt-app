@@ -10,6 +10,7 @@ interface AppState {
   activeWorkspaceId: string | null;
   openTabs: TabData[];
   isBrowserOpen: boolean;
+  workspaceSnapshots: Record<string, Record<string, import('../types/ipc').Preset>>;
 
   setActiveWorkspace: (id: string | null) => void;
   addWorkspaceTab: (id: string, title?: string) => void;
@@ -17,12 +18,16 @@ interface AppState {
   updateTabTitle: (id: string, title: string) => void;
   setOpenTabs: (tabs: TabData[]) => void;
   setBrowserOpen: (isOpen: boolean) => void;
+
+  setWorkspaceSnapshots: (workspaceId: string, snapshots: Record<string, import('../types/ipc').Preset>) => void;
+  deleteWorkspaceSnapshot: (workspaceId: string, presetId: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
   activeWorkspaceId: null,
   openTabs: [],
   isBrowserOpen: false,
+  workspaceSnapshots: {},
 
   setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
 
@@ -49,5 +54,17 @@ export const useAppStore = create<AppState>((set) => ({
 
   setOpenTabs: (tabs) => set({ openTabs: tabs }),
 
-  setBrowserOpen: (isOpen) => set({ isBrowserOpen: isOpen })
+  setBrowserOpen: (isOpen) => set({ isBrowserOpen: isOpen }),
+
+  setWorkspaceSnapshots: (workspaceId, snapshots) => set((state) => ({
+    workspaceSnapshots: { ...state.workspaceSnapshots, [workspaceId]: snapshots }
+  })),
+
+  deleteWorkspaceSnapshot: (workspaceId, presetId) => set((state) => {
+    const workspaceData = { ...state.workspaceSnapshots[workspaceId] };
+    delete workspaceData[presetId];
+    return {
+      workspaceSnapshots: { ...state.workspaceSnapshots, [workspaceId]: workspaceData }
+    };
+  })
 }));

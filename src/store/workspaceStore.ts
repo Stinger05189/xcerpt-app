@@ -1,6 +1,7 @@
 // src/store/workspaceStore.ts
 import { create } from 'zustand';
-import type { FileNode } from '../types/ipc';
+import type { FileNode, Preset, ExportHistory } from '../types/ipc';
+import { useAppStore } from './appStore';
 
 export interface CompressionRule {
   id: string;
@@ -24,6 +25,10 @@ interface WorkspaceState {
   includes: string[];
   excludes: string[];
   treeOnly: string[]; 
+
+  activePresetId: string | null;
+  presets: Preset[];
+  presetSnapshots: Record<string, Preset>;
 
   compressions: Record<string, CompressionRule[]>;
   compressionHistory: Record<string, CompressionRule[][]>;
@@ -53,6 +58,14 @@ interface WorkspaceState {
   setMaxFilesPerChunk: (val: number) => void;
   setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[]; isEphemeralBuilding: boolean; ephemeralDragPaths: string[] | null; }>) => void;
   setSidebarOpen: (val: boolean) => void;
+
+  getPackedPresets: () => Preset[];
+  createPreset: (name: string) => void;
+  switchPreset: (id: string) => void;
+  renamePreset: (id: string, newName: string) => void;
+  deletePreset: (id: string) => void;
+  revertPreset: () => void;
+  addHistoryEntry: (entry: Omit<ExportHistory, 'id'>) => void;
 
   addRootPath: (path: string, forceRescan?: boolean) => Promise<void>;
   removeRootPath: (path: string) => void;
@@ -102,6 +115,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   includes: [],
   excludes: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
   treeOnly: [],
+
+  activePresetId: null,
+  presets: [],
+  presetSnapshots: {},
+
   compressions: {},
   compressionHistory: {},
   maxFilesPerChunk: 100000,
@@ -123,38 +141,209 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isBuilding: false,
   chunkPaths: [],
 
-  hydrateWorkspace: (payload) => set({
-    workspaceId: payload.id,
-    workspaceName: payload.metadata.name,
-    createdAt: payload.metadata.createdAt,
-    rootPaths: [], 
-    rawTrees: {},
-    hardBlacklist: payload.rules.hardBlacklist,
-    pendingBlacklist: [],
-    includes: payload.rules.inclusions,
-    excludes: payload.rules.exclusions,
-    treeOnly: payload.rules.treeOnly,
-    compressions: payload.compressions,
-    compressionHistory: {}, 
-    maxFilesPerChunk: payload.settings.maxFilesPerChunk,
-    activeTab: payload.uiState.activeTab,
-    expandedFolders: new Set(payload.uiState.expandedFolders),
-    selectedFiles: new Set(),
-    isSidebarOpen: false, // Default to hidden on boot for maximum real estate
-    isPainting: false,
-    paintMode: null,
-    isEphemeralBuilding: false,
-    ephemeralDragPaths: null,
-    activeFile: null,
-    isExportStaging: false,
-    isStale: true,
-    isBuilding: false,
-    chunkPaths: []
+  hydrateWorkspace: (payload) => set(() => {
+    let activePresetId = payload.activePresetId;
+    let presets = payload.presets || [];
+    
+    // Migration for v2.0 Payloads
+    if (payload.version !== "3.0" || !presets.length) {
+      const legacyRules = payload.rules as unknown as { inclusions?: string[]; exclusions?: string[]; treeOnly?: string[] };
+      const legacyPayload = payload as unknown as { compressions?: Record<string, import('../types/ipc').CompressionRuleIPC[]> };
+    
+      const defaultPreset: import('../types/ipc').Preset = {
+        id: 'default-' + Date.now(),
+        name: 'Default Context',
+        inclusions: legacyRules.inclusions || [],
+        exclusions: legacyRules.exclusions || ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+        treeOnly: legacyRules.treeOnly || [],
+        compressions: legacyPayload.compressions || {},
+        history: []
+      };
+      presets = [defaultPreset];
+      activePresetId = defaultPreset.id;
+    }
+    
+    const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+    
+    // AppStore Integration: Pull existing session snapshots or generate new ones
+    let snapshots = useAppStore.getState().workspaceSnapshots[payload.id];
+    if (!snapshots) {
+      snapshots = presets.reduce((acc, p) => ({ ...acc, [p.id]: JSON.parse(JSON.stringify(p)) }), {});
+      useAppStore.getState().setWorkspaceSnapshots(payload.id, snapshots);
+    }
+    
+    return {
+      workspaceId: payload.id,
+      workspaceName: payload.metadata.name,
+      createdAt: payload.metadata.createdAt,
+      rootPaths: [], 
+      rawTrees: {},
+      hardBlacklist: payload.rules.hardBlacklist,
+      pendingBlacklist: [],
+      
+      activePresetId: activePreset.id,
+      presets,
+      presetSnapshots: snapshots,
+    
+      includes: activePreset.inclusions,
+      excludes: activePreset.exclusions,
+      treeOnly: activePreset.treeOnly,
+      compressions: activePreset.compressions,
+      compressionHistory: {}, 
+      
+      maxFilesPerChunk: payload.settings.maxFilesPerChunk,
+      activeTab: payload.uiState.activeTab,
+      expandedFolders: new Set(payload.uiState.expandedFolders),
+      selectedFiles: new Set(),
+      isSidebarOpen: false, 
+      isPainting: false,
+      paintMode: null,
+      isEphemeralBuilding: false,
+      ephemeralDragPaths: null,
+      activeFile: null,
+      isExportStaging: false,
+      isStale: true,
+      isBuilding: false,
+      chunkPaths: []
+    };
   }),
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
   setExportState: (newState) => set((state) => ({ ...state, ...newState })),
   setSidebarOpen: (val: boolean) => set({ isSidebarOpen: val }),
+
+  getPackedPresets: () => {
+    const state = get();
+    return state.presets.map(p => {
+      if (p.id === state.activePresetId) {
+        return {
+          ...p,
+          inclusions: state.includes,
+          exclusions: state.excludes,
+          treeOnly: state.treeOnly,
+          compressions: state.compressions
+        };
+      }
+      return p;
+    });
+  },
+
+  createPreset: (name: string) => set(state => {
+    const newPreset: Preset = {
+      id: 'preset-' + Date.now() + Math.random().toString(36).substring(2, 7),
+      name,
+      inclusions: [],
+      exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+      treeOnly: [],
+      compressions: {},
+      history: []
+    };
+    
+    const packedPresets = state.getPackedPresets();
+    packedPresets.push(newPreset);
+    
+    const newSnapshots = { ...state.presetSnapshots, [newPreset.id]: JSON.parse(JSON.stringify(newPreset)) };
+    useAppStore.getState().setWorkspaceSnapshots(state.workspaceId!, newSnapshots);
+    
+    return {
+      activePresetId: newPreset.id,
+      presets: packedPresets,
+      presetSnapshots: newSnapshots,
+      includes: newPreset.inclusions,
+      excludes: newPreset.exclusions,
+      treeOnly: newPreset.treeOnly,
+      compressions: newPreset.compressions,
+      compressionHistory: {},
+      isStale: true
+    };
+  }),
+
+  switchPreset: (id: string) => set(state => {
+    if (id === state.activePresetId) return state;
+    
+    const packedPresets = state.getPackedPresets();
+    const target = packedPresets.find(p => p.id === id);
+    if (!target) return state;
+    
+    return {
+      activePresetId: id,
+      presets: packedPresets,
+      includes: target.inclusions,
+      excludes: target.exclusions,
+      treeOnly: target.treeOnly,
+      compressions: target.compressions,
+      compressionHistory: {},
+      isStale: true
+    };
+  }),
+
+  renamePreset: (id: string, newName: string) => set(state => {
+    const updatedPresets = state.presets.map(p => p.id === id ? { ...p, name: newName } : p);
+    return { presets: updatedPresets };
+  }),
+
+  deletePreset: (id: string) => set(state => {
+    const newPresets = state.presets.filter(p => p.id !== id);
+    if (newPresets.length === 0) return state; 
+    
+    const newSnapshots = { ...state.presetSnapshots };
+    delete newSnapshots[id];
+    useAppStore.getState().deleteWorkspaceSnapshot(state.workspaceId!, id);
+    
+    let newState: Partial<WorkspaceState> = {
+      presets: newPresets,
+      presetSnapshots: newSnapshots
+    };
+    
+    if (id === state.activePresetId) {
+      const fallback = newPresets[0];
+      newState = {
+        ...newState,
+        activePresetId: fallback.id,
+        includes: fallback.inclusions,
+        excludes: fallback.exclusions,
+        treeOnly: fallback.treeOnly,
+        compressions: fallback.compressions,
+        compressionHistory: {},
+        isStale: true
+      };
+    }
+    
+    return newState;
+  }),
+
+  revertPreset: () => set(state => {
+    if (!state.activePresetId) return state;
+    const snapshot = state.presetSnapshots[state.activePresetId];
+    if (!snapshot) return state;
+    
+    const revertedPresets = state.presets.map(p => 
+      p.id === state.activePresetId ? JSON.parse(JSON.stringify(snapshot)) : p
+    );
+    
+    return {
+      presets: revertedPresets,
+      includes: snapshot.inclusions,
+      excludes: snapshot.exclusions,
+      treeOnly: snapshot.treeOnly,
+      compressions: snapshot.compressions,
+      compressionHistory: {},
+      isStale: true
+    };
+  }),
+
+  addHistoryEntry: (entry) => set(state => {
+    if (!state.activePresetId) return state;
+    const newEntry = { ...entry, id: crypto.randomUUID() };
+    
+    const updatedPresets = state.presets.map(p => 
+      p.id === state.activePresetId 
+        ? { ...p, history: [newEntry, ...p.history] }
+        : p
+    );
+    
+    return { presets: updatedPresets };
+  }),
 
   addRootPath: async (rootPath: string, forceRescan = false) => {
     if (!forceRescan && get().rootPaths.includes(rootPath)) return;

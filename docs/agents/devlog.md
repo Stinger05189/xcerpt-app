@@ -50,6 +50,25 @@
 
 ---
 
+### Session 011
+
+- **Focus Area:** Workspace Presets, Session Snapshots, and Ephemeral History (Phase 10).
+- **Key Decisions:**
+  - **Flat-State Sync Pattern:** Migrated the `WorkspacePayload` schema to `v3.0` to support multi-context presets. To prevent massive React refactoring and render locks, the active preset's rules are unpacked into "flat" Zustand state properties (`includes`, `excludes`, `compressions`) and repacked (`getPackedPresets()`) before saving or switching presets.
+  - **Session-Bound Snapshots:** Implemented an in-memory snapshot pattern to support a "Revert Session Changes" feature. Snapshots are captured on preset load/creation and are strictly session-bound.
+  - **Elevated Snapshot Memory:** Shifted the `presetSnapshots` registry into the global `AppStore` (`workspaceSnapshots`) to ensure session revert capabilities survive workspace tab switching without permanently writing them to the disk schema.
+  - **Drag-Triggered History:** Decoupled export history logging from the payload generation step. History is now uniquely logged exactly once per `onDragStart` event, retaining the exact `files: string[]` array for future restoration.
+  - **History UX & Flyout Inspector:** Transformed history items into robust cards with dual inline actions ("Package Context" & "Select in Tree"). Implemented a `HistoryInspector` fixed-position flyout that projects to the right of the sidebar, allowing users to safely peek at a history item's contents via hover without mutating their active tree selection.
+- **Roadblocks Resolved:**
+  - Prevented a crash caused by legacy history entries missing the newly added `files: string[]` array by implementing strict fallback arrays (`?.files || []`) and defensive rendering.
+  - Resolved strict ESLint `@typescript-eslint/no-explicit-any` errors during v2.0 -> v3.0 legacy schema parsing by utilizing strict `unknown` type intersections.
+- **Core Files Modified:**
+  - `src/types/ipc.d.ts`, `src/store/workspaceStore.ts`, `src/store/appStore.ts`
+  - `src/components/layout/Bootstrapper.tsx`, `src/components/layout/Sidebar.tsx`
+  - `src/components/tree/FileTree.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

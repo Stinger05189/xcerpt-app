@@ -60,6 +60,25 @@ export interface WorkspaceMetadata {
   rootPaths: string[];
 }
 
+export interface ExportHistory {
+  id: string;
+  date: string;
+  fileCount: number;
+  totalSize: number;
+  estimatedTokens: number;
+  files: string[];
+}
+
+export interface Preset {
+  id: string;
+  name: string;
+  inclusions: string[];
+  exclusions: string[];
+  treeOnly: string[];
+  compressions: Record<string, CompressionRuleIPC[]>;
+  history: ExportHistory[];
+}
+
 export interface WorkspacePayload {
   id: string;
   version: string;
@@ -69,11 +88,9 @@ export interface WorkspacePayload {
   };
   rules: {
     hardBlacklist: string[];
-    inclusions: string[];
-    exclusions: string[];
-    treeOnly: string[];
   };
-  compressions: Record<string, CompressionRuleIPC[]>;
+  activePresetId: string;
+  presets: Preset[];
   uiState: {
     expandedFolders: string[];
     activeTab: string | null;
