@@ -3,6 +3,91 @@ import type { FileNode, ExportPayload, ExportFile } from '../types/ipc';
 import type { CompressionRule } from '../store/workspaceStore';
 import { getFileStatus } from './filterEngine';
 
+export function generateEphemeralPayload(
+  rootPath: string,
+  tree: FileNode,
+  selectedFiles: Set<string>,
+  compressions: Record<string, CompressionRule[]>
+) {
+  const exportFiles: ExportFile[] = [];
+  const rootName = rootPath.split(/[/\\]/).pop() || 'root';
+
+  let mdTree = `# Ephemeral Quick Export\n\n> **Note:** This is a partial export containing only explicitly selected files.\n\n## File Tree\n\`\`\`text\n`;
+
+  const traverse = (node: FileNode, prefix: string, isLast: boolean, relativePath: string, isParentSelected: boolean): string => {
+    const isDir = node.type === 'directory';
+    const pattern = isDir ? (relativePath ? `${relativePath}/` : '') : relativePath;
+    const isSelected = selectedFiles.has(pattern) || isParentSelected;
+    
+    // Fast-Fail: Pre-calculate if this branch has ANY selected descendants
+    const hasSelectedDescendant = (n: FileNode, currRel: string, parentSel: boolean): boolean => {
+      const dir = n.type === 'directory';
+      const pat = dir ? (currRel ? `${currRel}/` : '') : currRel;
+      const sel = selectedFiles.has(pat) || parentSel;
+      if (!dir && sel) return true;
+      if (n.children) {
+        return n.children.some(c => hasSelectedDescendant(c, currRel ? `${currRel}/${c.name}` : c.name, sel));
+      }
+      return false;
+    };
+    
+    if (!hasSelectedDescendant(node, relativePath, isParentSelected)) return "";
+    
+    let result = "";
+    const connector = isLast ? "└── " : "├── ";
+    const newPrefix = prefix + (isLast ? "    " : "│   ");
+    
+    if (relativePath === "") {
+      result += `${node.name}/\n`;
+    } else {
+      if (isDir) {
+        result += `${prefix}${connector}${node.name}/\n`;
+      } else {
+        if (isSelected) {
+          const flatFileName = `${rootName}_${relativePath.replace(/[/\\]/g, '_')}`;
+          const fileComps = compressions[relativePath] || [];
+        
+          exportFiles.push({
+            absolutePath: `${rootPath}/${relativePath}`.replace(/\\/g, '/'),
+            relativePath: `${rootName}/${relativePath}`,
+            flatFileName,
+            compressions: fileComps
+          });
+        
+          const compCount = fileComps.length;
+          const compStr = compCount > 0 ? ` [${compCount} skips]` : "";
+          result += `${prefix}${connector}${node.name}${compStr}\n`;
+        }
+      }
+    }
+    
+    if (isDir && node.children) {
+      const relevantChildren = node.children.filter(c => {
+        const childRel = relativePath ? `${relativePath}/${c.name}` : c.name;
+        return hasSelectedDescendant(c, childRel, isSelected);
+      });
+    
+      relevantChildren.forEach((child, index) => {
+        const childRel = relativePath ? `${relativePath}/${child.name}` : child.name;
+        result += traverse(
+          child,
+          relativePath === "" ? "" : newPrefix,
+          index === relevantChildren.length - 1,
+          childRel,
+          isSelected
+        );
+      });
+    }
+    
+    return result;
+  };
+
+  mdTree += traverse(tree, "", true, "", false);
+  mdTree += "```\n";
+
+  return { files: exportFiles, treeMarkdown: mdTree };
+}
+
 export function generateExportPayload(
   rootPaths: string[],
   rawTrees: Record<string, FileNode>,

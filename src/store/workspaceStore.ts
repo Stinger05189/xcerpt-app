@@ -7,8 +7,8 @@ export interface CompressionRule {
   startLine: number;
   endLine: number;
   type: 'SKIP' | 'GHOST';
-  signature: string; // The exact text of the first line skipped (for drift healing)
-  lineCount: number; // Total lines skipped
+  signature: string; 
+  lineCount: number; 
 }
 
 interface WorkspaceState {
@@ -20,10 +20,10 @@ interface WorkspaceState {
   rawTrees: Record<string, FileNode>;
 
   hardBlacklist: string[];
-  pendingBlacklist: string[]; // Uncommitted blacklist rules
+  pendingBlacklist: string[]; 
   includes: string[];
   excludes: string[];
-  treeOnly: string[]; // Patterns matching files shown in tree but skipped during physical export
+  treeOnly: string[]; 
 
   compressions: Record<string, CompressionRule[]>;
   compressionHistory: Record<string, CompressionRule[][]>;
@@ -32,15 +32,18 @@ interface WorkspaceState {
 
   activeTab: string | null;
   activeFile: string | null;
-  selectedFiles: Set<string>; // For multi-select and paint actions
+  selectedFiles: Set<string>; 
   isExportStaging: boolean;
   expandedFolders: Set<string>;
 
-  // Paint Selection State
+  // UI States
+  isSidebarOpen: boolean;
   isPainting: boolean;
   paintMode: 'add' | 'remove' | null;
 
-  // Export State
+  isEphemeralBuilding: boolean;
+  ephemeralDragPaths: string[] | null;
+
   isStale: boolean;
   isBuilding: boolean;
   chunkPaths: string[];
@@ -48,7 +51,8 @@ interface WorkspaceState {
   // Actions
   hydrateWorkspace: (payload: import('../types/ipc').WorkspacePayload) => void;
   setMaxFilesPerChunk: (val: number) => void;
-  setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[] }>) => void;
+  setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[]; isEphemeralBuilding: boolean; ephemeralDragPaths: string[] | null; }>) => void;
+  setSidebarOpen: (val: boolean) => void;
 
   addRootPath: (path: string, forceRescan?: boolean) => Promise<void>;
   removeRootPath: (path: string) => void;
@@ -59,12 +63,10 @@ interface WorkspaceState {
   toggleFolderExpansion: (relativePath: string) => void;
   setFoldersExpanded: (relativePaths: string[], expanded: boolean) => void;
 
-  // Paint Handlers
   startPainting: (pattern: string, mode: 'add' | 'remove', clearFirst?: boolean) => void;
   continuePainting: (pattern: string) => void;
   stopPainting: () => void;
 
-  // Rule Management
   addBlacklistRule: (pattern: string) => void;
   removeBlacklistRule: (pattern: string) => void;
   addPendingBlacklistRule: (pattern: string) => void;
@@ -75,11 +77,9 @@ interface WorkspaceState {
   removeExcludeRule: (pattern: string) => void;
   addTreeOnlyRule: (pattern: string) => void;
   removeTreeOnlyRule: (pattern: string) => void;
-  
-  // Bulk Rule Updater (High Performance)
+
   applyRuleToSelection: (ruleType: 'include' | 'tree-only' | 'exclude') => void;
 
-  // Compression Management
   addCompressions: (relativePath: string, rules: Omit<CompressionRule, 'id'>[]) => void;
   removeCompression: (relativePath: string, id: string) => void;
   setCompressions: (relativePath: string, rules: CompressionRule[]) => void;
@@ -112,8 +112,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isExportStaging: false,
   expandedFolders: new Set<string>(),
 
+  isSidebarOpen: false,
   isPainting: false,
   paintMode: null,
+
+  isEphemeralBuilding: false,
+  ephemeralDragPaths: null,
 
   isStale: true,
   isBuilding: false,
@@ -123,7 +127,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     workspaceId: payload.id,
     workspaceName: payload.metadata.name,
     createdAt: payload.metadata.createdAt,
-    rootPaths: [], // Wiped; Bootstrapper will call addRootPath to trigger Chokidar
+    rootPaths: [], 
     rawTrees: {},
     hardBlacklist: payload.rules.hardBlacklist,
     pendingBlacklist: [],
@@ -131,13 +135,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     excludes: payload.rules.exclusions,
     treeOnly: payload.rules.treeOnly,
     compressions: payload.compressions,
-    compressionHistory: {}, // History is volatile
+    compressionHistory: {}, 
     maxFilesPerChunk: payload.settings.maxFilesPerChunk,
     activeTab: payload.uiState.activeTab,
     expandedFolders: new Set(payload.uiState.expandedFolders),
     selectedFiles: new Set(),
+    isSidebarOpen: false, // Default to hidden on boot for maximum real estate
     isPainting: false,
     paintMode: null,
+    isEphemeralBuilding: false,
+    ephemeralDragPaths: null,
     activeFile: null,
     isExportStaging: false,
     isStale: true,
@@ -146,8 +153,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
-
   setExportState: (newState) => set((state) => ({ ...state, ...newState })),
+  setSidebarOpen: (val: boolean) => set({ isSidebarOpen: val }),
 
   addRootPath: async (rootPath: string, forceRescan = false) => {
     if (!forceRescan && get().rootPaths.includes(rootPath)) return;
@@ -166,7 +173,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const newPaths = state.rootPaths.filter(p => p !== pathToRemove);
       const newRawTrees = { ...state.rawTrees };
       delete newRawTrees[pathToRemove];
-
+    
       return {
         rootPaths: newPaths,
         rawTrees: newRawTrees,
@@ -192,7 +199,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return { expandedFolders: newSet };
   }),
 
-  // --- Paint Handlers ---
   startPainting: (pattern, mode, clearFirst = false) => set(state => {
     const newSet = clearFirst ? new Set<string>() : new Set(state.selectedFiles);
     if (mode === 'add') {
@@ -200,7 +206,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } else {
       newSet.delete(pattern);
     }
-    return { isPainting: true, paintMode: mode, selectedFiles: newSet };
+    return { isPainting: true, paintMode: mode, selectedFiles: newSet, ephemeralDragPaths: null };
   }),
 
   continuePainting: (pattern) => set(state => {
@@ -208,8 +214,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     
     const hasPattern = state.selectedFiles.has(pattern);
     
-    // BAILOUT: If the state already matches the desired mode, do nothing.
-    // This entirely prevents React from dropping frames during fast mouse drags.
     if (state.paintMode === 'add' && hasPattern) return state;
     if (state.paintMode === 'remove' && !hasPattern) return state;
     
@@ -219,18 +223,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } else {
       newSet.delete(pattern);
     }
-    return { selectedFiles: newSet };
+    return { selectedFiles: newSet, ephemeralDragPaths: null };
   }),
 
   stopPainting: () => set({ isPainting: false, paintMode: null }),
 
-  // --- Rule Management ---
   addBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: Array.from(new Set([...state.hardBlacklist, pattern])) })),
   removeBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: state.hardBlacklist.filter(p => p !== pattern) })),
 
   addPendingBlacklistRule: (pattern: string) => set((state) => ({ pendingBlacklist: Array.from(new Set([...state.pendingBlacklist, pattern])) })),
   removePendingBlacklistRule: (pattern: string) => set((state) => ({ pendingBlacklist: state.pendingBlacklist.filter(p => p !== pattern) })),
-  
+
   commitBlacklist: async () => {
     const state = get();
     if (state.pendingBlacklist.length === 0) return;
@@ -238,7 +241,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const merged = Array.from(new Set([...state.hardBlacklist, ...state.pendingBlacklist]));
     set({ hardBlacklist: merged, pendingBlacklist: [], isStale: true });
     
-    // Rescan all currently loaded roots with the new blacklist rules
     for (const root of state.rootPaths) {
       await get().addRootPath(root, true);
     }
@@ -250,13 +252,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   addTreeOnlyRule: (pattern: string) => set((state) => ({ treeOnly: Array.from(new Set([...state.treeOnly, pattern])) })),
   removeTreeOnlyRule: (pattern: string) => set((state) => ({ treeOnly: state.treeOnly.filter((p) => p !== pattern) })),
 
-  // --- Bulk Updater ---
   applyRuleToSelection: (ruleType) => set(state => {
     if (state.selectedFiles.size === 0) return state;
     
     const newExcludes = new Set(state.excludes);
     const newTreeOnly = new Set(state.treeOnly);
-
+    
     state.selectedFiles.forEach(path => {
       if (ruleType === 'include') {
         newExcludes.delete(path);
@@ -269,7 +270,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         newExcludes.add(path);
       }
     });
-
+    
     return {
       excludes: Array.from(newExcludes),
       treeOnly: Array.from(newTreeOnly),
@@ -278,32 +279,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
 
   setActiveFile: (path: string | null) => set({ activeFile: path, isExportStaging: false }),
-  setSelectedFiles: (files: Set<string>) => set({ selectedFiles: files }),
+  setSelectedFiles: (files: Set<string>) => set({ selectedFiles: files, ephemeralDragPaths: null }),
   setExportStaging: (val: boolean) => set({ isExportStaging: val }),
 
-  // --- Compression Management ---
   addCompressions: (relativePath, rules) => {
     set((state) => {
       const existing = state.compressions[relativePath] || [];
       const history = state.compressionHistory[relativePath] || [];
-      
       const newRules = rules.map(r => ({ ...r, id: Math.random().toString(36).substr(2, 9) }));
-      const newState = [...existing, ...newRules];
-    
       return {
-        compressions: { ...state.compressions, [relativePath]: newState },
+        compressions: { ...state.compressions, [relativePath]: [...existing, ...newRules] },
         compressionHistory: { ...state.compressionHistory, [relativePath]: [...history, existing] },
         isStale: true
       };
     });
   },
 
-  setCompressions: (relativePath, rules) => {
-    set((state) => ({ 
-      compressions: { ...state.compressions, [relativePath]: rules },
-      isStale: true 
-    }));
-  },
+  setCompressions: (relativePath, rules) => set(state => ({ compressions: { ...state.compressions, [relativePath]: rules }, isStale: true })),
 
   removeCompression: (relativePath, id) => {
     set((state) => {
@@ -321,7 +313,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => {
       const history = state.compressionHistory[relativePath] || [];
       if (history.length === 0) return state;
-      
       const newHistory = [...history];
       const previousState = newHistory.pop()!;
       return {

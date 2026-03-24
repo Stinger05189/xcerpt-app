@@ -20,7 +20,6 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
   const isDirectory = node.type === 'directory';
   const pattern = isDirectory ? `${relativePath}/` : relativePath;
 
-  // Granular Subscriptions for Performance
   const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath)) || (visiblePaths !== null && visiblePaths !== undefined);
   const isActiveFile = useWorkspaceStore(s => s.activeFile === relativePath && !isDirectory);
   const isSelected = useWorkspaceStore(s => s.selectedFiles.has(pattern));
@@ -38,10 +37,8 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
   const isTreeOnly = status === 'tree-only';
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Left clicks only
+    if (e.button !== 0) return; 
     
-    // Prevent selection logic from triggering if they click inside the exact gutter area (width 32px)
-    // The gutter has its own independent onClick handler.
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     if (e.clientX - rect.left <= 32) return; 
     
@@ -60,7 +57,6 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
     } else if (e.ctrlKey || e.metaKey) {
       mode = hasPattern ? 'remove' : 'add';
     } else {
-      // Standard click: Clear selection, select this item, set as active file
       mode = 'add';
       clearFirst = true;
       if (!isDirectory) store.setActiveFile(relativePath);
@@ -70,7 +66,6 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
   };
 
   const handleMouseEnter = () => {
-    // Read directly from state to avoid subscribing the entire tree to the painting boolean
     const state = useWorkspaceStore.getState();
     if (state.isPainting) state.continuePainting(pattern);
   };
@@ -128,7 +123,6 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
         onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${(depth - 1) * 16 + 32}px` }}
       >
-        {/* Absolute Left Gutter for perfectly aligned Chevron Toggles */}
         <div 
           onClick={handleChevronClick}
           className="absolute left-0 top-0 bottom-0 w-8 flex justify-center items-center text-text-muted hover:text-text-primary hover:bg-bg-hover/80 z-10 transition-colors"
@@ -142,12 +136,14 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
           {isDirectory ? <Folder size={14} /> : <File size={14} />}
         </span>
         
-        <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium' : ''}`}>
+        {/* Explicit Title Added for Truncated Names */}
+        <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium' : ''}`} title={node.name}>
           {node.name}
         </span>
         
+        {/* Dynamic File Size Hidden on Narrow Screens via Container Query */}
         {!isDirectory && !isExcluded && !isTreeOnly && (
-          <span className="text-[10px] text-accent font-medium pr-3 whitespace-nowrap">
+          <span className="text-[10px] text-accent font-medium pr-3 whitespace-nowrap hidden @[200px]:inline">
             {(node.size / 1024).toFixed(1)} kb
           </span>
         )}

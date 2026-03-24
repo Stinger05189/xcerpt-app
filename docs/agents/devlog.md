@@ -14,144 +14,6 @@
 
 ---
 
-## Active Epoch: 01 - Foundation & Architecture
-
-### Session 001
-
-- **Focus Area:** Project initialization, environment scaffolding, and agent documentation formalization.
-- **Key Decisions:**
-  - Adopted Electron + React + Vite + TypeScript as the core stack for "Xcerpt" to replace the legacy Python/PyQt version.
-  - Chose Zustand for global state management to handle deep tree structures without Redux boilerplate.
-  - Established the "Stable Relative Path" architectural rule: all React keys and state maps (expanded, selected, excluded) will bind to relative file paths instead of UI indexes to permanently resolve the erratic selection/scroll resets found in the legacy application.
-- **Roadblocks Resolved:**
-  - Initial Vite/Electron boilerplate generated manually by the User to ensure a stable launch point and avoid AI hallucination during complex build-step configurations.
-- **Core Files Modified:**
-  - `package.json`, `vite.config.ts`, `main.cjs`, `preload.cjs`
-  - `agents/conventions.md`, `agents/plan.md`, `agents/devlog.md`
-
-## Active Epoch: 02 - Context Compression & Export Staging
-
-### Session 002
-
-- **Focus Area:** Integrating Monaco Editor for Context Compression and building the Export Staging chunking logic.
-- **Key Decisions:**
-  - Decided to use `@monaco-editor/react` for the code viewer. We will mount it conditionally in a right-hand split pane to preserve performance.
-  - Context compression markers (`startLine`, `endLine`) will be stored in Zustand mapped to the stable relative path of the file.
-  - Added `fs:readFile` IPC endpoint to allow the Renderer to lazily load file contents into Monaco only when selected, keeping memory usage low.
-- **Roadblocks Resolved:**
-  - Resolved Vite/Tailwind v4 CSS compilation issue by explicitly installing and configuring the `@tailwindcss/vite` plugin.
-- **Core Files Modified:**
-  - `src/store/workspaceStore.ts`, `src/components/layout/MainStage.tsx`
-  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
-
----
-
-### Session 003
-
-- **Focus Area:** Implemented Context Editor (Monaco) and Export Staging preview; resolved critical React/Monaco integration bugs.
-- **Key Decisions:**
-  - Shifted away from Tailwind utility classes inside Monaco configuration. Monaco's virtualized DOM fails to parse classes with special characters (like `/`). We now use standard global CSS classes (e.g., `.monaco-skip-block-line`) for editor decorations.
-- **Roadblocks Resolved:**
-  - **Stale Closures:** The `xcerpt-skip-block` context menu was trapping the initial `relativePath` in a stale closure. Fixed by forcing a React unmount/remount of the `<ContextEditor>` using `key={activeFile}`.
-  - **React Strict Mode Artifacts:** Identified and safely ignored the `Uncaught {type: 'cancelation'}` error thrown by Monaco during React 18's strict mode double-mount.
-
----
-
-### Session 004
-
-- **Focus Area:** Workflow Refinement, Context Resiliency, & Frameless Shell formatting.
-- **Key Decisions:**
-  - Implemented a custom frameless Electron shell (`frame: false`) utilizing `WebkitAppRegion` in React and IPC window controls.
-  - Moved the `HARD_BLACKLIST` (`.git`, `node_modules`) to global state. Passing this array over IPC to the Node.js scanner entirely bypassed the massive performance hit of reading dependency directories.
-  - **Drift Management:** Upgraded the `CompressionRule` schema to capture the exact string `signature` of the skipped block. Xcerpt now assumes files are edited externally; upon file load, it automatically scans +/- 50 lines to detect offset changes and heals the skip coordinates in Zustand.
-  - Locked the Monaco editor to `readOnly: true`, disabled TS diagnostics, enabled the minimap, and added a `Ctrl/Cmd + Backspace` quick-skip shortcut.
-- **Roadblocks Resolved:**
-  - Fixed the Monaco style-persistence bug. Decorations were disappearing because React fired the `useEffect` before Monaco had fully ingested the new file content. Bound decoration updates to a strict content matching check.
-  - Fixed Export Stage rendering lag by wrapping the batch limit numeric input in a local React debounce effect.
-- **Core Files Modified:**
-  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
-  - `src/components/layout/TitleBar.tsx`, `src/App.tsx`, `src/components/layout/Sidebar.tsx`
-  - `src/store/workspaceStore.ts`, `src/components/editor/ContextEditor.tsx`, `src/components/export/ExportStage.tsx`
-
----
-
-### Session 005
-
-- **Focus Area:** Export Engine, Native Drag & Drop, Tertiary "Tree-Only" State, and Curation UI enhancements.
-- **Key Decisions:**
-  - Implemented a session-scoped OS temp directory (`xcerpt_session_<pid>`) that wipes and rebuilds on every payload generation to prevent disk bloat.
-  - Flattened all exported files and encoded their relative paths into the filename (e.g., `src_components_Button.tsx`) to prevent naming collisions and support LLM chat interfaces that reject folder uploads.
-  - Introduced a tertiary `tree-only` state. These files are skipped during physical export but are injected into the generated `ExportedFileTree.md` as `[Content Omitted]`, preserving structural context for the LLM.
-  - Built a marquee-style "paint" selection system with a contextual action bar and global keyboard shortcuts (A, S, D, Esc) to drastically speed up curation.
-  - Decoupled the React `useEffect` auto-build pipeline to mark payloads as `isStale` instantly, while deferring the Node.js disk write via a 1.5s debounce.
-- **Roadblocks Resolved:**
-  - `startDrag` failed on directories; refactored the UI to map chunk folders into an array of absolute file paths.
-  - Addressed React rendering bottlenecks during bulk selections by creating a single-pass `applyRuleToSelection` Zustand mutation.
-- **Remaining Roadblocks:**
-  - Chokidar watcher is still locking up Node on massive roots and not consistently triggering the payload refresh.
-  - Needs a much more aggressive default blacklist (Unreal Engine, Obsidian, etc.) and smart predictions for tree-only files (`package-lock.json`, `.env`).
-
----
-
-### Session 006
-
-- **Focus Area:** Performance Stabilization, High-Fidelity Curation UX, Token Density, and Extreme I/O Optimization.
-- **Key Decisions:**
-  - **Tree Rendering:** Refactored `TreeNode` to use strictly granular Zustand selectors. Utilized `getState()` inside `onMouseEnter` to preemptively halt state mutations if the dragged item already matches the desired selection state, achieving 0 dropped frames during fast dragging.
-  - **I/O Optimization:** Rewrote the Node.js recursive scanner. Eliminated `fs.stat` for directories by relying on `dirent.isDirectory()`. Prevented 10,000+ blind `try/catch` read failures by checking the `dirents` array for `.gitignore` before attempting `fs.readFile`.
-  - **Memory Optimization:** Replaced O(N²) array spreading during recursive scanning with a shared, mutable `Context` object, drastically reducing JS garbage collection churn.
-  - **Markdown Token Density:** Overhauled `ExportedFileTree.md`. Implemented a fast-forward algorithm to dynamically collapse single-child nested directories. Removed verbose export strings in favor of a global header legend and flattened path instructions.
-  - **Curation UX:** Decoupled `activeFile` from `selectedFiles`. Created an absolute-left fixed gutter for collapse chevrons. Implemented a two-tier (`pending` vs `committed`) blacklist engine with a custom hold-to-confirm context menu button to prevent accidental exclusions.
-- **Roadblocks Resolved:**
-  - Diagnosed and fixed a variable shadowing bug in `main.cjs` (`const mainWindow`) that was silently breaking the Chokidar IPC event bridge.
-  - Prevented Chokidar indexing from starving the Node event loop by wrapping `fileWatcher.add()` in a 500ms `setTimeout`, allowing the IPC payload to return to React instantly.
-- **Core Files Modified:**
-  - `main.cjs`, `src/utils/exportEngine.ts`
-  - `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`, `src/components/tree/ContextMenu.tsx`
-  - `src/store/workspaceStore.ts`, `src/components/layout/Sidebar.tsx`
-
----
-
-### Session 007
-
-- **Focus Area:** Transition to Multi-Workspace IDE, Implicit Auto-Saving (Phase 6), and UI Header Consolidation (Phase 7).
-- **Key Decisions:**
-  - **Dual-Store Architecture:** Implemented `AppStore` for global IDE state (active tabs, history) and a _Single Re-hydrating_ `WorkspaceStore` for the active project. To prevent V8 memory limits from crashing the app when opening multiple massive workspaces, Xcerpt only holds one `rawTree` in memory at a time. Switching tabs serializes the outgoing state, wipes the store, and hydrates the incoming state.
-  - **Implicit Auto-Saving:** Shifted from a manual "Save As" model to automatic background persistence. Workspaces are tracked via UUIDs in the OS `AppData` folder.
-  - **Aggressive Debouncing:** Lowered the auto-save Zustand subscription debounce from 1500ms to 300ms. This perfectly protects the IPC bridge during rapid 60fps Marquee Dragging but guarantees near-instant persistence when the mouse is released.
-  - **Consolidated Header:** Rebuilt the `TitleBar` to contain the Home Logo, Global Workspace Tabs, and Window Controls in a single horizontal row to maximize vertical screen real estate.
-- **Roadblocks Resolved:**
-  - **Initialization Race Conditions:** Fixed a bug where React 18's Strict Mode double-mounted the Bootstrapper before the Zustand subscription attached, causing infinite "Untitled Workspaces" to spawn without saving to `app.json`. Solved using a strict `useRef` initialization lock.
-  - **Cascading Render Lint Errors:** Resolved `react-hooks/set-state-in-effect` warnings by pushing synchronous state-checks inside the asynchronous context-switching function.
-  - **Electron Drag Regions:** The `TitleBar` lost its draggability because `WebkitAppRegion: 'no-drag'` was applied to a flex wrapper, creating a hard boundary that neutralized the background. Fixed by applying `'no-drag'` _strictly_ to the interactive leaf nodes (buttons/tabs) and using container padding to expose the drag region.
-- **Core Files Modified:**
-  - `docs/0_Excerpt_Overview.md`, `docs/1_Excerpt_Architecture.md`, `docs/2_Excerpt_Workflows.md`, `docs/3_Excerpt_Implementation.md`
-  - `src/types/ipc.d.ts`, `main.cjs`, `preload.cjs`
-  - `src/store/appStore.ts` (NEW), `src/store/workspaceStore.ts`
-  - `src/components/layout/Bootstrapper.tsx` (NEW), `src/components/layout/TitleBar.tsx`, `src/App.tsx`
-
----
-
-### Session 008
-
-- **Focus Area:** The Workspace Browser, Metadata Querying, and UX refinements (Phase 8).
-- **Key Decisions:**
-  - Built the `WorkspaceBrowser.tsx` full-screen modal to parse and display historical session metadata via the `workspace:getMetadata` IPC endpoint.
-  - Implemented inline renaming and deletion of workspaces, backed by new Node.js IPC handlers (`workspace:rename`, `workspace:delete`).
-  - Refactored the `Bootstrapper` to prevent "garbage" JSON file creation. Closing the last workspace tab now opens the Browser rather than auto-generating an "Untitled Workspace."
-  - Enforced a strict modal focus state by locking the background `TitleBar` elements (`opacity-30 pointer-events-none`) when the Browser is open, ensuring users don't accidentally navigate while preserving access to OS window controls.
-- **Roadblocks Resolved:**
-  - **React ESLint Purity Rules:** The `timeAgo` formatter triggered a purity violation due to `Date.now()`. Resolved by hoisting the helper function completely outside the component scope.
-  - **Cascading Render Warnings:** Addressed `react-hooks/set-state-in-effect` errors in the `Bootstrapper` by wrapping the synchronous `setIsSwitching(false)` state update in a `setTimeout(..., 0)` to push it to the end of the event loop.
-  - **TypeScript Union Types:** Fixed `string | null | undefined` assignment errors in Zustand actions by enforcing strict nullish coalescing (`?? null`).
-- **Core Files Modified:**
-  - `src/components/layout/WorkspaceBrowser.tsx` (NEW)
-  - `src/components/layout/Bootstrapper.tsx`, `src/components/layout/TitleBar.tsx`, `src/App.tsx`
-  - `src/store/appStore.ts`
-  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
-
----
-
 ## Active Epoch: 03 - Advanced Workflows & Customization
 
 ### Session 009
@@ -167,8 +29,29 @@
 - **Core Files Modified:**
   - `docs/0_Excerpt_Overview.md`, `docs/1_Excerpt_Architecture.md`, `docs/2_Excerpt_Workflows.md`, `docs/3_Excerpt_Implementation.md`
 
+---
+
+### Session 010
+
+- **Focus Area:** Ephemeral Quick Exports, Selection Stats Heuristics, and Responsive UI Stabilization (Phase 9).
+- **Key Decisions:**
+  - **Live Token Heuristics:** Implemented a fast `bytes / 4` token estimation heuristic inside a `useMemo` in the `FileTree` to provide instant stats during rapid marquee selections without blocking the React UI thread with deep file reads.
+  - **Ephemeral Export Engine:** Decoupled quick-exports from the workspace background chunker. Added `fs:stageEphemeralExport` to Node.js which generates process-bound, isolated temp directories exclusively containing the user's active tree selection.
+  - **Sidebar Flyout Architecture:** Converted the right-side Rules/Stats sidebar into a fixed-position flyout overlay (`z-40`) controlled by global state and a `Tab` hotkey. This prioritizes the File Tree and Monaco Editor on narrow aspect ratios.
+  - **Anti-CLS (Cumulative Layout Shift):** Stabilized the `FileTree` bottom action bar. It is now permanently mounted in the DOM, utilizing `opacity` and `pointer-events: none` to toggle visibility. This entirely eliminates vertical layout popping that previously caused target files to move out from under the user's cursor during selections.
+  - **Container Queries for Panes:** Wrapped the `FileTree` in a Tailwind `@container`. UI elements now conditionally hide text labels (e.g., `@[240px]:inline`) based on the pane's localized width rather than the global OS window viewport.
+- **Roadblocks Resolved:**
+  - Fixed a TypeScript interface mismatch where `setExportState` threw errors because it lacked the new `isEphemeralBuilding` and `ephemeralDragPaths` properties added to the Zustand store.
+- **Core Files Modified:**
+  - `src/store/workspaceStore.ts`, `src/types/ipc.d.ts`
+  - `main.cjs`, `preload.cjs`, `src/utils/exportEngine.ts`
+  - `src/components/tree/FileTree.tsx`, `src/components/tree/TreeNode.tsx`
+  - `src/components/layout/Sidebar.tsx`, `src/components/layout/TitleBar.tsx`
+
+---
+
 ## Archived Epochs
 
-- **Epoch 02 (Context Compression & Export Staging):** Integrated Monaco Editor for advanced context compression (skipping/ghosting blocks with drift-healing). Implemented the Export Engine with background batch chunking, native OS drag-and-drop, and transitioned the app to a Multi-Workspace IDE with a Dual-Store architecture and implicit auto-saving.
-- **Epoch 01 (Foundation & Architecture):** Established the Electron+React+Zustand+Tailwind v4 stack. Built the IPC bridge, implemented the recursive file scanner in Node.js, and constructed the Unified Tree UI with dynamic visual exclusion filtering using `ignore`.
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.
+- **Epoch 01 (Foundation & Architecture):** Established the core Vite + React + Electron + Zustand stack with Tailwind CSS v4. Enforced the "Stable Relative Path" architectural rule, binding all React keys and Zustand state maps strictly to file paths to permanently resolve UI selection drift. Bootstrapped the initial recursive file scanner and unified frameless Tree UI.
+- **Epoch 02 (Context Compression & Export Staging):** Integrated `@monaco-editor/react` for context compression with a read-only, auto-healing skip-block system bound to stable relative paths. Built a high-performance Export Engine leveraging Node.js recursive scanning (using directory-first `dirent` checks to bypass `try/catch` I/O spikes), a single mutable `Context` object for memory safety, and flattened chunk exports via native OS drag-and-drop. Transitioned the architecture to a Multi-Workspace IDE utilizing a Dual-Store setup (`AppStore` for global IDE state, single re-hydrating `WorkspaceStore` for the active project) with implicit auto-saving, responsive container queries, and a full-screen Workspace Browser overlay.

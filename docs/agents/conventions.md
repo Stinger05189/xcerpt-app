@@ -43,6 +43,9 @@
 - **Frameless Window (`frame: false`):** Apply `WebkitAppRegion: 'drag'` to the layout container. Apply `'no-drag'` ONLY to interactive leaf nodes (buttons/tabs) and use padding on the parent to expose the drag region.
 - **Native Drag-and-Drop:** Chat UI interfaces reject folder drops. `webContents.startDrag` must receive an array of absolute file paths representing a flattened chunk.
 - **Modal Overlays & Frameless Windows:** When implementing full-screen overlays (like the Workspace Browser), do not hide or unmount the `TitleBar`. Instead, apply `opacity-30 pointer-events-none` to the specific background UI containers, ensuring the right-aligned OS window controls (Minimize, Maximize, Close) remain accessible and functional at all times.
+- **Layout Stability (Anti-Popping):** UI elements that appear conditionally based on fast-firing interactions (like tree selections) must remain permanently mounted in the DOM. Use `opacity-0 pointer-events-none` to simulate removal. This prevents Cumulative Layout Shift (CLS) and keeps interactive targets stable under the cursor.
+- **Responsive Split Panes:** Standard viewport breakpoints (`sm`, `md`) are invalid for internal UI panes whose widths change dynamically. Use Tailwind container queries (`@container`, `@[240px]:inline`) to gracefully degrade or hide text labels inside resizable or narrow flex items.
+- **Global Hotkey Guards:** Any global keyboard listener (e.g., `Tab` to open sidebar, `A/S/D` for tree rules) must include a strict early return `if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA')` to prevent overriding standard typing behaviors.
 
 ## 5. Monaco Editor
 

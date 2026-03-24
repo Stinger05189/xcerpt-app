@@ -105,6 +105,10 @@ export function MainStage() {
             <div
               key={path}
               onClick={() => setActiveTab(path)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                window.api.showItemInFolder(path);
+              }}
               className={`group flex items-center gap-2 px-3 py-2 text-sm rounded-t-md border border-b-0 max-w-64 cursor-pointer transition-colors
                 ${activeTab === path 
                   ? 'bg-bg-base border-border-subtle text-text-primary' 

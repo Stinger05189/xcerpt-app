@@ -142,6 +142,40 @@ async function processExport(payload) {
 
   return chunkPaths;
 }
+
+async function processEphemeralExport(payload) {
+  const ephemeralDir = path.join(os.tmpdir(), `xcerpt_ephemeral_${Date.now()}`);
+  await fs.mkdir(ephemeralDir, { recursive: true });
+
+  const createdPaths = [];
+
+  // Write markdown tree
+  const treePath = path.join(ephemeralDir, 'ExportedFileTree.md');
+  await fs.writeFile(treePath, payload.treeMarkdown, 'utf-8');
+  createdPaths.push(treePath);
+
+  for (const file of payload.files) {
+    try {
+      const content = await fs.readFile(file.absolutePath, 'utf-8');
+      let lines = content.split('\n');
+      
+      const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
+      for (const comp of sortedComps) {
+        const skipCount = comp.endLine - comp.startLine + 1;
+        const marker = `// ... [Skipped ${skipCount} lines] ...`;
+        lines.splice(comp.startLine - 1, skipCount, marker);
+      }
+      
+      const outPath = path.join(ephemeralDir, file.flatFileName);
+      await fs.writeFile(outPath, lines.join('\n'), 'utf-8');
+      createdPaths.push(outPath);
+    } catch (err) {
+      console.error(`Error processing ephemeral file ${file.absolutePath}:`, err);
+    }
+  }
+
+  return createdPaths;
+}
 // --- End Export Engine Logic ---
 
 function createWindow() {
@@ -237,6 +271,11 @@ ipcMain.handle('fs:readFile', async (_, filePath) => {
 ipcMain.handle('fs:stageExport', async (_, payload) => {
   try { return await processExport(payload); }
   catch (error) { console.error('Error staging export:', error); throw error; }
+});
+
+ipcMain.handle('fs:stageEphemeralExport', async (_, payload) => {
+  try { return await processEphemeralExport(payload); }
+  catch (error) { console.error('Error staging ephemeral export:', error); throw error; }
 });
 
 ipcMain.handle('shell:openPath', async (_, targetPath) => {

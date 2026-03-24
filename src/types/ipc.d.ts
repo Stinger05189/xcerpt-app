@@ -39,6 +39,11 @@ export interface ExportPayload {
   treeMarkdown: string;
 }
 
+export interface EphemeralPayload {
+  files: ExportFile[];
+  treeMarkdown: string;
+}
+
 // --- Persistence Schemas ---
 export interface AppStatePayload {
   activeWorkspaceId: string | null;
@@ -86,6 +91,7 @@ export interface ElectronAPI {
 
   // Export & OS API
   stageExport: (payload: ExportPayload) => Promise<string[]>;
+  stageEphemeralExport: (payload: EphemeralPayload) => Promise<string[]>;
   startDrag: (filePaths: string[]) => void;
   openPath: (path: string) => Promise<string>;
   showItemInFolder: (path: string) => void;

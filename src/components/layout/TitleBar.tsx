@@ -1,9 +1,11 @@
 // src/components/layout/TitleBar.tsx
-import { Minus, Square, X, Plus, Home } from 'lucide-react';
+import { Minus, Square, X, Plus, Home, PanelLeft } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 export function TitleBar() {
   const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen } = useAppStore();
+  const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
 
   const handleMinimize = () => window.api.minimizeWindow();
   const handleMaximize = () => window.api.maximizeWindow();
@@ -18,9 +20,19 @@ export function TitleBar() {
       {/* Locked Container for Header Tools when Browser is Open */}
       <div className={`flex items-end h-full flex-1 overflow-x-hidden ${isBrowserOpen ? 'opacity-30 pointer-events-none' : ''}`}>
         
+        {/* Sidebar Toggle */}
+        <div 
+          className={`flex items-center h-full px-2 mb-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors ${isSidebarOpen ? 'text-accent' : ''}`}
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onClick={() => setSidebarOpen(!isSidebarOpen)}
+          title="Toggle Rules Sidebar"
+        >
+          <PanelLeft size={15} />
+        </div>
+        
         {/* Home / Browser Button */}
         <div 
-          className="flex items-center h-full px-3 mb-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors"
+          className="flex items-center h-full px-2 mb-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           onClick={() => setBrowserOpen(true)}
           title="Workspace Browser"
@@ -55,7 +67,6 @@ export function TitleBar() {
             );
           })}
           
-          {/* Add/Browse Workspace Button */}
           <button 
             onClick={() => setBrowserOpen(true)} 
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -67,29 +78,11 @@ export function TitleBar() {
         </div>
       </div>
     
-      {/* OS Window Controls (Never Locked) */}
+      {/* OS Window Controls */}
       <div className="flex h-full pb-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        <button 
-          onClick={handleMinimize} 
-          className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md"
-          title="Minimize"
-        >
-          <Minus size={14} />
-        </button>
-        <button 
-          onClick={handleMaximize} 
-          className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md"
-          title="Maximize"
-        >
-          <Square size={12} />
-        </button>
-        <button 
-          onClick={handleClose} 
-          className="px-3 hover:bg-red-500 hover:text-white text-text-muted transition-colors flex items-center justify-center rounded-md mr-1"
-          title="Close"
-        >
-          <X size={14} />
-        </button>
+        <button onClick={handleMinimize} className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md" title="Minimize"><Minus size={14} /></button>
+        <button onClick={handleMaximize} className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md" title="Maximize"><Square size={12} /></button>
+        <button onClick={handleClose} className="px-3 hover:bg-red-500 hover:text-white text-text-muted transition-colors flex items-center justify-center rounded-md mr-1" title="Close"><X size={14} /></button>
       </div>
       
     </div>

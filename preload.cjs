@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Export Engine & Native OS
   stageExport: (payload) => ipcRenderer.invoke('fs:stageExport', payload),
+  stageEphemeralExport: (payload) => ipcRenderer.invoke('fs:stageEphemeralExport', payload),
   startDrag: (filePaths) => ipcRenderer.send('drag:start', filePaths),
   openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
   showItemInFolder: (path) => ipcRenderer.send('shell:showItemInFolder', path),
