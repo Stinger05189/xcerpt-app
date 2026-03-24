@@ -1,6 +1,7 @@
 // src/components/layout/Sidebar.tsx
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
 import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock, RefreshCw, ChevronDown, Edit2, Trash2, Plus, RotateCcw, Check, Loader2, GripVertical, MousePointer } from 'lucide-react';
 import type { ExportHistory } from '../../types/ipc';
@@ -27,6 +28,8 @@ export function Sidebar() {
     activePresetId, presets, presetSnapshots, switchPreset, createPreset, renamePreset, deletePreset, revertPreset,
     setSelectedFiles, activeTab, rootPaths, rawTrees
   } = useWorkspaceStore();
+
+  const extensionOverrides = useAppStore(s => s.config.extensionOverrides);
 
   const [activeTabState, setActiveTabState] = useState<Tab>('RULES');
   const [newBlacklist, setNewBlacklist] = useState('');
@@ -125,7 +128,7 @@ export function Sidebar() {
     setHistoryStates(prev => ({ ...prev, [h.id]: { loading: true, paths: null } }));
     
     try {
-      const payload = generateEphemeralPayload(root, tree, new Set(h.files), compressions);
+      const payload = generateEphemeralPayload(root, tree, new Set(h.files), compressions, extensionOverrides);
       const paths = await window.api.stageEphemeralExport(payload);
       setHistoryStates(prev => ({ ...prev, [h.id]: { loading: false, paths } }));
     } catch (error) {

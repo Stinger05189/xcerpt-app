@@ -86,6 +86,22 @@
 
 ---
 
+### Session 013
+
+- **Focus Area:** Global Extension Overrides and Prompt Integrity (Phase 12).
+- **Key Decisions:**
+  - **Dictionary Management UI:** Built a dedicated CRUD interface inside the `SettingsModal` allowing users to define arbitrary file extension mappings (e.g., `.uproject` -> `.json`).
+  - **File Spoofing Engine:** Modified both the Ephemeral and Full Export engines to dynamically detect and physically rename files based on the global `extensionOverrides` config before they are written to the OS temp directory.
+  - **Truth in Prompting:** Adhered strictly to the Prompt Integrity architecture rule by automatically appending `(Exported as [NewFileName])` directly to the `ExportedFileTree.md` Markdown tree structure for any spoofed file, ensuring the LLM understands the original file type despite the bypass.
+- **Roadblocks Resolved:**
+  - Fixed a TypeScript argument mismatch where the `Sidebar.tsx` history package generation was calling the old `generateEphemeralPayload` signature lacking the new `extensionOverrides` argument.
+- **Core Files Modified:**
+  - `src/components/layout/SettingsModal.tsx`
+  - `src/utils/exportEngine.ts`
+  - `src/components/layout/MainStage.tsx`, `src/components/export/ExportStage.tsx`, `src/components/tree/FileTree.tsx`, `src/components/layout/Sidebar.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

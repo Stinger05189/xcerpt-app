@@ -1,17 +1,20 @@
 // src/components/layout/SettingsModal.tsx
 import { useEffect, useState } from 'react';
 import { useAppStore, DEFAULT_CONFIG } from '../../store/appStore';
-import { X, Palette, Type, RotateCcw } from 'lucide-react';
+import { X, Palette, Type, RotateCcw, FileCode, Plus, Trash2 } from 'lucide-react';
 
 export function SettingsModal() {
 const { config, updateConfig, setSettingsOpen } = useAppStore();
-  
+
   // 1. Store both the current local value AND the "previous" global config value
   const [localScale, setLocalScale] = useState(config.theme.scale);
   const [prevGlobalScale, setPrevGlobalScale] = useState(config.theme.scale);
-  
+
   const [localFontSize, setLocalFontSize] = useState(config.theme.font.size);
   const [prevGlobalFontSize, setPrevGlobalFontSize] = useState(config.theme.font.size);
+
+  const [newExtOriginal, setNewExtOriginal] = useState('');
+  const [newExtTarget, setNewExtTarget] = useState('');
 
   // 2. Update state directly during render if the global config changed externally
   if (config.theme.scale !== prevGlobalScale) {
@@ -43,6 +46,25 @@ const { config, updateConfig, setSettingsOpen } = useAppStore();
     if (confirm('Reset all settings to default values?')) {
       updateConfig(DEFAULT_CONFIG);
     }
+  };
+
+  const handleAddOverride = () => {
+    if (!newExtOriginal.trim() || !newExtTarget.trim()) return;
+    const normalize = (ext: string) => ext.startsWith('.') ? ext : `.${ext}`;
+    const orig = normalize(newExtOriginal.trim());
+    const target = normalize(newExtTarget.trim());
+    
+    updateConfig({
+      extensionOverrides: { ...config.extensionOverrides, [orig]: target }
+    });
+    setNewExtOriginal('');
+    setNewExtTarget('');
+  };
+
+  const handleRemoveOverride = (key: string) => {
+    const newOverrides = { ...config.extensionOverrides };
+    delete newOverrides[key];
+    updateConfig({ extensionOverrides: newOverrides });
   };
 
   return (
@@ -151,6 +173,68 @@ const { config, updateConfig, setSettingsOpen } = useAppStore();
                 placeholder="e.g. ui-monospace, SFMono-Regular..."
               />
             </div>
+          </div>
+        </section>
+        
+        {/* Extension Overrides */}
+        <section className="bg-bg-panel border border-border-subtle rounded-xl p-6 shadow-sm">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h2 className="text-sm uppercase font-semibold text-text-muted flex items-center gap-2 mb-1">
+                <FileCode size={16} className="text-orange-400" /> Extension Overrides
+              </h2>
+              <p className="text-xs text-text-muted">Map file extensions to bypass AI upload filters. The generated Markdown will explicitly state the original file type to maintain LLM context integrity.</p>
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input 
+                type="text" 
+                placeholder="Original (e.g. .uproject)"
+                value={newExtOriginal}
+                onChange={(e) => setNewExtOriginal(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddOverride()}
+                className="flex-1 bg-bg-base border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary font-mono outline-none focus:border-orange-400 transition-colors"
+              />
+              <span className="text-text-muted">→</span>
+              <input 
+                type="text" 
+                placeholder="Export As (e.g. .json)"
+                value={newExtTarget}
+                onChange={(e) => setNewExtTarget(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddOverride()}
+                className="flex-1 bg-bg-base border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary font-mono outline-none focus:border-orange-400 transition-colors"
+              />
+              <button 
+                onClick={handleAddOverride}
+                disabled={!newExtOriginal.trim() || !newExtTarget.trim()}
+                className="px-4 py-2 bg-orange-500/10 text-orange-400 border border-orange-500/30 hover:bg-orange-500/20 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Plus size={16} /> Add
+              </button>
+            </div>
+            
+            {Object.keys(config.extensionOverrides).length > 0 && (
+              <ul className="mt-4 border border-border-subtle rounded-lg overflow-hidden bg-bg-base divide-y divide-border-subtle">
+                {Object.entries(config.extensionOverrides).map(([orig, target]) => (
+                  <li key={orig} className="flex items-center justify-between px-3 py-2 group hover:bg-bg-hover transition-colors">
+                    <div className="flex items-center gap-3 font-mono text-sm">
+                      <span className="text-red-400">{orig}</span>
+                      <span className="text-text-muted text-xs">mapped to</span>
+                      <span className="text-green-400">{target}</span>
+                    </div>
+                    <button 
+                      onClick={() => handleRemoveOverride(orig)}
+                      className="p-1.5 text-text-muted hover:text-red-400 rounded-md opacity-0 group-hover:opacity-100 transition-all hover:bg-red-400/10"
+                      title="Remove Override"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
     

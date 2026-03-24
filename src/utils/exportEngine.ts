@@ -7,12 +7,13 @@ export function generateEphemeralPayload(
   rootPath: string,
   tree: FileNode,
   selectedFiles: Set<string>,
-  compressions: Record<string, CompressionRule[]>
+  compressions: Record<string, CompressionRule[]>,
+  extensionOverrides: Record<string, string>
 ) {
   const exportFiles: ExportFile[] = [];
   const rootName = rootPath.split(/[/\\]/).pop() || 'root';
 
-  let mdTree = `# Ephemeral Quick Export\n\n> **Note:** This is a partial export containing only explicitly selected files.\n\n## File Tree\n\`\`\`text\n`;
+  let mdTree = `# Ephemeral Quick Export\n\n> **Note:** This is a partial export containing only explicitly selected files.\n> (Exported as [filename]) : File extension was modified to bypass upload filters. Treat the file as its original type.\n\n## File Tree\n\`\`\`text\n`;
 
   const traverse = (node: FileNode, prefix: string, isLast: boolean, relativePath: string, isParentSelected: boolean): string => {
     const isDir = node.type === 'directory';
@@ -44,7 +45,17 @@ export function generateEphemeralPayload(
         result += `${prefix}${connector}${node.name}/\n`;
       } else {
         if (isSelected) {
-          const flatFileName = `${rootName}_${relativePath.replace(/[/\\]/g, '_')}`;
+          let flatFileName = `${rootName}_${relativePath.replace(/[/\\]/g, '_')}`;
+          let exportNote = "";
+        
+          for (const [orig, override] of Object.entries(extensionOverrides)) {
+            if (flatFileName.endsWith(orig)) {
+              flatFileName = flatFileName.slice(0, -orig.length) + override;
+              exportNote = ` (Exported as ${flatFileName})`;
+              break;
+            }
+          }
+        
           const fileComps = compressions[relativePath] || [];
         
           exportFiles.push({
@@ -56,7 +67,7 @@ export function generateEphemeralPayload(
         
           const compCount = fileComps.length;
           const compStr = compCount > 0 ? ` [${compCount} skips]` : "";
-          result += `${prefix}${connector}${node.name}${compStr}\n`;
+          result += `${prefix}${connector}${node.name}${compStr}${exportNote}\n`;
         }
       }
     }
@@ -95,7 +106,8 @@ export function generateExportPayload(
   excludes: string[],
   treeOnly: string[],
   compressions: Record<string, CompressionRule[]>,
-  maxFilesPerChunk: number
+  maxFilesPerChunk: number,
+  extensionOverrides: Record<string, string>
 ): ExportPayload {
   const exportFiles: ExportFile[] = [];
 
@@ -105,6 +117,7 @@ export function generateExportPayload(
 > **Legend:**
 > \`[-]\` : File is visible in the tree for structural context, but its contents were not exported.
 > \`[X skips]\` : File was exported, but X sections of code were removed to save context.
+> \`(Exported as [filename])\` : File extension was modified to bypass upload filters. Treat the file as its original type.
 
 ## File Tree
 \`\`\`text
@@ -169,7 +182,17 @@ export function generateExportPayload(
           if (status === 'tree-only') {
             result += `${prefix}${connector}${collapsedName} [-]\n`;
           } else {
-            const flatFileName = `${rootName}_${currRelative.replace(/[/\\]/g, '_')}`;
+            let flatFileName = `${rootName}_${currRelative.replace(/[/\\]/g, '_')}`;
+            let exportNote = "";
+            
+            for (const [orig, override] of Object.entries(extensionOverrides)) {
+              if (flatFileName.endsWith(orig)) {
+                flatFileName = flatFileName.slice(0, -orig.length) + override;
+                exportNote = ` (Exported as ${flatFileName})`;
+                break;
+              }
+            }
+            
             const fileComps = compressions[currRelative] || [];
             
             exportFiles.push({
@@ -182,8 +205,7 @@ export function generateExportPayload(
             const compCount = fileComps.length;
             const compStr = compCount > 0 ? ` [${compCount} skips]` : "";
             
-            // We removed the highly verbose (Exported as flatFileName) 
-            result += `${prefix}${connector}${collapsedName}${compStr}\n`;
+            result += `${prefix}${connector}${collapsedName}${compStr}${exportNote}\n`;
           }
         }
       }

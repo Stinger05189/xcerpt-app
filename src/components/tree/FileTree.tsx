@@ -70,7 +70,7 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
     setHasLoggedDrag(false); // Reset logging flag for the new payload
     
     try {
-      const payload = generateEphemeralPayload(rootPath, node, selectedFiles, compressions);
+      const payload = generateEphemeralPayload(rootPath, node, selectedFiles, compressions, config.extensionOverrides);
       const paths = await window.api.stageEphemeralExport(payload);
       setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
     } catch (e) {

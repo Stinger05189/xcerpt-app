@@ -1,6 +1,7 @@
 // src/components/export/ExportStage.tsx
 import { useMemo } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useAppStore } from '../../store/appStore';
 import { generateExportPayload } from '../../utils/exportEngine';
 import { PackageOpen, Settings2, FileText, Database, Layers, Check, Infinity as InfinityIcon, ExternalLink } from 'lucide-react';
 
@@ -17,12 +18,14 @@ export function ExportStage() {
     chunkPaths 
   } = useWorkspaceStore();
 
+  const extensionOverrides = useAppStore(s => s.config.extensionOverrides);
+
   const isUnlimited = maxFilesPerChunk >= 100000;
 
   // Compute the payload purely for UI rendering so the user sees exactly what the LLM sees
   const payload = useMemo(() => {
-    return generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk);
-  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk]);
+    return generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides);
+  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides]);
 
   const totalFiles = payload.chunks.reduce((acc, c) => acc + c.files.length, 0);
   const filesWithCompressions = payload.chunks.flatMap(c => c.files).filter(f => f.compressions.length > 0).length;

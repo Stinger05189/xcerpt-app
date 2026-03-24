@@ -1,6 +1,7 @@
 // src/components/layout/MainStage.tsx
 import { useEffect, useState } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useAppStore } from '../../store/appStore';
 import { generateExportPayload } from '../../utils/exportEngine';
 import { FileTree } from '../tree/FileTree';
 import { ContextEditor } from '../editor/ContextEditor';
@@ -30,6 +31,8 @@ export function MainStage() {
   } = useWorkspaceStore();
 
   const [activePayload, setActivePayload] = useState<ReturnType<typeof generateExportPayload> | null>(null);
+
+  const extensionOverrides = useAppStore(s => s.config.extensionOverrides);
 
   const handleAddRoot = async () => {
     const path = await window.api.selectDirectory();
@@ -75,7 +78,7 @@ export function MainStage() {
     const timer = setTimeout(async () => {
       setExportState({ isBuilding: true });
       try {
-        const payload = generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk);
+        const payload = generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides);
         setActivePayload(payload);
         
         if (payload.chunks.length > 0 && payload.chunks[0].files.length > 0) {
@@ -91,7 +94,7 @@ export function MainStage() {
     }, 1500);
     
     return () => clearTimeout(timer);
-  }, [isStale, rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, setExportState]);
+  }, [isStale, rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, setExportState]);
 
   const activeTree = activeTab ? rawTrees[activeTab] : null;
   const hasFiles = chunkPaths.length > 0;

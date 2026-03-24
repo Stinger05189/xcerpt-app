@@ -21,14 +21,16 @@ _Context: Phase 11 (Global Config & Theming) is complete. We are now completing 
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Extension Overrides UI & State**
+- [x] **Task 1: Extension Overrides UI & State**
   - _Details:_ Build a dictionary management interface inside the `SettingsModal` to allow users to add, edit, and delete extension mappings (saved to `AppStore.config.extensionOverrides`).
-- [ ] **Task 2: Export Engine Integration**
+- [x] **Task 2: Export Engine Integration**
   - _Details:_ Modify `exportEngine.ts` (for both Ephemeral and Full Workspaces) to dynamically intercept and rename files matching these extensions during the flattening process before they are written to disk.
-- [ ] **Task 3: Prompt Integrity Mapping**
+- [x] **Task 3: Prompt Integrity Mapping**
   - _Details:_ Update the `ExportedFileTree.md` generation logic to strictly adhere to the "Truth in Prompting" architecture rule. Renamed files must explicitly annotate the structural spoofing (e.g., `MyGame.uproject (Exported as MyGame.json)`).
 
 ## Pending Queue (Upcoming)
 
 - [ ] **Task 4: Epoch 3 Review & Stabilization**
   - _Details:_ Final UI polish, bug hunting, and ensuring all workflows established in Epoch 3 (Ephemeral Exports, Presets, History, Theming, Overrides) function seamlessly together.
+- [ ] **Task 5: Epoch Archiving**
+  - _Details:_ Summarize Epoch 3 sessions into an archive paragraph and prepare the roadmap for Epoch 4 (or v1.0 Launch Prep).
