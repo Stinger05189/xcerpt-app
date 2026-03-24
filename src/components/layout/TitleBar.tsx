@@ -1,10 +1,10 @@
 // src/components/layout/TitleBar.tsx
-import { Minus, Square, X, Plus, Home, PanelLeft } from 'lucide-react';
+import { Minus, Square, X, Plus, Home, PanelLeft, Settings } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
 export function TitleBar() {
-  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen } = useAppStore();
+  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
 
   const handleMinimize = () => window.api.minimizeWindow();
@@ -17,8 +17,9 @@ export function TitleBar() {
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       
-      {/* Locked Container for Header Tools when Browser is Open */}
-      <div className={`flex items-end h-full flex-1 overflow-x-hidden ${isBrowserOpen ? 'opacity-30 pointer-events-none' : ''}`}>
+      {/* <div className={`flex items-end h-full flex-1 overflow-x-hidden ${isBrowserOpen ? 'opacity-30 pointer-events-none' : ''}`}> */}
+      {/* Locked Container for Header Tools when Overlays are Open */}
+      <div className={`flex items-end h-full flex-1 overflow-x-hidden ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
         
         {/* Sidebar Toggle */}
         <div 
@@ -32,12 +33,22 @@ export function TitleBar() {
         
         {/* Home / Browser Button */}
         <div 
-          className="flex items-center h-full px-2 mb-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors"
+          className={`flex items-center h-full px-2 mb-1 rounded-md cursor-pointer transition-colors ${isBrowserOpen ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          onClick={() => setBrowserOpen(true)}
+          onClick={() => setBrowserOpen(!isBrowserOpen)}
           title="Workspace Browser"
         >
-          <Home size={15} className="text-accent" />
+          <Home size={15} />
+        </div>
+        
+        {/* Global Settings Toggle */}
+        <div 
+          className={`flex items-center h-full px-2 mb-1 rounded-md cursor-pointer transition-colors ${isSettingsOpen ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onClick={() => setSettingsOpen(!isSettingsOpen)}
+          title="Global Settings"
+        >
+          <Settings size={15} />
         </div>
         
         <div className="w-px h-5 bg-border-subtle mx-2 mb-2 pointer-events-none" />

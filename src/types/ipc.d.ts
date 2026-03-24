@@ -44,6 +44,28 @@ export interface EphemeralPayload {
   treeMarkdown: string;
 }
 
+// --- App Config Schema ---
+export interface AppConfig {
+  theme: {
+    scale: number;
+    font: {
+      size: number;
+      family: string;
+    };
+    colors: {
+      bgBase: string;
+      bgPanel: string;
+      bgHover: string;
+      textPrimary: string;
+      textMuted: string;
+      borderSubtle: string;
+      accent: string;
+    };
+  };
+  shortcuts: Record<string, string>;
+  extensionOverrides: Record<string, string>;
+}
+
 // --- Persistence Schemas ---
 export interface AppStatePayload {
   activeWorkspaceId: string | null;
@@ -105,6 +127,7 @@ export interface ElectronAPI {
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
+  setZoomFactor: (factor: number) => void;
 
   // Export & OS API
   stageExport: (payload: ExportPayload) => Promise<string[]>;
@@ -114,6 +137,8 @@ export interface ElectronAPI {
   showItemInFolder: (path: string) => void;
 
   // Persistence API
+  loadAppConfig: () => Promise<AppConfig | null>;
+  saveAppConfig: (config: AppConfig) => Promise<void>;
   loadAppState: () => Promise<AppStatePayload | null>;
   saveAppState: (payload: AppStatePayload) => Promise<void>;
   loadSession: (id: string) => Promise<WorkspacePayload | null>;

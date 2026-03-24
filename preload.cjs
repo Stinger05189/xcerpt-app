@@ -1,5 +1,5 @@
 // preload.cjs
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   ping: () => ipcRenderer.invoke('ping'),
@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
+  setZoomFactor: (factor) => webFrame.setZoomFactor(factor),
 
   // Export Engine & Native OS
   stageExport: (payload) => ipcRenderer.invoke('fs:stageExport', payload),
@@ -20,6 +21,8 @@ contextBridge.exposeInMainWorld('api', {
   showItemInFolder: (path) => ipcRenderer.send('shell:showItemInFolder', path),
 
   // Persistence API
+  loadAppConfig: () => ipcRenderer.invoke('app:loadConfig'),
+  saveAppConfig: (config) => ipcRenderer.invoke('app:saveConfig', config),
   loadAppState: () => ipcRenderer.invoke('app:loadState'),
   saveAppState: (payload) => ipcRenderer.invoke('app:saveState', payload),
   loadSession: (id) => ipcRenderer.invoke('workspace:loadSession', id),

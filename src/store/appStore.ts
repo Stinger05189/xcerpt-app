@@ -1,16 +1,45 @@
 // src/store/appStore.ts
 import { create } from 'zustand';
+import type { AppConfig } from '../types/ipc';
 
 export interface TabData {
   id: string;
   title: string;
 }
 
+export const DEFAULT_CONFIG: AppConfig = {
+  theme: {
+    scale: 1.0,
+    font: {
+      size: 13,
+      family: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+    },
+    colors: {
+      bgBase: '#0f0f11',
+      bgPanel: '#18181b',
+      bgHover: '#27272a',
+      textPrimary: '#f4f4f5',
+      textMuted: '#a1a1aa',
+      borderSubtle: '#27272a',
+      accent: '#8b5cf6'
+    }
+  },
+  shortcuts: {},
+  extensionOverrides: {}
+};
+
 interface AppState {
+  config: AppConfig;
+  isSettingsOpen: boolean;
+
   activeWorkspaceId: string | null;
   openTabs: TabData[];
   isBrowserOpen: boolean;
   workspaceSnapshots: Record<string, Record<string, import('../types/ipc').Preset>>;
+
+  loadConfig: () => Promise<void>;
+  updateConfig: (newConfig: Partial<AppConfig> | ((prev: AppConfig) => AppConfig)) => void;
+  setSettingsOpen: (isOpen: boolean) => void;
 
   setActiveWorkspace: (id: string | null) => void;
   addWorkspaceTab: (id: string, title?: string) => void;
@@ -24,10 +53,31 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
+  config: DEFAULT_CONFIG,
+  isSettingsOpen: false,
+
   activeWorkspaceId: null,
   openTabs: [],
   isBrowserOpen: false,
   workspaceSnapshots: {},
+
+  loadConfig: async () => {
+    const loaded = await window.api.loadAppConfig();
+    if (loaded) {
+      // Deep merge to ensure missing keys from legacy configs are populated with defaults
+      set({ config: { ...DEFAULT_CONFIG, ...loaded, theme: { ...DEFAULT_CONFIG.theme, ...loaded.theme, colors: { ...DEFAULT_CONFIG.theme.colors, ...(loaded.theme?.colors || {}) } } } });
+    }
+  },
+
+  updateConfig: (updater) => {
+    set((state) => {
+      const nextConfig = typeof updater === 'function' ? updater(state.config) : { ...state.config, ...updater };
+      window.api.saveAppConfig(nextConfig);
+      return { config: nextConfig };
+    });
+  },
+
+  setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
 
   setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
 

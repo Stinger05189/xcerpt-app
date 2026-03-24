@@ -294,6 +294,17 @@ ipcMain.on('drag:start', (e, filePaths) => {
 });
 
 // --- Persistence IPC Handlers ---
+ipcMain.handle('app:loadConfig', async () => {
+  try {
+    const data = await fs.readFile(path.join(SESSIONS_DIR, 'config.json'), 'utf-8');
+    return JSON.parse(data);
+  } catch (e) { return null; }
+});
+
+ipcMain.handle('app:saveConfig', async (_, payload) => {
+  await fs.writeFile(path.join(SESSIONS_DIR, 'config.json'), JSON.stringify(payload, null, 2), 'utf-8');
+});
+
 ipcMain.handle('app:loadState', async () => {
   try {
     const data = await fs.readFile(path.join(SESSIONS_DIR, 'app.json'), 'utf-8');

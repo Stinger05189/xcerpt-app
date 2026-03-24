@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useAppStore } from '../../store/appStore';
 import { FileCode2, Undo2, Trash2, Eye, Code2 } from 'lucide-react';
 
 type MonacoEditor = Parameters<OnMount>[0];
@@ -20,6 +21,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const editorRef = useRef<MonacoEditor | null>(null);
   const decorationsCollectionRef = useRef<EditorDecorationsCollection | null>(null);
   const monaco = useMonaco();
+  const config = useAppStore(s => s.config);
 
   const { 
     addCompressions, 
@@ -260,6 +262,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
           value={isPreviewMode ? previewContent : content}
           onMount={handleEditorMount}
           options={{
+            fontSize: config.theme.font.size,
             readOnly: true, // App operates assuming external edits only
             minimap: { enabled: true, scale: 0.75, renderCharacters: false },
             glyphMargin: !isPreviewMode,

@@ -16,19 +16,19 @@
 
 ## Current Macro-Objective
 
-**Epoch 3, Phase 11: Global Application Configuration & Theming**
-_Context: Phase 10 (Presets & History) is complete. We are now shifting to application-wide configuration. We need to introduce a workspace-agnostic `config.json` schema to manage dynamic CSS variable injection for real-time scale, font, and color updates._
+**Epoch 3, Phase 12: Extension Overrides**
+_Context: Phase 11 (Global Config & Theming) is complete. We are now completing the final feature of Epoch 3: enabling users to define global extension mappings (e.g., `.uproject` -> `.json`) to bypass arbitrary AI chat upload filters, while ensuring the LLM is explicitly informed of the spoofing in the prompt payload._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: AppConfig Schema & Persistence**
-  - _Details:_ Create a new `config.json` schema managed by the Node.js main process. Wire this into the `AppStore` alongside the `AppState` so global settings persist entirely independent of individual workspaces.
-- [ ] **Task 2: Global Settings UI Modal**
-  - _Details:_ Build a centralized Settings modal accessible from the TitleBar or Sidebar. Include controls for Background colors, Foreground/Text colors, Accent colors, Selection states, and global keyboard shortcuts.
-- [ ] **Task 3: Dynamic CSS Variable Injection**
-  - _Details:_ Implement a Theme Engine (likely a `useEffect` hook near the root) that reacts to `AppStore` config changes and maps the settings to `--color-*` CSS variables at the `:root` level for instant, reload-free theming.
+- [ ] **Task 1: Extension Overrides UI & State**
+  - _Details:_ Build a dictionary management interface inside the `SettingsModal` to allow users to add, edit, and delete extension mappings (saved to `AppStore.config.extensionOverrides`).
+- [ ] **Task 2: Export Engine Integration**
+  - _Details:_ Modify `exportEngine.ts` (for both Ephemeral and Full Workspaces) to dynamically intercept and rename files matching these extensions during the flattening process before they are written to disk.
+- [ ] **Task 3: Prompt Integrity Mapping**
+  - _Details:_ Update the `ExportedFileTree.md` generation logic to strictly adhere to the "Truth in Prompting" architecture rule. Renamed files must explicitly annotate the structural spoofing (e.g., `MyGame.uproject (Exported as MyGame.json)`).
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 4: Extension Overrides (Phase 12)**
-  - _Details:_ Build a UI to define extension mappings (e.g., `.uproject` -> `.json`). Integrate this into the export engine and ensure `ExportedFileTree.md` explicitly annotates the renames.
+- [ ] **Task 4: Epoch 3 Review & Stabilization**
+  - _Details:_ Final UI polish, bug hunting, and ensuring all workflows established in Epoch 3 (Ephemeral Exports, Presets, History, Theming, Overrides) function seamlessly together.

@@ -3,6 +3,7 @@ import { useState, useMemo, useEffect } from 'react';
 import type { FileNode } from '../../types/ipc';
 import { TreeNode } from './TreeNode';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
 import { Search, Plus, LayoutTemplate, EyeOff, X, Zap, Loader2, GripVertical } from 'lucide-react';
 
@@ -15,6 +16,8 @@ interface FileTreeProps {
 export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [hasLoggedDrag, setHasLoggedDrag] = useState(false);
+
+  const config = useAppStore(s => s.config);
 
   const { 
     selectedFiles, setSelectedFiles, stopPainting, applyRuleToSelection, 
@@ -138,7 +141,8 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
     
       {/* Scrollable Tree Container */}
       <div 
-        className={`flex-1 overflow-y-auto font-mono text-[13px] text-text-primary relative pb-4 ${isPainting ? 'is-painting' : ''}`}
+        className={`flex-1 overflow-y-auto font-mono text-text-primary relative pb-4 ${isPainting ? 'is-painting' : ''}`}
+        style={{ fontSize: config.theme.font.size }}
         onMouseUp={stopPainting}
         onMouseLeave={stopPainting}
         onClick={(e) => {

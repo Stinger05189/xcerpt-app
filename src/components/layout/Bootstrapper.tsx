@@ -70,6 +70,7 @@ export function Bootstrapper({ children }: { children: React.ReactNode }) {
     initRef.current = true;
     
     async function init() {
+      await useAppStore.getState().loadConfig();
       const appState = await window.api.loadAppState();
       const store = useAppStore.getState();
       

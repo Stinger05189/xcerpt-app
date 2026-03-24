@@ -69,6 +69,23 @@
 
 ---
 
+### Session 012
+
+- **Focus Area:** Global Application Configuration & Theming (Phase 11).
+- **Key Decisions:**
+  - **AppConfig Schema:** Implemented a workspace-agnostic `config.json` schema managed by the Node.js main process and integrated into the global `AppStore`.
+  - **Dynamic Theme Engine:** Leveraged Tailwind v4's native CSS variable support by injecting `--theme-*` variables directly onto `document.documentElement.style` inside `App.tsx`. This allows real-time, hardware-accelerated color updates without React re-renders.
+  - **Granular Font Scaling:** Abandoned overriding font size on the global `body` tag to protect Tailwind's `rem`-based spacing cascade. Dynamic font sizes are now explicitly passed to the `Monaco Editor` (via `options.fontSize`) and the `FileTree` (via inline style).
+  - **Settings Modal Integration:** Built the `SettingsModal` as a full-screen overlay, reusing the `opacity-30 pointer-events-none` trick on the underlying layout to ensure TitleBar OS window controls remain functional.
+- **Roadblocks Resolved:**
+  - **Slider Cursor Drift:** When the UI `zoom` property was tied directly to the global store, dragging the slider scaled the DOM instantly, causing the slider handle to move away from the user's cursor. Fixed by decoupling the visual `<input type="range">` using local `useState` and only committing to the global `AppStore` on `onMouseUp`/`onTouchEnd`/`onKeyUp`.
+- **Core Files Modified:**
+  - `src/types/ipc.d.ts`, `main.cjs`, `preload.cjs`, `src/store/appStore.ts`
+  - `src/App.tsx`, `src/index.css`, `src/components/layout/SettingsModal.tsx`
+  - `src/components/layout/TitleBar.tsx`, `src/components/editor/ContextEditor.tsx`, `src/components/tree/FileTree.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.
