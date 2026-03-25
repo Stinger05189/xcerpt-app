@@ -147,6 +147,10 @@ export interface ElectronAPI {
   renameWorkspace: (id: string, newName: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
 
+  // Auto-Updater
+  onUpdateStatus: (callback: (status: 'update-available' | 'update-downloaded') => void) => () => void;
+  installUpdate: () => Promise<void>;
+
   // Event Listeners
   onFileChange: (callback: (event: 'add' | 'change' | 'unlink', path: string) => void) => () => void;
 }

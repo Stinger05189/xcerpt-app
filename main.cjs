@@ -9,6 +9,7 @@ const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('ele
 const chokidar = require('chokidar');
 const { performance, monitorEventLoopDelay } = require('perf_hooks');
 const fsSync = require('fs'); // Added for Synchronous testing
+const { autoUpdater } = require('electron-updater');
 
 // Start monitoring the event loop for lag
 const elMonitor = monitorEventLoopDelay({ resolution: 10 });
@@ -258,10 +259,11 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      devTools: !app.isPackaged,
     },
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
@@ -275,6 +277,11 @@ app.whenReady().then(async () => {
   cleanupOldExports().catch(() => {});
 
   createWindow();
+
+  // Initialize Background Auto-Updater
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -300,6 +307,19 @@ ipcMain.handle('dialog:selectDirectory', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   if (result.canceled) return null;
   return result.filePaths[0];
+});
+
+// --- Auto-Updater IPC Handlers ---
+autoUpdater.on('update-available', () => {
+  if (mainWindow) mainWindow.webContents.send('updater:status', 'update-available');
+});
+
+autoUpdater.on('update-downloaded', () => {
+  if (mainWindow) mainWindow.webContents.send('updater:status', 'update-downloaded');
+});
+
+ipcMain.handle('updater:install', () => {
+  autoUpdater.quitAndInstall(false, true);
 });
 
 ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist) => {

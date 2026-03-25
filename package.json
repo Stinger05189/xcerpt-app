@@ -1,19 +1,68 @@
 {
   "name": "xcerpt-app",
-  "private": true,
-  "version": "0.0.0",
+  "private": false,
+  "version": "1.0.0",
+  "description": "A premium, desktop-based Context Staging Environment for AI models.",
+  "author": "Stinger05189",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Stinger05189/xcerpt-app.git"
+  },
   "main": "main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "dist": "npm run build && electron-builder",
+    "pack": "npm run build && electron-builder --dir",
     "lint": "eslint .",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.xcerpt.app",
+    "productName": "Xcerpt",
+    "directories": {
+      "output": "release/",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Stinger05189",
+        "repo": "xcerpt-app"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png"
+    }
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@tanstack/react-virtual": "^3.13.23",
     "chokidar": "^5.0.0",
+    "electron-updater": "^6.8.3",
     "ignore": "^7.0.5",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
@@ -29,6 +78,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "electron": "^41.0.3",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

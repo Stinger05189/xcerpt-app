@@ -31,6 +31,14 @@ contextBridge.exposeInMainWorld('api', {
   renameWorkspace: (id, newName) => ipcRenderer.invoke('workspace:rename', id, newName),
   deleteWorkspace: (id) => ipcRenderer.invoke('workspace:delete', id),
 
+  // Auto-Updater
+  onUpdateStatus: (callback) => {
+    const handler = (_, status) => callback(status);
+    ipcRenderer.on('updater:status', handler);
+    return () => ipcRenderer.removeListener('updater:status', handler);
+  },
+  installUpdate: () => ipcRenderer.invoke('updater:install'),
+
   // Listeners
   onFileChange: (callback) => {
     const handler = (_, eventType, path) => callback(eventType, path);

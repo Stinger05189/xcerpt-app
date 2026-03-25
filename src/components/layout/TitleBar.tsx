@@ -1,11 +1,22 @@
 // src/components/layout/TitleBar.tsx
-import { Minus, Square, X, Plus, Home, PanelLeft, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
 export function TitleBar() {
   const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
+
+  const [updateStatus, setUpdateStatus] = useState<'none' | 'update-available' | 'update-downloaded'>('none');
+
+  useEffect(() => {
+    if (!window.api?.onUpdateStatus) return;
+    const cleanup = window.api.onUpdateStatus((status) => {
+      setUpdateStatus(status);
+    });
+    return cleanup;
+  }, []);
 
   const handleMinimize = () => window.api.minimizeWindow();
   const handleMaximize = () => window.api.maximizeWindow();
@@ -31,14 +42,14 @@ export function TitleBar() {
           <PanelLeft size={15} />
         </div>
         
-        {/* Home / Browser Button */}
+        {/* Xcerpt Logo / Browser Button */}
         <div 
-          className={`flex items-center h-full px-2 mb-1 rounded-md cursor-pointer transition-colors ${isBrowserOpen ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
+          className={`flex items-center h-full px-2 mb-1 rounded-md cursor-pointer transition-all ${isBrowserOpen ? 'opacity-100 scale-105' : 'opacity-70 hover:opacity-100 hover:bg-bg-hover'}`}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           onClick={() => setBrowserOpen(!isBrowserOpen)}
           title="Workspace Browser"
         >
-          <Home size={15} />
+          <img src="/icon.svg" alt="Xcerpt" className="w-4 h-4" />
         </div>
         
         {/* Global Settings Toggle */}
@@ -89,11 +100,20 @@ export function TitleBar() {
         </div>
       </div>
     
-      {/* OS Window Controls */}
-      <div className="flex h-full pb-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        <button onClick={handleMinimize} className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md" title="Minimize"><Minus size={14} /></button>
-        <button onClick={handleMaximize} className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md" title="Maximize"><Square size={12} /></button>
-        <button onClick={handleClose} className="px-3 hover:bg-red-500 hover:text-white text-text-muted transition-colors flex items-center justify-center rounded-md mr-1" title="Close"><X size={14} /></button>
+      {/* OS Window Controls & Updater */}
+      <div className="flex h-full pb-1 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        {updateStatus === 'update-downloaded' && (
+          <button 
+            onClick={() => window.api.installUpdate()}
+            className="flex items-center gap-1.5 px-2.5 py-1 mr-2 bg-accent/20 text-accent hover:bg-accent hover:text-white rounded-full text-[10px] font-semibold transition-colors animate-in fade-in zoom-in"
+            title="Update downloaded. Click to restart and install."
+          >
+            <DownloadCloud size={12} /> Update Ready
+          </button>
+        )}
+        <button onClick={handleMinimize} className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md h-full" title="Minimize"><Minus size={14} /></button>
+        <button onClick={handleMaximize} className="px-3 hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors flex items-center justify-center rounded-md h-full" title="Maximize"><Square size={12} /></button>
+        <button onClick={handleClose} className="px-3 hover:bg-red-500 hover:text-white text-text-muted transition-colors flex items-center justify-center rounded-md h-full mr-1" title="Close"><X size={14} /></button>
       </div>
       
     </div>
