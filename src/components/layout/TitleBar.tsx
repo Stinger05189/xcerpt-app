@@ -49,7 +49,7 @@ export function TitleBar() {
           onClick={() => setBrowserOpen(!isBrowserOpen)}
           title="Workspace Browser"
         >
-          <img src="/icon.svg" alt="Xcerpt" className="w-4 h-4" />
+          <img src="./icon.svg" alt="Xcerpt" className="w-4 h-4" />
         </div>
         
         {/* Global Settings Toggle */}

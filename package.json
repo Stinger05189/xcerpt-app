@@ -1,7 +1,7 @@
 {
   "name": "xcerpt-app",
   "private": false,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A premium, desktop-based Context Staging Environment for AI models.",
   "author": "Stinger05189",
   "license": "MIT",
