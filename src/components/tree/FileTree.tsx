@@ -19,63 +19,88 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
 
   const config = useAppStore(s => s.config);
 
-  const { 
-    selectedFiles, setSelectedFiles, stopPainting, applyRuleToSelection, 
-    compressions, isEphemeralBuilding, ephemeralDragPaths, setExportState,
-    addHistoryEntry
-  } = useWorkspaceStore();
-
+  // Subscribe only to primitives/booleans to prevent tree re-rendering
   const isPainting = useWorkspaceStore(s => s.isPainting);
-  const hasSelection = selectedFiles.size > 0;
+  const isEphemeralBuilding = useWorkspaceStore(s => s.isEphemeralBuilding);
+  const ephemeralDragPaths = useWorkspaceStore(s => s.ephemeralDragPaths);
 
-  const selectionStats = useMemo(() => {
-    let fileCount = 0;
-    let totalBytes = 0;
+  // Local state to break the React render lock during marquee painting
+  const [stats, setStats] = useState({ fileCount: 0, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 });
+  const [hasSelection, setHasSelection] = useState(false);
+
+  // Deferred Calculation Engine
+  useEffect(() => {
+    const calculateStats = (rootNode: FileNode, selFiles: Set<string>) => {
+      let fileCount = 0;
+      let totalBytes = 0;
     
-    if (selectedFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 };
+      if (selFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 };
     
-    const traverse = (n: FileNode, currentRelative: string, isParentSelected: boolean) => {
-      const isDir = n.type === 'directory';
-      const pattern = isDir ? (currentRelative ? `${currentRelative}/` : '') : currentRelative;
-      const isSelected = selectedFiles.has(pattern) || isParentSelected;
+      const traverse = (n: FileNode, currentRelative: string, isParentSelected: boolean) => {
+        const isDir = n.type === 'directory';
+        const pattern = isDir ? (currentRelative ? `${currentRelative}/` : '') : currentRelative;
+        const isSelected = selFiles.has(pattern) || isParentSelected;
+        
+        if (!isDir && isSelected) {
+          fileCount++;
+          totalBytes += n.size;
+        }
+        
+        if (n.children) {
+          n.children.forEach(child => {
+            const childRelative = currentRelative ? `${currentRelative}/${child.name}` : child.name;
+            traverse(child, childRelative, isSelected);
+          });
+        }
+      };
     
-      if (!isDir && isSelected) {
-        fileCount++;
-        totalBytes += n.size;
-      }
+      traverse(rootNode, '', false);
+      const rawTokens = Math.round(totalBytes / 4);
     
-      if (n.children) {
-        n.children.forEach(child => {
-          const childRelative = currentRelative ? `${currentRelative}/${child.name}` : child.name;
-          traverse(child, childRelative, isSelected);
-        });
-      }
+      return {
+        fileCount,
+        kb: (totalBytes / 1024).toFixed(1),
+        tokens: rawTokens.toLocaleString(),
+        rawBytes: totalBytes,
+        rawTokens: rawTokens
+      };
     };
     
-    traverse(node, '', false);
+    const unsub = useWorkspaceStore.subscribe((state, prevState) => {
+      const selectionChanged = state.selectedFiles !== prevState.selectedFiles;
+      const justStoppedPainting = prevState.isPainting && !state.isPainting;
     
-    const rawTokens = Math.round(totalBytes / 4);
+      if (selectionChanged) {
+        setHasSelection(state.selectedFiles.size > 0);
+      }
     
-    return {
-      fileCount,
-      kb: (totalBytes / 1024).toFixed(1),
-      tokens: rawTokens.toLocaleString(),
-      rawBytes: totalBytes,
-      rawTokens: rawTokens
-    };
-  }, [node, selectedFiles]);
+      // ONLY run the heavy O(N) calculation if we are NOT actively painting
+      // This ensures 60fps marquee selections without blocking the UI thread
+      if (!state.isPainting && (selectionChanged || justStoppedPainting)) {
+        setStats(calculateStats(node, state.selectedFiles));
+      }
+    });
+    
+    // Initial calc on mount
+    const initialStore = useWorkspaceStore.getState();
+    setHasSelection(initialStore.selectedFiles.size > 0);
+    setStats(calculateStats(node, initialStore.selectedFiles));
+    
+    return unsub;
+  }, [node]);
 
   const handleStageEphemeral = async () => {
-    setExportState({ isEphemeralBuilding: true, ephemeralDragPaths: null });
-    setHasLoggedDrag(false); // Reset logging flag for the new payload
+    const state = useWorkspaceStore.getState();
+    state.setExportState({ isEphemeralBuilding: true, ephemeralDragPaths: null });
+    setHasLoggedDrag(false); 
     
     try {
-      const payload = generateEphemeralPayload(rootPath, node, selectedFiles, compressions, config.extensionOverrides);
+      const payload = generateEphemeralPayload(rootPath, node, state.selectedFiles, state.compressions, config.extensionOverrides);
       const paths = await window.api.stageEphemeralExport(payload);
-      setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
+      state.setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
     } catch (e) {
       console.error('Failed to generate ephemeral payload', e);
-      setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: null });
+      state.setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: null });
     }
   };
 
@@ -112,18 +137,20 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
-      if (selectedFiles.size === 0) return;
+      const state = useWorkspaceStore.getState();
+      
+      if (state.selectedFiles.size === 0) return;
     
       switch(e.key.toLowerCase()) {
-        case 'a': applyRuleToSelection('include'); break;
-        case 's': applyRuleToSelection('tree-only'); break;
-        case 'd': applyRuleToSelection('exclude'); break;
-        case 'escape': setSelectedFiles(new Set()); break;
+        case 'a': state.applyRuleToSelection('include'); break;
+        case 's': state.applyRuleToSelection('tree-only'); break;
+        case 'd': state.applyRuleToSelection('exclude'); break;
+        case 'escape': state.setSelectedFiles(new Set()); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedFiles.size, applyRuleToSelection, setSelectedFiles]);
+  }, []);
 
   return (
     <div className="flex flex-col h-full relative @container">
@@ -143,10 +170,10 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
       <div 
         className={`flex-1 overflow-y-auto font-mono text-text-primary relative pb-4 ${isPainting ? 'is-painting' : ''}`}
         style={{ fontSize: config.theme.font.size }}
-        onMouseUp={stopPainting}
-        onMouseLeave={stopPainting}
+        onMouseUp={() => useWorkspaceStore.getState().stopPainting()}
+        onMouseLeave={() => useWorkspaceStore.getState().stopPainting()}
         onClick={(e) => {
-          if (e.target === e.currentTarget) setSelectedFiles(new Set());
+          if (e.target === e.currentTarget) useWorkspaceStore.getState().setSelectedFiles(new Set());
         }}
       >
         <TreeNode 
@@ -160,30 +187,30 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
       {/* Persistent Stats & Actions Bar */}
       <div className={`shrink-0 bg-bg-base border-t border-border-subtle p-3 flex flex-col gap-3 transition-all duration-200 z-20 ${hasSelection ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
         <div className="flex items-center justify-between text-xs text-text-muted px-1">
-          <span className="font-medium text-text-primary">{hasSelection ? selectionStats.fileCount : 0} Files Selected</span>
+          <span className="font-medium text-text-primary">{hasSelection ? stats.fileCount : 0} Files Selected</span>
           <div className="flex gap-4">
-            <span className="hidden @[200px]:inline">{selectionStats.kb} KB</span>
-            <span className={hasSelection ? 'text-accent' : ''}>~{selectionStats.tokens} Tokens</span>
+            <span className="hidden @[200px]:inline">{stats.kb} KB</span>
+            <span className={hasSelection ? 'text-accent' : ''}>~{stats.tokens} Tokens</span>
           </div>
         </div>
         
         <div className="flex items-center gap-1.5">
           <button 
-            onClick={() => applyRuleToSelection('include')} 
+            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('include')} 
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-bg-hover hover:bg-green-500/20 rounded text-xs font-medium transition-colors text-green-400 border border-transparent hover:border-green-500/30 whitespace-nowrap"
             title="Include File & Export [A]"
           >
             <Plus size={14}/> <span className="hidden @[240px]:inline">Include</span>
           </button>
           <button 
-            onClick={() => applyRuleToSelection('tree-only')} 
+            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('tree-only')} 
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-bg-hover hover:bg-accent/20 rounded text-xs font-medium transition-colors text-accent border border-transparent hover:border-accent/30 whitespace-nowrap"
             title="Show in Tree, Skip Export [S]"
           >
             <LayoutTemplate size={14}/> <span className="hidden @[240px]:inline">Tree</span>
           </button>
           <button 
-            onClick={() => applyRuleToSelection('exclude')} 
+            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('exclude')} 
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-bg-hover hover:bg-red-500/20 rounded text-xs font-medium transition-colors text-text-muted hover:text-red-400 border border-transparent hover:border-red-500/30 whitespace-nowrap"
             title="Exclude Entirely [D]"
           >
@@ -191,7 +218,7 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
           </button>
           
           <button 
-            onClick={() => setSelectedFiles(new Set())} 
+            onClick={() => useWorkspaceStore.getState().setSelectedFiles(new Set())} 
             className="px-2 py-1.5 bg-bg-hover hover:bg-red-500/20 rounded transition-colors text-text-muted hover:text-red-400 border border-transparent hover:border-red-500/30 shrink-0"
             title="Clear Selection [Esc]"
           >
@@ -210,13 +237,14 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
             draggable
             onDragStart={(e) => {
               e.preventDefault();
+              const state = useWorkspaceStore.getState();
               if (!hasLoggedDrag) {
-                addHistoryEntry({
+                state.addHistoryEntry({
                   date: new Date().toISOString(),
-                  fileCount: selectionStats.fileCount,
-                  totalSize: selectionStats.rawBytes,
-                  estimatedTokens: selectionStats.rawTokens,
-                  files: Array.from(selectedFiles)
+                  fileCount: stats.fileCount,
+                  totalSize: stats.rawBytes,
+                  estimatedTokens: stats.rawTokens,
+                  files: Array.from(state.selectedFiles)
                 });
                 setHasLoggedDrag(true);
               }

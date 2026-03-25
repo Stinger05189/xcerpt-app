@@ -1,22 +1,55 @@
 // main.cjs
+// 1. Expand the thread pool immediately to prevent Chokidar/I/O starvation
+process.env.UV_THREADPOOL_SIZE = Math.max(16, require('os').cpus().length).toString();
+
 const path = require('path');
 const fs = require('fs/promises');
 const os = require('os');
 const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('electron');
 const chokidar = require('chokidar');
+const { performance, monitorEventLoopDelay } = require('perf_hooks');
+const fsSync = require('fs'); // Added for Synchronous testing
 
-const SESSION_TEMP_DIR = path.join(os.tmpdir(), `xcerpt_session_${process.pid}`);
+// Start monitoring the event loop for lag
+const elMonitor = monitorEventLoopDelay({ resolution: 10 });
+elMonitor.enable();
+
 const SESSIONS_DIR = path.join(app.getPath('userData'), 'XcerptSessions');
 
 let fileWatcher = null;
+let watchedPaths = new Set();
+let currentBlacklist = [];
 let mainWindow = null;
+
+let isWatcherUpdating = false;
+let pendingWatcherUpdate = false;
 
 const TREE_ONLY_REGEX = /\.(lock|png|jpe?g|gif|svg|ico|webp|pdf|mp4|webm|wav|mp3|zip|tar|gz|bz2|7z|bin|dll|exe|so|dylib|class|jar)$/i;
 const TREE_ONLY_EXACT = ['.DS_Store', '.env', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
 
-// --- File Scanner Logic ---
+// --- Background Garbage Collection ---
+// Silently cleans up old temporary export folders so they don't pile up
+async function cleanupOldExports() {
+  try {
+    const tmpDir = os.tmpdir();
+    const files = await fs.readdir(tmpDir);
+    const now = Date.now();
+    for (const file of files) {
+      if (file.startsWith('xcerpt_export_') || file.startsWith('xcerpt_ephemeral_')) {
+        const fullPath = path.join(tmpDir, file);
+        try {
+          const stats = await fs.stat(fullPath);
+          // Delete folders older than 1 hour
+          if (now - stats.mtimeMs > 3600000) {
+            await fs.rm(fullPath, { recursive: true, force: true });
+          }
+        } catch (e) { /* ignore locked files */ }
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
 
-// The new Context object completely eliminates O(N^2) array spreading during deep recursion
+// --- File Scanner Logic ---
 async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relativeToRoot = '', isDir = true, context = { gitignoreRules: [], treeOnlyRules: [] }) {
   const name = path.basename(currentPath);
 
@@ -32,7 +65,6 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     if (TREE_ONLY_REGEX.test(name) || TREE_ONLY_EXACT.includes(name)) {
       context.treeOnlyRules.push(path.posix.join(relativeToRoot.replace(/\\/g, '/')));
     }
-    // We only stat files to get their byte size. Directories bypass this entirely.
     try {
       const stats = await fs.stat(currentPath);
       node.size = stats.size || 0;
@@ -42,16 +74,13 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules };
   }
 
-  // If it's a directory, read entries
   let entries;
   try {
     entries = await fs.readdir(currentPath, { withFileTypes: true });
   } catch (e) {
-    // Permission denied or missing directory
     return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules };
   }
 
-  // 1. Check for .gitignore before blindly trying to read it
   const hasGitignore = entries.some(e => e.name === '.gitignore' && e.isFile());
   if (hasGitignore) {
     try {
@@ -62,12 +91,9 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
         .filter(l => l && !l.startsWith('#'))
         .map(l => path.posix.join(relativeToRoot.replace(/\\/g, '/'), l));
       context.gitignoreRules.push(...lines);
-    } catch (e) {
-      // Silently continue if read fails
-    }
+    } catch (e) {}
   }
 
-  // 2. Process directory entries
   const sortedEntries = entries
     .filter(entry => !blacklist.includes(entry.name))
     .sort((a, b) => {
@@ -80,7 +106,6 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     const childPath = path.join(currentPath, entry.name);
     const childRelative = path.posix.join(relativeToRoot.replace(/\\/g, '/'), entry.name);
     
-    // Pass the context reference down. Destructuring the return is no longer necessary for the arrays.
     const { node: childNode } = await scanDirectory(
       rootPath, 
       blacklist, 
@@ -94,36 +119,33 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     node.size += childNode.size;
   }
 
-  // Only the top-level call returns the accumulated arrays
   return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules };
 }
-// --- End Scanner Logic ---
 
 // --- Export Engine Logic ---
 async function processExport(payload) {
-  // Wipe previous session chunks if they exist, then recreate base dir
-  await fs.rm(SESSION_TEMP_DIR, { recursive: true, force: true });
-  await fs.mkdir(SESSION_TEMP_DIR, { recursive: true });
+  // Use unique timestamped folder to bypass Windows Defender locking
+  const exportDir = path.join(os.tmpdir(), `xcerpt_export_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`);
+  fsSync.mkdirSync(exportDir, { recursive: true });
 
   const chunkPaths = [];
 
   for (let i = 0; i < payload.chunks.length; i++) {
     const chunk = payload.chunks[i];
-    const chunkDir = path.join(SESSION_TEMP_DIR, `chunk_${chunk.id}`);
-    await fs.mkdir(chunkDir, { recursive: true });
+    const chunkDir = path.join(exportDir, `chunk_${chunk.id}`);
+    fsSync.mkdirSync(chunkDir, { recursive: true });
     chunkPaths.push(chunkDir);
     
-    // Provide the spatial map to the LLM only in the first chunk
     if (chunk.id === 1) {
-      await fs.writeFile(path.join(chunkDir, 'ExportedFileTree.md'), payload.treeMarkdown, 'utf-8');
+      fsSync.writeFileSync(path.join(chunkDir, 'ExportedFileTree.md'), payload.treeMarkdown, 'utf-8');
     }
     
-    for (const file of chunk.files) {
+    // Process files synchronously to bypass event-loop starvation from background watchers
+    chunk.files.forEach((file) => {
       try {
-        const content = await fs.readFile(file.absolutePath, 'utf-8');
+        const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
         let lines = content.split('\n');
         
-        // Apply compressions (sort descending to safely splice without shifting indexes)
         const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
           const skipCount = comp.endLine - comp.startLine + 1;
@@ -131,32 +153,30 @@ async function processExport(payload) {
           lines.splice(comp.startLine - 1, skipCount, marker);
         }
         
-        // Write the file entirely flat
         const outPath = path.join(chunkDir, file.flatFileName);
-        await fs.writeFile(outPath, lines.join('\n'), 'utf-8');
+        fsSync.writeFileSync(outPath, lines.join('\n'), 'utf-8');
       } catch (err) {
         console.error(`Error processing file ${file.absolutePath}:`, err);
       }
-    }
+    });
   }
 
   return chunkPaths;
 }
 
 async function processEphemeralExport(payload) {
-  const ephemeralDir = path.join(os.tmpdir(), `xcerpt_ephemeral_${Date.now()}`);
-  await fs.mkdir(ephemeralDir, { recursive: true });
+  const ephemeralDir = path.join(os.tmpdir(), `xcerpt_ephemeral_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`);
+  fsSync.mkdirSync(ephemeralDir, { recursive: true });
 
   const createdPaths = [];
 
-  // Write markdown tree
   const treePath = path.join(ephemeralDir, 'ExportedFileTree.md');
-  await fs.writeFile(treePath, payload.treeMarkdown, 'utf-8');
+  fsSync.writeFileSync(treePath, payload.treeMarkdown, 'utf-8');
   createdPaths.push(treePath);
 
-  for (const file of payload.files) {
+  payload.files.forEach((file) => {
     try {
-      const content = await fs.readFile(file.absolutePath, 'utf-8');
+      const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
       let lines = content.split('\n');
       
       const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
@@ -167,17 +187,67 @@ async function processEphemeralExport(payload) {
       }
       
       const outPath = path.join(ephemeralDir, file.flatFileName);
-      await fs.writeFile(outPath, lines.join('\n'), 'utf-8');
+      fsSync.writeFileSync(outPath, lines.join('\n'), 'utf-8');
       createdPaths.push(outPath);
     } catch (err) {
       console.error(`Error processing ephemeral file ${file.absolutePath}:`, err);
     }
-  }
+  });
 
   return createdPaths;
 }
-// --- End Export Engine Logic ---
 
+// --- Watcher Lifecycle Management ---
+async function setupWatcher() {
+  if (isWatcherUpdating) {
+    pendingWatcherUpdate = true;
+    return;
+  }
+  isWatcherUpdating = true;
+  pendingWatcherUpdate = false;
+
+  try {
+    if (fileWatcher) {
+      await fileWatcher.close();
+      fileWatcher = null;
+    }
+    
+    if (watchedPaths.size > 0) {
+      
+      // 1. BULLETPROOF WINDOWS IGNORING:
+      // Instead of failing string globs, we split the path natively.
+      // If ANY folder in the path matches a blacklist word, Chokidar instantly drops it.
+      const ignoreFunc = (testPath) => {
+        const pathParts = testPath.split(/[\/\\]/);
+        return currentBlacklist.some(b => pathParts.includes(b));
+      };
+    
+      fileWatcher = chokidar.watch(Array.from(watchedPaths), {
+        ignored: ignoreFunc,
+        persistent: true,
+        ignoreInitial: true,
+      });
+    
+      // 2. EVENT SHIELDING:
+      // Do not attach the 'all' listener until the initial background scan is 100% complete.
+      // This prevents thousands of 'add' events from flooding the IPC bridge and freezing React.
+      fileWatcher.on('ready', () => {
+        fileWatcher.on('all', (event, filePath) => {
+          if (['change', 'add', 'unlink'].includes(event) && mainWindow) {
+            mainWindow.webContents.send('fs:file-changed', event, filePath);
+          }
+        });
+      });
+    }
+  } finally {
+    isWatcherUpdating = false;
+    if (pendingWatcherUpdate) {
+      setupWatcher();
+    }
+  }
+}
+
+// --- Window Management ---
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -201,21 +271,10 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await fs.mkdir(SESSIONS_DIR, { recursive: true });
+  // Fire and forget the temp folder cleanup
+  cleanupOldExports().catch(() => {});
+
   createWindow();
-
-  // Initialize Global Watcher (empty at first, relying strictly on our dynamic blacklist)
-  fileWatcher = chokidar.watch([], {
-    ignored: [], 
-    persistent: true,
-    ignoreInitial: true,
-  });
-
-  fileWatcher.on('all', (event, filePath) => {
-    // Only emit on change/add/unlink to avoid excessive noise
-    if (['change', 'add', 'unlink'].includes(event) && mainWindow) {
-      mainWindow.webContents.send('fs:file-changed', event, filePath);
-    }
-  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -227,7 +286,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC Handlers
+// --- IPC Handlers ---
 ipcMain.handle('ping', () => 'pong');
 
 ipcMain.handle('window:minimize', (e) => { BrowserWindow.fromWebContents(e.sender)?.minimize(); });
@@ -244,21 +303,17 @@ ipcMain.handle('dialog:selectDirectory', async () => {
 });
 
 ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist) => {
-  try { 
-    // Dynamically update the watcher to ignore the heavy blacklist folders
-    if (fileWatcher) {
-      const ignorePatterns = blacklist.map(b => `**/${b}/**`);
-      fileWatcher.options.ignored = [...ignorePatterns];
-      
-      // DEFER: Do not let Chokidar indexing block the IPC event loop.
-      // Wait 500ms so Node can instantly serialize and return the tree payload to React.
-      setTimeout(() => {
-        if (fileWatcher) fileWatcher.add(dirPath);
-      }, 500);
-    }
+  try {
+    watchedPaths.add(dirPath);
+    currentBlacklist = blacklist;
     
-    // The top-level call kicks off the context object
-    return await scanDirectory(dirPath, blacklist); 
+    const payload = await scanDirectory(dirPath, blacklist); 
+    
+    setTimeout(() => {
+      setupWatcher().catch(e => console.error("Watcher setup failed:", e));
+    }, 500);
+    
+    return payload;
   } 
   catch (error) { console.error('Error scanning:', error); throw error; }
 });
@@ -287,7 +342,6 @@ ipcMain.on('shell:showItemInFolder', (_, targetPath) => {
 });
 
 ipcMain.on('drag:start', (e, filePaths) => {
-  // Pass array of files directly to the OS Native Drag
   const iconPath = path.join(__dirname, 'public', 'drag-package.png');
   const icon = nativeImage.createFromPath(iconPath);
   e.sender.startDrag({ files: filePaths, icon: icon });
@@ -318,6 +372,9 @@ ipcMain.handle('app:saveState', async (_, payload) => {
 
 ipcMain.handle('workspace:loadSession', async (_, id) => {
   try {
+    watchedPaths.clear();
+    setupWatcher();
+    
     const data = await fs.readFile(path.join(SESSIONS_DIR, `${id}.json`), 'utf-8');
     return JSON.parse(data);
   } catch (e) { return null; }

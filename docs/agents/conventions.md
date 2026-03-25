@@ -38,6 +38,10 @@
 - **Recursive Opts:** Use `fs.readdir({ withFileTypes: true })` and `dirent.isDirectory()` instead of `fs.stat` loops. Pass a single mutable `Context` object down recursive chains instead of array spreading to prevent GC spikes.
 - **Control Flow:** Never use `try/catch` `fs.readFile` to check file existence; check the `dirents` array first.
 - **Temp Directories:** Use a process-bound directory (`os.tmpdir()/xcerpt_session_<pid>`). Wipe and recreate on payload build instead of generating infinite timestamped folders.
+- **Synchronous Local Exports:** When generating local temp files for drag-and-drop payloads, use `fsSync` rather than `await fs.promises`. In a local Electron desktop app, blocking the main thread for 15ms to bypass event-loop starvation from background watchers is drastically superior to waiting 20 seconds in the async microtask queue.
+- **Chokidar Windows Glob Fails:** Never use string globs (`**/dir/**`) for Chokidar `ignored` options on Windows. They fail silently. Always pass a Javascript function that splits the path `[\/\\]` and checks against the blacklist to ensure massive directories are dropped instantly, preventing 100% CPU utilization.
+- **Chokidar Event Shielding:** Always wrap `fileWatcher.on('all')` inside the `fileWatcher.on('ready')` callback. This prevents massive file trees from flooding the IPC bridge with thousands of initial `add` events, which crashes the React renderer and causes severe memory creep.
+- **Anti-Virus Folder Locks:** Never rapidly delete (`fs.rm`) and recreate (`fs.mkdir`) the same temporary directory during payload generation. Windows Defender flags this as ransomware and locks the folder, freezing the app's I/O. Always use unique, timestamped directory names.
 
 ## 4. UI & Shell
 

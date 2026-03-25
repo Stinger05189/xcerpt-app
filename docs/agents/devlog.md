@@ -102,6 +102,25 @@
 
 ---
 
+### Session 014
+
+- **Focus Area:** Node.js Event Loop Starvation, Watcher Optimization, and Disk I/O Performance.
+- **Key Decisions:**
+  - **Synchronous Export I/O:** Switched the payload generation engine from asynchronous `fs.promises` to synchronous `fsSync`. This prevents the Node.js event loop's microtask queue from starving our local disk writes when heavy background tasks (like `chokidar`) are flooding the event loop. Export times dropped from 25+ seconds to ~15 milliseconds.
+  - **Windows-Safe Chokidar Ignores:** Replaced Chokidar's string-based glob ignores (`**/node_modules/**`) with a native JavaScript evaluation function (`path.split(/[\/\\]/).some(...)`). This accurately drops blacklisted directories on Windows OS natively, stopping Chokidar from endlessly recursing into massive folders like UE's `Intermediate`.
+  - **Watcher Event Shielding:** Deferred Chokidar's `on('all')` IPC event bindings until _after_ the `ready` event fires. This physically prevents thousands of initial `add` events from flooding the IPC bridge and freezing the React frontend during startup.
+  - **Anti-Virus Folder Lock Bypass:** Implemented unique, timestamped export directories (`xcerpt_export_<timestamp>_<hash>`) instead of deleting and recreating the same temp folder. This prevents Windows Defender's real-time protection from flagging the action as ransomware and locking the I/O pipeline.
+- **Roadblocks Resolved:**
+  - Eliminated the infinite loading loop during workspace switching caused by orphaned watchers.
+  - Resolved the 25+ second payload generation delay (Event Loop Starvation).
+  - Cured the 30-second 5 FPS application stuttering and memory creep during massive workspace loads (Chokidar CPU pinning).
+- **Core Files Modified:**
+  - `main.cjs`
+  - `src/components/layout/MainStage.tsx`
+  - `src/components/tree/FileTree.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

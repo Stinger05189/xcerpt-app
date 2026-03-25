@@ -16,21 +16,19 @@
 
 ## Current Macro-Objective
 
-**Epoch 3, Phase 12: Extension Overrides**
-_Context: Phase 11 (Global Config & Theming) is complete. We are now completing the final feature of Epoch 3: enabling users to define global extension mappings (e.g., `.uproject` -> `.json`) to bypass arbitrary AI chat upload filters, while ensuring the LLM is explicitly informed of the spoofing in the prompt payload._
+**Epoch 4, Phase 13: UI Rendering Optimization & Virtualization**
+_Context: We have completely resolved Node.js backend performance limits. However, the React Frontend struggles to paint massive DOM structures (like the 800+ node UE plugin tree). We must optimize `FileTree.tsx` to maintain a buttery smooth 60 FPS during drag-painting and scrolling._
 
 ## Active Queue (Current / Next Session)
 
-- [x] **Task 1: Extension Overrides UI & State**
-  - _Details:_ Build a dictionary management interface inside the `SettingsModal` to allow users to add, edit, and delete extension mappings (saved to `AppStore.config.extensionOverrides`).
-- [x] **Task 2: Export Engine Integration**
-  - _Details:_ Modify `exportEngine.ts` (for both Ephemeral and Full Workspaces) to dynamically intercept and rename files matching these extensions during the flattening process before they are written to disk.
-- [x] **Task 3: Prompt Integrity Mapping**
-  - _Details:_ Update the `ExportedFileTree.md` generation logic to strictly adhere to the "Truth in Prompting" architecture rule. Renamed files must explicitly annotate the structural spoofing (e.g., `MyGame.uproject (Exported as MyGame.json)`).
+- [ ] **Task 1: DOM Virtualization Evaluation**
+  - _Details:_ Assess and implement a virtualization strategy for the unified file tree (e.g., `react-window`, `react-virtuoso`, or `@tanstack/react-virtual`). We must convert the deeply nested `TreeNode` recursive rendering into a flattened, virtualized list to prevent React from keeping thousands of hidden DOM nodes in memory.
+- [ ] **Task 2: Paint Selection Architecture**
+  - _Details:_ Refactor the `onMouseEnter` drag-to-paint implementation. Determine if we can decouple visual CSS updates from React's state loop during the drag, ensuring 60 FPS feedback without causing full-tree layout thrashing.
+- [ ] **Task 3: Hover & Memoization Pass**
+  - _Details:_ Audit `TreeNode.tsx` for unnecessary re-renders. Implement `React.memo` with custom comparison functions to ensure only explicitly hovered or painted rows trigger a render cycle.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 4: Epoch 3 Review & Stabilization**
-  - _Details:_ Final UI polish, bug hunting, and ensuring all workflows established in Epoch 3 (Ephemeral Exports, Presets, History, Theming, Overrides) function seamlessly together.
-- [ ] **Task 5: Epoch Archiving**
-  - _Details:_ Summarize Epoch 3 sessions into an archive paragraph and prepare the roadmap for Epoch 4 (or v1.0 Launch Prep).
+- [ ] **Task 4: Epoch Archiving**
+  - _Details:_ Summarize Epoch 3 sessions into an archive paragraph and prepare the roadmap for a v1.0 Launch Prep.
