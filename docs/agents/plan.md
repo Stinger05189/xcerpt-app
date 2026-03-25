@@ -16,20 +16,17 @@
 
 ## Current Macro-Objective
 
-**Epoch 4, Phase 14: Packaging, Deployment & Branding**
-_Context: With performance profiling complete and rendering bottlenecks resolved via virtualization, the application is ready to become a standalone executable. We must configure the build tools, integrate branding, and establish an auto-update pipeline for seamless user distribution._
+**Epoch 4, Phase 15: Analytics & Updater UX Polish**
+_Context: The app is packaged and live. However, the background auto-updater currently lacks transparency, leading to UX ambiguity (silent failures or invisible downloads). We must expose updater states and current app versions to the UI. Additionally, we need to implement persistent workspace statistics to quantify the value of the compression engine (e.g., total tokens saved)._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Application Branding (App Icon Integration)**
-  - _Details:_ Inject the provided high-quality icon into the Electron build process so that OS taskbars, executable files, and desktop shortcuts display the correct branding.
-  - _Blockers:_ User must provide or point to the `.ico` / `.icns` / `.png` asset to be used.
-- [ ] **Task 2: Build System & Packaging Configuration**
-  - _Details:_ Configure `electron-builder` or Electron Forge to compile the React/Vite/Node assets into a distributable installer (e.g., Windows `.exe`, Mac `.dmg`). Ensure `main.cjs` and `preload.cjs` are correctly bundled.
-- [ ] **Task 3: Seamless Background Auto-Updater**
-  - _Details:_ Integrate `electron-updater` to automatically check for, download, and install updates in the background (e.g., via GitHub Releases or a dedicated update server). This completely eliminates the need for manual installer downloads. Ensure the update lifecycle (downloading, patching, and prompting for restart) protects the user's local `AppData/Roaming/Xcerpt` workspace data.
+- [ ] **Task 1: Enhanced Auto-Updater UX & Versioning**
+  - _Details:_ Expand the IPC bridge to pipe detailed `electron-updater` events (`checking-for-update`, `download-progress`, `error`) to the `AppStore`. Build a UI element (e.g., in the Settings Modal or a dedicated flyout) to display the current App Version and real-time download progress to resolve "blind" updating.
+- [ ] **Task 2: Workspace Statistics Implementation**
+  - _Details:_ Implement a tracking mechanism to aggregate metrics per workspace (e.g., "Total Tokens Saved via Skips", "Lines Compressed"). Display these global stats in the Sidebar or Workspace Browser to provide tangible feedback on context curation.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 4: v1.0 Launch Prep & Final QA**
-  - _Details:_ Perform a final pass on the UI states for a compiled binary environment, test production DevTools stripping, and finalize README documentation.
+- [ ] **Task 3: Post-Launch Stabilization**
+  - _Details:_ Address any edge cases or UI bugs discovered during real-world usage of the packaged v1.0.1 environment.

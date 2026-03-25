@@ -32,6 +32,21 @@
 
 ---
 
+### Session 016
+
+- **Focus Area:** Branding, Build Pipeline, Auto-Updater Integration, and Open-Source Launch (Phase 14).
+- **Key Decisions:**
+  - **Branding:** Designed and integrated a pure SVG geometric logo representing context compression.
+  - **Build System:** Integrated `electron-builder` to compile NSIS (Windows), DMG (Mac), and AppImage (Linux) targets directly from the Vite `dist/` output.
+  - **Distribution Strategy:** Transitioned the project to a public repository with an MIT License. Leveraged `electron-updater` linked to GitHub Releases for seamless, zero-cost differential updates.
+  - **Production Security:** Locked `webPreferences.devTools` behind `!app.isPackaged` to ensure the Chromium inspector is stripped from public binaries.
+- **Roadblocks Resolved:**
+  - **Packaged Asset Resolution:** Fixed a bug where the `TitleBar` logo disappeared in the compiled executable. Changed absolute asset paths (`/icon.svg`) to relative paths (`./icon.svg`) to prevent Electron from incorrectly querying the OS root drive when running via the `file://` protocol.
+  - **CLI Argument Swallowing:** Fixed NPM swallowing the publish flag by enforcing the `--` separator (`npm run dist -- -p always`).
+  - **Token Handling:** Clarified the auto-updater security architecture: GitHub PATs are strictly for local developer uploads via `electron-builder` and are never required by the client-side `electron-updater`.
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.
