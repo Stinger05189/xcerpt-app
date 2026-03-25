@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
+    "@tanstack/react-virtual": "^3.13.23",
     "chokidar": "^5.0.0",
     "ignore": "^7.0.5",
     "lucide-react": "^0.577.0",

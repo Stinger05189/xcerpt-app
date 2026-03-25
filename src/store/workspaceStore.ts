@@ -44,7 +44,6 @@ interface WorkspaceState {
   // UI States
   isSidebarOpen: boolean;
   isPainting: boolean;
-  paintMode: 'add' | 'remove' | null;
 
   isEphemeralBuilding: boolean;
   ephemeralDragPaths: string[] | null;
@@ -58,6 +57,7 @@ interface WorkspaceState {
   setMaxFilesPerChunk: (val: number) => void;
   setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[]; isEphemeralBuilding: boolean; ephemeralDragPaths: string[] | null; }>) => void;
   setSidebarOpen: (val: boolean) => void;
+  setIsPainting: (val: boolean) => void;
 
   getPackedPresets: () => Preset[];
   createPreset: (name: string) => void;
@@ -75,10 +75,6 @@ interface WorkspaceState {
   setExportStaging: (val: boolean) => void;
   toggleFolderExpansion: (relativePath: string) => void;
   setFoldersExpanded: (relativePaths: string[], expanded: boolean) => void;
-
-  startPainting: (pattern: string, mode: 'add' | 'remove', clearFirst?: boolean) => void;
-  continuePainting: (pattern: string) => void;
-  stopPainting: () => void;
 
   addBlacklistRule: (pattern: string) => void;
   removeBlacklistRule: (pattern: string) => void;
@@ -132,7 +128,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   isSidebarOpen: false,
   isPainting: false,
-  paintMode: null,
 
   isEphemeralBuilding: false,
   ephemeralDragPaths: null,
@@ -197,7 +192,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       selectedFiles: new Set(),
       isSidebarOpen: false, 
       isPainting: false,
-      paintMode: null,
       isEphemeralBuilding: false,
       ephemeralDragPaths: null,
       activeFile: null,
@@ -388,34 +382,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     return { expandedFolders: newSet };
   }),
 
-  startPainting: (pattern, mode, clearFirst = false) => set(state => {
-    const newSet = clearFirst ? new Set<string>() : new Set(state.selectedFiles);
-    if (mode === 'add') {
-      newSet.add(pattern);
-    } else {
-      newSet.delete(pattern);
-    }
-    return { isPainting: true, paintMode: mode, selectedFiles: newSet, ephemeralDragPaths: null };
-  }),
-
-  continuePainting: (pattern) => set(state => {
-    if (!state.isPainting || !state.paintMode) return state;
-    
-    const hasPattern = state.selectedFiles.has(pattern);
-    
-    if (state.paintMode === 'add' && hasPattern) return state;
-    if (state.paintMode === 'remove' && !hasPattern) return state;
-    
-    const newSet = new Set(state.selectedFiles);
-    if (state.paintMode === 'add') {
-      newSet.add(pattern);
-    } else {
-      newSet.delete(pattern);
-    }
-    return { selectedFiles: newSet, ephemeralDragPaths: null };
-  }),
-
-  stopPainting: () => set({ isPainting: false, paintMode: null }),
+  setIsPainting: (val: boolean) => set({ isPainting: val }),
 
   addBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: Array.from(new Set([...state.hardBlacklist, pattern])) })),
   removeBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: state.hardBlacklist.filter(p => p !== pattern) })),

@@ -16,19 +16,20 @@
 
 ## Current Macro-Objective
 
-**Epoch 4, Phase 13: UI Rendering Optimization & Virtualization**
-_Context: We have completely resolved Node.js backend performance limits. However, the React Frontend struggles to paint massive DOM structures (like the 800+ node UE plugin tree). We must optimize `FileTree.tsx` to maintain a buttery smooth 60 FPS during drag-painting and scrolling._
+**Epoch 4, Phase 14: Packaging, Deployment & Branding**
+_Context: With performance profiling complete and rendering bottlenecks resolved via virtualization, the application is ready to become a standalone executable. We must configure the build tools, integrate branding, and establish an auto-update pipeline for seamless user distribution._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: DOM Virtualization Evaluation**
-  - _Details:_ Assess and implement a virtualization strategy for the unified file tree (e.g., `react-window`, `react-virtuoso`, or `@tanstack/react-virtual`). We must convert the deeply nested `TreeNode` recursive rendering into a flattened, virtualized list to prevent React from keeping thousands of hidden DOM nodes in memory.
-- [ ] **Task 2: Paint Selection Architecture**
-  - _Details:_ Refactor the `onMouseEnter` drag-to-paint implementation. Determine if we can decouple visual CSS updates from React's state loop during the drag, ensuring 60 FPS feedback without causing full-tree layout thrashing.
-- [ ] **Task 3: Hover & Memoization Pass**
-  - _Details:_ Audit `TreeNode.tsx` for unnecessary re-renders. Implement `React.memo` with custom comparison functions to ensure only explicitly hovered or painted rows trigger a render cycle.
+- [ ] **Task 1: Application Branding (App Icon Integration)**
+  - _Details:_ Inject the provided high-quality icon into the Electron build process so that OS taskbars, executable files, and desktop shortcuts display the correct branding.
+  - _Blockers:_ User must provide or point to the `.ico` / `.icns` / `.png` asset to be used.
+- [ ] **Task 2: Build System & Packaging Configuration**
+  - _Details:_ Configure `electron-builder` or Electron Forge to compile the React/Vite/Node assets into a distributable installer (e.g., Windows `.exe`, Mac `.dmg`). Ensure `main.cjs` and `preload.cjs` are correctly bundled.
+- [ ] **Task 3: Seamless Background Auto-Updater**
+  - _Details:_ Integrate `electron-updater` to automatically check for, download, and install updates in the background (e.g., via GitHub Releases or a dedicated update server). This completely eliminates the need for manual installer downloads. Ensure the update lifecycle (downloading, patching, and prompting for restart) protects the user's local `AppData/Roaming/Xcerpt` workspace data.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 4: Epoch Archiving**
-  - _Details:_ Summarize Epoch 3 sessions into an archive paragraph and prepare the roadmap for a v1.0 Launch Prep.
+- [ ] **Task 4: v1.0 Launch Prep & Final QA**
+  - _Details:_ Perform a final pass on the UI states for a compiled binary environment, test production DevTools stripping, and finalize README documentation.

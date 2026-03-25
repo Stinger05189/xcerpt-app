@@ -1,5 +1,5 @@
 // src/components/tree/TreeNode.tsx
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { ChevronRight, ChevronDown, File, Folder } from 'lucide-react';
 import type { FileNode } from '../../types/ipc';
 import { useWorkspaceStore } from '../../store/workspaceStore';
@@ -11,16 +11,17 @@ interface TreeNodeProps {
   rootPath: string;
   relativePath: string;
   depth?: number;
-  visiblePaths?: Set<string> | null;
+  style?: React.CSSProperties;
+  onPointerDown?: (e: React.PointerEvent) => void;
 }
 
-export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths }: TreeNodeProps) {
+const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onPointerDown }: TreeNodeProps) => {
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
 
   const isDirectory = node.type === 'directory';
   const pattern = isDirectory ? `${relativePath}/` : relativePath;
 
-  const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath)) || (visiblePaths !== null && visiblePaths !== undefined);
+  const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath));
   const isActiveFile = useWorkspaceStore(s => s.activeFile === relativePath && !isDirectory);
   const isSelected = useWorkspaceStore(s => s.selectedFiles.has(pattern));
 
@@ -28,47 +29,9 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
   const excludes = useWorkspaceStore(s => s.excludes);
   const treeOnly = useWorkspaceStore(s => s.treeOnly);
 
-  if (visiblePaths && depth > 0 && !visiblePaths.has(relativePath)) {
-    return null;
-  }
-
   const status = getFileStatus(relativePath, isDirectory, includes, excludes, treeOnly);
   const isExcluded = status === 'excluded';
   const isTreeOnly = status === 'tree-only';
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; 
-    
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (e.clientX - rect.left <= 32) return; 
-    
-    e.stopPropagation();
-    
-    const store = useWorkspaceStore.getState();
-    const hasPattern = store.selectedFiles.has(pattern);
-    
-    let mode: 'add' | 'remove' = 'add';
-    let clearFirst = false;
-    
-    if (e.shiftKey) {
-      mode = 'add';
-    } else if (e.altKey) {
-      mode = 'remove';
-    } else if (e.ctrlKey || e.metaKey) {
-      mode = hasPattern ? 'remove' : 'add';
-    } else {
-      mode = 'add';
-      clearFirst = true;
-      if (!isDirectory) store.setActiveFile(relativePath);
-    }
-    
-    store.startPainting(pattern, mode, clearFirst);
-  };
-
-  const handleMouseEnter = () => {
-    const state = useWorkspaceStore.getState();
-    if (state.isPainting) state.continuePainting(pattern);
-  };
 
   const handleChevronClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -91,25 +54,8 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
     setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
 
-  if (depth === 0) {
-    return (
-      <div className="pl-1 pb-4">
-        {node.children.map(child => (
-          <TreeNode 
-            key={child.path} 
-            node={child} 
-            rootPath={rootPath} 
-            relativePath={child.path.replace(`${rootPath}\\`, '').replace(`${rootPath}/`, '')}
-            depth={depth + 1} 
-            visiblePaths={visiblePaths}
-          />
-        ))}
-      </div>
-    );
-  }
-
   return (
-    <div>
+    <div style={style}>
       <div 
         className={`relative flex items-center py-1 rounded cursor-pointer group select-none transition-all
           ${isExcluded ? 'opacity-40' : 'opacity-100'} 
@@ -117,8 +63,7 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
           ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle' : 'hover:bg-bg-hover'}
           ${isTreeOnly ? 'text-accent bg-accent/10' : ''}
         `}
-        onMouseDown={handleMouseDown}
-        onMouseEnter={handleMouseEnter}
+        onPointerDown={onPointerDown}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${(depth - 1) * 16 + 32}px` }}
@@ -136,36 +81,16 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
           {isDirectory ? <Folder size={14} /> : <File size={14} />}
         </span>
         
-        {/* Explicit Title Added for Truncated Names */}
         <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium' : ''}`} title={node.name}>
           {node.name}
         </span>
         
-        {/* Dynamic File Size Hidden on Narrow Screens via Container Query */}
         {!isDirectory && !isExcluded && !isTreeOnly && (
           <span className="text-[10px] text-accent font-medium pr-3 whitespace-nowrap hidden @[200px]:inline">
             {(node.size / 1024).toFixed(1)} kb
           </span>
         )}
       </div>
-    
-      {isDirectory && isExpanded && (
-        <div>
-          {node.children.map(child => {
-            const childRelative = relativePath ? `${relativePath}/${child.name}` : child.name;
-            return (
-              <TreeNode 
-                key={child.path} 
-                node={child} 
-                rootPath={rootPath} 
-                relativePath={childRelative}
-                depth={depth + 1}
-                visiblePaths={visiblePaths} 
-              />
-            );
-          })}
-        </div>
-      )}
     
       {contextMenuPos && (
         <ContextMenu 
@@ -178,4 +103,12 @@ export function TreeNode({ node, rootPath, relativePath, depth = 0, visiblePaths
       )}
     </div>
   );
-}
+};
+
+export const TreeNode = memo(TreeNodeComponent, (prev, next) => {
+  return (
+    prev.relativePath === next.relativePath &&
+    prev.node === next.node &&
+    prev.style?.transform === next.style?.transform
+  );
+});

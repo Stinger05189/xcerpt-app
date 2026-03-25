@@ -14,110 +14,21 @@
 
 ---
 
-## Active Epoch: 03 - Advanced Workflows & Customization
+## Active Epoch: 04 - Rendering Optimization & Deployment
 
-### Session 009
+### Session 015
 
-- **Focus Area:** Architectural roadmapping, schema redesign, and documentation overhaul for Epoch 3.
+- **Focus Area:** UI Rendering Optimization, DOM Virtualization, and 1D Marquee Drag Engine (Phase 13).
 - **Key Decisions:**
-  - **Explicit Quick Exports:** Decoupled selection-based ephemeral exports from the background chunking engine. To protect the React UI thread during rapid marquee drags, "Quick Exports" will require an explicit user click ("Stage Selection") rather than continuous background generation.
-  - **Workspace Presets:** Planned the migration of the `XcerptWorkspace` JSON schema. Global workspace states (like hard blacklists) will be separated from ephemeral configurations (Exclusions, Tree-Only paths), which will now live inside a `presets[]` array to allow multi-context swapping within the same codebase.
-  - **AppConfig & Theming:** Designed a global `config.json` schema managed by the `AppStore` to handle application-agnostic settings. CSS variables will be injected at the `:root` level for real-time, performant theming (colors, fonts, scale).
-  - **Extension Overrides:** Formulated a dictionary-based extension mapping system (e.g., `.uproject` -> `.json`) to bypass AI upload filters, ensuring the physical renaming is strictly documented inside the `ExportedFileTree.md` prompt legend so the LLM retains spatial awareness.
+  - **Tree Virtualization:** Replaced deeply nested, recursive DOM rendering with a headless virtualization engine (`@tanstack/react-virtual`). Created `useFlattenedTree.ts` to mathematically flatten the 1D structure, dropping hidden/collapsed nodes before render.
+  - **1D Math Marquee Engine:** Completely ripped out DOM-based `onMouseEnter` tick-dependent painting. Implemented a purely mathematical drag engine that calculates the active row index via `Math.floor(offsetY / ROW_HEIGHT)` during `pointermove`.
+  - **Auto-Scroll Loop:** Bound a `requestAnimationFrame` loop to the drag state, allowing smooth, infinite scrolling when the cursor hits the top/bottom 40px of the tree container.
 - **Roadblocks Resolved:**
-  - Mitigated potential performance bottlenecks for the upcoming "Selection Stats" feature by establishing that token estimation will use a fast byte-to-token heuristic (rather than deep file reads) during tree painting.
+  - **Stale Closure Misalignment:** Fixed an issue where the math marquee mapped indices to a "ghost" array of closed folders. Fixed by pointing the selection engine to a `useRef` tracking the latest `flatNodes` array, bypassing React's `memo` closures.
+  - **Fixed Positioning clipping:** Fixed the Context Menu flying off-screen or clipping under panes. Virtualization's `transform: translateY()` creates a new CSS containing block, breaking `position: fixed`. Fixed by ejecting the menu via `createPortal(..., document.body)`.
 - **Core Files Modified:**
-  - `docs/0_Excerpt_Overview.md`, `docs/1_Excerpt_Architecture.md`, `docs/2_Excerpt_Workflows.md`, `docs/3_Excerpt_Implementation.md`
-
----
-
-### Session 010
-
-- **Focus Area:** Ephemeral Quick Exports, Selection Stats Heuristics, and Responsive UI Stabilization (Phase 9).
-- **Key Decisions:**
-  - **Live Token Heuristics:** Implemented a fast `bytes / 4` token estimation heuristic inside a `useMemo` in the `FileTree` to provide instant stats during rapid marquee selections without blocking the React UI thread with deep file reads.
-  - **Ephemeral Export Engine:** Decoupled quick-exports from the workspace background chunker. Added `fs:stageEphemeralExport` to Node.js which generates process-bound, isolated temp directories exclusively containing the user's active tree selection.
-  - **Sidebar Flyout Architecture:** Converted the right-side Rules/Stats sidebar into a fixed-position flyout overlay (`z-40`) controlled by global state and a `Tab` hotkey. This prioritizes the File Tree and Monaco Editor on narrow aspect ratios.
-  - **Anti-CLS (Cumulative Layout Shift):** Stabilized the `FileTree` bottom action bar. It is now permanently mounted in the DOM, utilizing `opacity` and `pointer-events: none` to toggle visibility. This entirely eliminates vertical layout popping that previously caused target files to move out from under the user's cursor during selections.
-  - **Container Queries for Panes:** Wrapped the `FileTree` in a Tailwind `@container`. UI elements now conditionally hide text labels (e.g., `@[240px]:inline`) based on the pane's localized width rather than the global OS window viewport.
-- **Roadblocks Resolved:**
-  - Fixed a TypeScript interface mismatch where `setExportState` threw errors because it lacked the new `isEphemeralBuilding` and `ephemeralDragPaths` properties added to the Zustand store.
-- **Core Files Modified:**
-  - `src/store/workspaceStore.ts`, `src/types/ipc.d.ts`
-  - `main.cjs`, `preload.cjs`, `src/utils/exportEngine.ts`
-  - `src/components/tree/FileTree.tsx`, `src/components/tree/TreeNode.tsx`
-  - `src/components/layout/Sidebar.tsx`, `src/components/layout/TitleBar.tsx`
-
----
-
-### Session 011
-
-- **Focus Area:** Workspace Presets, Session Snapshots, and Ephemeral History (Phase 10).
-- **Key Decisions:**
-  - **Flat-State Sync Pattern:** Migrated the `WorkspacePayload` schema to `v3.0` to support multi-context presets. To prevent massive React refactoring and render locks, the active preset's rules are unpacked into "flat" Zustand state properties (`includes`, `excludes`, `compressions`) and repacked (`getPackedPresets()`) before saving or switching presets.
-  - **Session-Bound Snapshots:** Implemented an in-memory snapshot pattern to support a "Revert Session Changes" feature. Snapshots are captured on preset load/creation and are strictly session-bound.
-  - **Elevated Snapshot Memory:** Shifted the `presetSnapshots` registry into the global `AppStore` (`workspaceSnapshots`) to ensure session revert capabilities survive workspace tab switching without permanently writing them to the disk schema.
-  - **Drag-Triggered History:** Decoupled export history logging from the payload generation step. History is now uniquely logged exactly once per `onDragStart` event, retaining the exact `files: string[]` array for future restoration.
-  - **History UX & Flyout Inspector:** Transformed history items into robust cards with dual inline actions ("Package Context" & "Select in Tree"). Implemented a `HistoryInspector` fixed-position flyout that projects to the right of the sidebar, allowing users to safely peek at a history item's contents via hover without mutating their active tree selection.
-- **Roadblocks Resolved:**
-  - Prevented a crash caused by legacy history entries missing the newly added `files: string[]` array by implementing strict fallback arrays (`?.files || []`) and defensive rendering.
-  - Resolved strict ESLint `@typescript-eslint/no-explicit-any` errors during v2.0 -> v3.0 legacy schema parsing by utilizing strict `unknown` type intersections.
-- **Core Files Modified:**
-  - `src/types/ipc.d.ts`, `src/store/workspaceStore.ts`, `src/store/appStore.ts`
-  - `src/components/layout/Bootstrapper.tsx`, `src/components/layout/Sidebar.tsx`
-  - `src/components/tree/FileTree.tsx`
-
----
-
-### Session 012
-
-- **Focus Area:** Global Application Configuration & Theming (Phase 11).
-- **Key Decisions:**
-  - **AppConfig Schema:** Implemented a workspace-agnostic `config.json` schema managed by the Node.js main process and integrated into the global `AppStore`.
-  - **Dynamic Theme Engine:** Leveraged Tailwind v4's native CSS variable support by injecting `--theme-*` variables directly onto `document.documentElement.style` inside `App.tsx`. This allows real-time, hardware-accelerated color updates without React re-renders.
-  - **Granular Font Scaling:** Abandoned overriding font size on the global `body` tag to protect Tailwind's `rem`-based spacing cascade. Dynamic font sizes are now explicitly passed to the `Monaco Editor` (via `options.fontSize`) and the `FileTree` (via inline style).
-  - **Settings Modal Integration:** Built the `SettingsModal` as a full-screen overlay, reusing the `opacity-30 pointer-events-none` trick on the underlying layout to ensure TitleBar OS window controls remain functional.
-- **Roadblocks Resolved:**
-  - **Slider Cursor Drift:** When the UI `zoom` property was tied directly to the global store, dragging the slider scaled the DOM instantly, causing the slider handle to move away from the user's cursor. Fixed by decoupling the visual `<input type="range">` using local `useState` and only committing to the global `AppStore` on `onMouseUp`/`onTouchEnd`/`onKeyUp`.
-- **Core Files Modified:**
-  - `src/types/ipc.d.ts`, `main.cjs`, `preload.cjs`, `src/store/appStore.ts`
-  - `src/App.tsx`, `src/index.css`, `src/components/layout/SettingsModal.tsx`
-  - `src/components/layout/TitleBar.tsx`, `src/components/editor/ContextEditor.tsx`, `src/components/tree/FileTree.tsx`
-
----
-
-### Session 013
-
-- **Focus Area:** Global Extension Overrides and Prompt Integrity (Phase 12).
-- **Key Decisions:**
-  - **Dictionary Management UI:** Built a dedicated CRUD interface inside the `SettingsModal` allowing users to define arbitrary file extension mappings (e.g., `.uproject` -> `.json`).
-  - **File Spoofing Engine:** Modified both the Ephemeral and Full Export engines to dynamically detect and physically rename files based on the global `extensionOverrides` config before they are written to the OS temp directory.
-  - **Truth in Prompting:** Adhered strictly to the Prompt Integrity architecture rule by automatically appending `(Exported as [NewFileName])` directly to the `ExportedFileTree.md` Markdown tree structure for any spoofed file, ensuring the LLM understands the original file type despite the bypass.
-- **Roadblocks Resolved:**
-  - Fixed a TypeScript argument mismatch where the `Sidebar.tsx` history package generation was calling the old `generateEphemeralPayload` signature lacking the new `extensionOverrides` argument.
-- **Core Files Modified:**
-  - `src/components/layout/SettingsModal.tsx`
-  - `src/utils/exportEngine.ts`
-  - `src/components/layout/MainStage.tsx`, `src/components/export/ExportStage.tsx`, `src/components/tree/FileTree.tsx`, `src/components/layout/Sidebar.tsx`
-
----
-
-### Session 014
-
-- **Focus Area:** Node.js Event Loop Starvation, Watcher Optimization, and Disk I/O Performance.
-- **Key Decisions:**
-  - **Synchronous Export I/O:** Switched the payload generation engine from asynchronous `fs.promises` to synchronous `fsSync`. This prevents the Node.js event loop's microtask queue from starving our local disk writes when heavy background tasks (like `chokidar`) are flooding the event loop. Export times dropped from 25+ seconds to ~15 milliseconds.
-  - **Windows-Safe Chokidar Ignores:** Replaced Chokidar's string-based glob ignores (`**/node_modules/**`) with a native JavaScript evaluation function (`path.split(/[\/\\]/).some(...)`). This accurately drops blacklisted directories on Windows OS natively, stopping Chokidar from endlessly recursing into massive folders like UE's `Intermediate`.
-  - **Watcher Event Shielding:** Deferred Chokidar's `on('all')` IPC event bindings until _after_ the `ready` event fires. This physically prevents thousands of initial `add` events from flooding the IPC bridge and freezing the React frontend during startup.
-  - **Anti-Virus Folder Lock Bypass:** Implemented unique, timestamped export directories (`xcerpt_export_<timestamp>_<hash>`) instead of deleting and recreating the same temp folder. This prevents Windows Defender's real-time protection from flagging the action as ransomware and locking the I/O pipeline.
-- **Roadblocks Resolved:**
-  - Eliminated the infinite loading loop during workspace switching caused by orphaned watchers.
-  - Resolved the 25+ second payload generation delay (Event Loop Starvation).
-  - Cured the 30-second 5 FPS application stuttering and memory creep during massive workspace loads (Chokidar CPU pinning).
-- **Core Files Modified:**
-  - `main.cjs`
-  - `src/components/layout/MainStage.tsx`
-  - `src/components/tree/FileTree.tsx`
+  - `package.json`, `src/components/tree/useFlattenedTree.ts`
+  - `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`, `src/components/tree/ContextMenu.tsx`, `src/store/workspaceStore.ts`
 
 ---
 
@@ -126,3 +37,4 @@
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.
 - **Epoch 01 (Foundation & Architecture):** Established the core Vite + React + Electron + Zustand stack with Tailwind CSS v4. Enforced the "Stable Relative Path" architectural rule, binding all React keys and Zustand state maps strictly to file paths to permanently resolve UI selection drift. Bootstrapped the initial recursive file scanner and unified frameless Tree UI.
 - **Epoch 02 (Context Compression & Export Staging):** Integrated `@monaco-editor/react` for context compression with a read-only, auto-healing skip-block system bound to stable relative paths. Built a high-performance Export Engine leveraging Node.js recursive scanning (using directory-first `dirent` checks to bypass `try/catch` I/O spikes), a single mutable `Context` object for memory safety, and flattened chunk exports via native OS drag-and-drop. Transitioned the architecture to a Multi-Workspace IDE utilizing a Dual-Store setup (`AppStore` for global IDE state, single re-hydrating `WorkspaceStore` for the active project) with implicit auto-saving, responsive container queries, and a full-screen Workspace Browser overlay.
+- **Epoch 03 (Advanced Workflows & Customization):** Decoupled the background chunking engine from explicitly invoked, process-bound "Ephemeral Quick Exports". Migrated workspace logic to a Preset-based architecture allowing users to swap visual exclusions and compression profiles instantly. Overhauled the UI with a fixed-position flyout sidebar, eliminated vertical layout shifting (CLS) in the File Tree, and integrated dynamic, CSS-variable-based theming. Introduced a global File Spoofing engine (Extension Overrides) to seamlessly bypass strict LLM upload filters while explicitly logging the physical renaming inside the prompt. Fixed critical Node.js CPU/Event Loop starvation by migrating export I/O to synchronous blocking calls and utilizing native regex evaluations to shield Chokidar watcher events.

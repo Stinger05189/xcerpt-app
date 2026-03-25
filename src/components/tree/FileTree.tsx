@@ -1,11 +1,13 @@
 // src/components/tree/FileTree.tsx
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import type { FileNode } from '../../types/ipc';
 import { TreeNode } from './TreeNode';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
 import { Search, Plus, LayoutTemplate, EyeOff, X, Zap, Loader2, GripVertical } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useFlattenedTree } from './useFlattenedTree';
 
 interface FileTreeProps {
   node: FileNode;
@@ -13,20 +15,30 @@ interface FileTreeProps {
   relativePath: string;
 }
 
-export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
+export function FileTree({ node, rootPath }: FileTreeProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [hasLoggedDrag, setHasLoggedDrag] = useState(false);
 
   const config = useAppStore(s => s.config);
 
-  // Subscribe only to primitives/booleans to prevent tree re-rendering
   const isPainting = useWorkspaceStore(s => s.isPainting);
   const isEphemeralBuilding = useWorkspaceStore(s => s.isEphemeralBuilding);
   const ephemeralDragPaths = useWorkspaceStore(s => s.ephemeralDragPaths);
 
-  // Local state to break the React render lock during marquee painting
   const [stats, setStats] = useState({ fileCount: 0, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 });
   const [hasSelection, setHasSelection] = useState(false);
+
+  // --- Virtualization Architecture ---
+  const expandedFolders = useWorkspaceStore(s => s.expandedFolders);
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  // --- Marquee & Drag Engine ---
+  const [marquee, setMarquee] = useState<{ startIndex: number; currentIndex: number; mode: 'add' | 'remove' } | null>(null);
+
+  const baseSelectionRef = useRef<Set<string>>(new Set());
+  const dragStateRef = useRef<{ startIndex: number, mode: 'add' | 'remove' } | null>(null);
+  const lastPointerYRef = useRef<number>(0);
+  const autoScrollRafRef = useRef<number | null>(null);
 
   // Deferred Calculation Engine
   useEffect(() => {
@@ -134,6 +146,146 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
     return visible;
   }, [node, searchQuery]);
 
+  const flatNodes = useFlattenedTree(node, expandedFolders, visiblePaths);
+
+  // ANTI-STALE CLOSURE REF: Guarantees the drag engine always sees the live tree
+  const flatNodesRef = useRef(flatNodes);
+  useEffect(() => {
+    flatNodesRef.current = flatNodes;
+  }, [flatNodes]);
+
+  const ROW_HEIGHT = 28;
+
+  const virtualizer = useVirtualizer({
+    count: flatNodes.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 15, 
+  });
+
+  // --- 1D Mathematical Marquee System ---
+
+  const updateSelectionFromPointer = (clientY: number) => {
+    if (!parentRef.current || !dragStateRef.current) return;
+    const container = parentRef.current;
+    const rect = container.getBoundingClientRect();
+    
+    const offsetY = container.scrollTop + (clientY - rect.top);
+    let currentIndex = Math.floor(offsetY / ROW_HEIGHT);
+    currentIndex = Math.max(0, Math.min(currentIndex, flatNodesRef.current.length - 1));
+    
+    setMarquee(prev => prev ? { ...prev, currentIndex } : null);
+    
+    const { startIndex, mode } = dragStateRef.current;
+    const minIdx = Math.min(startIndex, currentIndex);
+    const maxIdx = Math.max(startIndex, currentIndex);
+    
+    const newSelection = new Set(baseSelectionRef.current);
+    for (let i = minIdx; i <= maxIdx; i++) {
+      const flatNode = flatNodesRef.current[i];
+      if (!flatNode) continue;
+      const pattern = flatNode.node.type === 'directory' ? `${flatNode.relativePath}/` : flatNode.relativePath;
+      
+      if (mode === 'add') newSelection.add(pattern);
+      else newSelection.delete(pattern);
+    }
+    
+    useWorkspaceStore.getState().setSelectedFiles(newSelection);
+  };
+
+  const handlePointerMove = (e: PointerEvent) => {
+    lastPointerYRef.current = e.clientY;
+    updateSelectionFromPointer(e.clientY);
+    
+    if (!autoScrollRafRef.current) {
+      startAutoScroll();
+    }
+  };
+
+  const startAutoScroll = () => {
+    const loop = () => {
+      if (!parentRef.current || !dragStateRef.current) {
+        autoScrollRafRef.current = null;
+        return;
+      }
+      
+      const container = parentRef.current;
+      const rect = container.getBoundingClientRect();
+      const y = lastPointerYRef.current;
+    
+      const SCROLL_SPEED = 15;
+      const THRESHOLD = 40;
+    
+      let scrolled = false;
+      if (y < rect.top + THRESHOLD) {
+        container.scrollTop -= SCROLL_SPEED;
+        scrolled = true;
+      } else if (y > rect.bottom - THRESHOLD) {
+        container.scrollTop += SCROLL_SPEED;
+        scrolled = true;
+      }
+    
+      if (scrolled) {
+        updateSelectionFromPointer(y);
+        autoScrollRafRef.current = requestAnimationFrame(loop);
+      } else {
+        autoScrollRafRef.current = null; 
+      }
+    };
+    autoScrollRafRef.current = requestAnimationFrame(loop);
+  };
+
+  const handlePointerUp = () => {
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', handlePointerUp);
+    if (autoScrollRafRef.current) cancelAnimationFrame(autoScrollRafRef.current);
+    autoScrollRafRef.current = null;
+    dragStateRef.current = null;
+    setMarquee(null);
+    useWorkspaceStore.getState().setIsPainting(false);
+  };
+
+  const handleRowPointerDown = (e: React.PointerEvent, index: number, pattern: string, isDirectory: boolean) => {
+    if (e.button !== 0) return;
+    
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (e.clientX - rect.left <= 32) return; 
+    
+    e.stopPropagation();
+    e.preventDefault(); 
+    
+    const store = useWorkspaceStore.getState();
+    const hasPattern = store.selectedFiles.has(pattern);
+    
+    let mode: 'add' | 'remove' = 'add';
+    let clearFirst = false;
+    
+    if (e.shiftKey) mode = 'add';
+    else if (e.altKey) mode = 'remove';
+    else if (e.ctrlKey || e.metaKey) mode = hasPattern ? 'remove' : 'add';
+    else {
+      mode = 'add';
+      clearFirst = true;
+      if (!isDirectory) store.setActiveFile(pattern);
+    }
+    
+    const baseSelection = clearFirst ? new Set<string>() : new Set(store.selectedFiles);
+    if (mode === 'add') baseSelection.add(pattern);
+    else baseSelection.delete(pattern);
+    
+    store.setSelectedFiles(baseSelection);
+    store.setIsPainting(true);
+    
+    setMarquee({ startIndex: index, currentIndex: index, mode });
+    
+    baseSelectionRef.current = baseSelection;
+    dragStateRef.current = { startIndex: index, mode };
+    lastPointerYRef.current = e.clientY;
+    
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
@@ -166,22 +318,65 @@ export function FileTree({ node, rootPath, relativePath }: FileTreeProps) {
         />
       </div>
     
-      {/* Scrollable Tree Container */}
+      {/* Scrollable Virtualized Tree Container */}
       <div 
-        className={`flex-1 overflow-y-auto font-mono text-text-primary relative pb-4 ${isPainting ? 'is-painting' : ''}`}
+        ref={parentRef}
+        className={`flex-1 overflow-y-auto font-mono text-text-primary relative pb-4 select-none ${isPainting ? 'is-painting' : ''}`}
         style={{ fontSize: config.theme.font.size }}
-        onMouseUp={() => useWorkspaceStore.getState().stopPainting()}
-        onMouseLeave={() => useWorkspaceStore.getState().stopPainting()}
         onClick={(e) => {
           if (e.target === e.currentTarget) useWorkspaceStore.getState().setSelectedFiles(new Set());
         }}
       >
-        <TreeNode 
-          node={node} 
-          rootPath={rootPath} 
-          relativePath={relativePath} 
-          visiblePaths={visiblePaths}
-        />
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: '100%',
+            position: 'relative',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const flatNode = flatNodes[virtualRow.index];
+            const isDirectory = flatNode.node.type === 'directory';
+            const pattern = isDirectory ? `${flatNode.relativePath}/` : flatNode.relativePath;
+            
+            return (
+              <TreeNode
+                key={flatNode.relativePath}
+                node={flatNode.node}
+                rootPath={rootPath}
+                relativePath={flatNode.relativePath}
+                depth={flatNode.depth}
+                onPointerDown={(e) => handleRowPointerDown(e, virtualRow.index, pattern, isDirectory)}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              />
+            );
+          })}
+          
+          {/* Virtual Selection Brush */}
+          {marquee && (
+            <div
+              style={{
+                position: 'absolute',
+                top: `${Math.min(marquee.startIndex, marquee.currentIndex) * ROW_HEIGHT}px`,
+                height: `${(Math.abs(marquee.currentIndex - marquee.startIndex) + 1) * ROW_HEIGHT}px`,
+                left: 0,
+                right: 0,
+                backgroundColor: marquee.mode === 'add' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                border: `1px solid ${marquee.mode === 'add' ? 'rgba(139, 92, 246, 0.5)' : 'rgba(239, 68, 68, 0.5)'}`,
+                pointerEvents: 'none',
+                zIndex: 10,
+                borderRadius: '4px'
+              }}
+            />
+          )}
+        </div>
       </div>
        
       {/* Persistent Stats & Actions Bar */}

@@ -1,5 +1,6 @@
 // src/components/tree/ContextMenu.tsx
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { X, EyeOff, LayoutTemplate, Plus, FolderOpen, ShieldBan, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
 
@@ -91,7 +92,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
 
   if (selectedFiles.size === 0) return null;
 
-  return (
+  return createPortal(
     <div 
       ref={menuRef}
       className="fixed z-50 w-64 bg-bg-panel border border-border-subtle rounded-lg shadow-xl overflow-hidden py-1 text-sm text-text-primary"
@@ -109,7 +110,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
         <span className="flex items-center gap-2"><Plus size={14} className="text-green-400" /> Include</span>
         <span className="text-[10px] text-text-muted font-mono">A</span>
       </button>
-    
+
       <button 
         onClick={() => { applyRuleToSelection('tree-only'); onClose(); }}
         className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-hover text-left transition-colors"
@@ -169,6 +170,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
       >
         <X size={14} /> Cancel
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
