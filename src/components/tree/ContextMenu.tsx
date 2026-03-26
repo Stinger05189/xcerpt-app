@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { X, EyeOff, LayoutTemplate, Plus, FolderOpen, ShieldBan, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
+import { X, EyeOff, LayoutTemplate, Plus, FolderSearch, ShieldBan, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
 
 interface ContextMenuProps {
   x: number;
@@ -133,10 +133,10 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
         onClick={handleRevealInExplorer}
         className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-hover text-left transition-colors"
       >
-        <span className="flex items-center gap-2"><FolderOpen size={14} className="text-blue-400" /> Reveal in OS</span>
-        <span className="text-[10px] text-text-muted font-mono">⇧⌥R</span>
+        <span className="flex items-center gap-2"><FolderSearch size={14} className="text-blue-400" /> Reveal in OS</span>
+        <span className="text-[10px] text-text-muted font-mono">Shift+Alt+R</span>
       </button>
-
+    
       {hasDirectories && (
         <>
           <button 

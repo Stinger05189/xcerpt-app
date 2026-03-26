@@ -47,6 +47,27 @@
 
 ---
 
+### Session 017
+
+- **Focus Area:** Workspace Statistics, Git Integration, Export UI Overhaul, and Updater UX (Phase 15).
+- **Key Decisions:**
+  - **Hard Blacklisting (`.gitignore`):** Shifted `.gitignore` parsing directly into the `main.cjs` recursive scanner using the `ignore` package. Ignored folders are now instantly dropped before IPC transmission or watcher attachment, drastically improving performance.
+  - **Git Status Integration:** Integrated a non-blocking `git status --porcelain` execution in the Node backend. Polled dynamically on tab switches and external edits, mapping states (M, A, ??) to distinct text colors in `TreeNode` without overriding explicit Excluded/Tree-Only UI states.
+  - **Export Table & Resizability:** Completely overhauled the `ExportStage` payload chunk view from a flat list to a rich, sortable HTML `<table>`. Implemented `<colgroup>` with `table-layout: fixed` and custom pointer drag-handlers for smooth column resizing.
+  - **Workspace Statistics:** Expanded the `WorkspacePayload` schema to track `totalExports`, `ephemeralExports`, and `fileFrequencies`. Rendered these as persistent global metrics in the `Sidebar` and wired them to the new Export Table.
+  - **Updater UX:** Displayed `appVersion` in the TitleBar alongside a manual "Check for Updates" button and a subtle progress bar mapped to `autoUpdater` download events.
+- **Roadblocks Resolved:**
+  - **Production Drag-and-Drop Image:** Fixed native dragging in packaged binaries by conditionally routing `nativeImage.createFromPath` to `dist/drag-package.png` when `app.isPackaged` is true.
+  - **Z-Index Clipping:** Lowered the resizable tree handle to `z-10` to prevent it from intercepting pointer events when the `Workspace Inspector` flyout overlaps it.
+  - **Stale Closures:** Added `fetchGitStatus` to the `MainStage` watcher `useEffect` dependencies to satisfy React hook purity rules.
+- **Core Files Modified:**
+  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+  - `src/store/appStore.ts`, `src/store/workspaceStore.ts`
+  - `src/components/export/ExportStage.tsx`, `src/components/layout/Sidebar.tsx`, `src/components/layout/MainStage.tsx`, `src/components/layout/TitleBar.tsx`
+  - `src/components/tree/TreeNode.tsx`, `src/components/tree/ContextMenu.tsx`, `src/utils/exportEngine.ts`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

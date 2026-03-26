@@ -19,16 +19,20 @@ const generateFreshWorkspace = async (id: string) => {
   const freshPayload: WorkspacePayload = {
     id,
     version: "3.0",
-    metadata: { id, name: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), totalIncludedFiles: 0, rootPaths: [] },
+    metadata: { 
+      id, 
+      name: null, 
+      createdAt: new Date().toISOString(), 
+      updatedAt: new Date().toISOString(), 
+      totalIncludedFiles: 0, 
+      rootPaths: [],
+      stats: { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} }
+    },
     settings: { maxFilesPerChunk: 100000 },
     rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist },
     activePresetId: defaultPreset.id,
     presets: [defaultPreset],
-    /*
-    rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist, inclusions: [], exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'], treeOnly: [] },
-    compressions: {},
-    */
-    uiState: { expandedFolders: [], activeTab: null }
+    uiState: { expandedFolders: [], activeTab: null, paneWidths: { sidebar: 320, tree: 320 } }
   };
   await window.api.saveSession(id, freshPayload);
 };
@@ -43,17 +47,18 @@ const getWorkspacePayload = (state: ReturnType<typeof useWorkspaceStore.getState
     createdAt: state.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     totalIncludedFiles: 0,
-    rootPaths: state.rootPaths
+    rootPaths: state.rootPaths,
+    stats: state.stats
   },
   settings: { maxFilesPerChunk: state.maxFilesPerChunk },
   rules: { hardBlacklist: state.hardBlacklist },
   activePresetId: state.activePresetId!,
   presets: state.getPackedPresets(),
-  /*
-  rules: { hardBlacklist: state.hardBlacklist, inclusions: state.includes, exclusions: state.excludes, treeOnly: state.treeOnly },
-  compressions: state.compressions,
-  */
-  uiState: { expandedFolders: Array.from(state.expandedFolders), activeTab: state.activeTab }
+  uiState: { 
+    expandedFolders: Array.from(state.expandedFolders), 
+    activeTab: state.activeTab,
+    paneWidths: state.paneWidths
+  }
 });
 
 export function Bootstrapper({ children }: { children: React.ReactNode }) {

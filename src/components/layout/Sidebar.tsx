@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
-import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock, RefreshCw, ChevronDown, Edit2, Trash2, Plus, RotateCcw, Check, Loader2, GripVertical, MousePointer } from 'lucide-react';
+import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock, RefreshCw, ChevronDown, Edit2, Trash2, Plus, RotateCcw, Check, Loader2, GripVertical, MousePointer, Activity } from 'lucide-react';
 import type { ExportHistory } from '../../types/ipc';
 
 type Tab = 'RULES' | 'STATS' | 'HISTORY';
@@ -26,7 +26,7 @@ export function Sidebar() {
     pendingBlacklist, removePendingBlacklistRule, commitBlacklist,
     isSidebarOpen, setSidebarOpen,
     activePresetId, presets, presetSnapshots, switchPreset, createPreset, renamePreset, deletePreset, revertPreset,
-    setSelectedFiles, activeTab, rootPaths, rawTrees
+    setSelectedFiles, activeTab, rootPaths, rawTrees, paneWidths, setPaneWidth
   } = useWorkspaceStore();
 
   const extensionOverrides = useAppStore(s => s.config.extensionOverrides);
@@ -46,6 +46,7 @@ export function Sidebar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const activePreset = presets.find(p => p.id === activePresetId);
+  const stats = useWorkspaceStore(s => s.stats);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -131,10 +132,32 @@ export function Sidebar() {
       const payload = generateEphemeralPayload(root, tree, new Set(h.files), compressions, extensionOverrides);
       const paths = await window.api.stageEphemeralExport(payload);
       setHistoryStates(prev => ({ ...prev, [h.id]: { loading: false, paths } }));
+      useWorkspaceStore.getState().incrementStat('ephemeralExports', h.files);
     } catch (error) {
       console.error('Failed to package historical context', error);
       setHistoryStates(prev => ({ ...prev, [h.id]: { loading: false, paths: null } }));
     }
+  };
+
+  const handleDragResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = paneWidths.sidebar;
+    
+    const onMove = (moveEvent: PointerEvent) => {
+      const newWidth = Math.max(240, Math.min(600, startWidth + (moveEvent.clientX - startX)));
+      setPaneWidth('sidebar', newWidth);
+    };
+    
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+    };
+    
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
   };
 
   return (
@@ -148,7 +171,17 @@ export function Sidebar() {
       
       {/* Unified Sliding Container */}
       <div className={`fixed top-10 bottom-0 left-0 z-40 flex transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <aside className="w-80 h-full bg-bg-panel border-r border-border-subtle flex flex-col shadow-2xl shrink-0">
+        <aside 
+          className="h-full bg-bg-panel border-r border-border-subtle flex flex-col shadow-2xl shrink-0 relative"
+          style={{ width: paneWidths.sidebar }}
+        >
+          {/* Drag Handle */}
+          <div 
+            className="absolute top-0 bottom-0 -right-1.5 w-3 cursor-col-resize z-50 group"
+            onPointerDown={handleDragResize}
+          >
+            <div className="w-0.5 h-full mx-auto bg-transparent group-hover:bg-accent/50 transition-colors" />
+          </div>
           
           {/* Workspace Title Header */}
         <div className="h-10 flex items-center px-4 border-b border-border-subtle shrink-0 bg-bg-base">
@@ -336,16 +369,55 @@ export function Sidebar() {
           )}
           
           {activeTabState === 'STATS' && (
-            <div className="space-y-4">
-              <h2 className="text-xs uppercase font-semibold text-text-muted mb-3 tracking-widest">Live Estimations</h2>
-              <div className="bg-bg-base border border-border-subtle rounded-lg p-3 flex flex-col gap-1">
-                <span className="text-xs text-text-muted flex items-center gap-1"><Zap size={12}/> Estimated Tokens</span>
-                <span className="text-xl font-semibold text-text-primary">124,500</span>
-                <span className="text-xs text-accent mt-1">-12,000 via Skips</span>
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-xs uppercase font-semibold text-text-muted mb-3 tracking-widest flex items-center gap-2"><Activity size={14} /> Global Workspace Metrics</h2>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  <div className="bg-bg-base border border-border-subtle rounded-lg p-3 flex flex-col gap-1">
+                    <span className="text-[10px] uppercase text-text-muted tracking-wide">Full Exports</span>
+                    <span className="text-2xl font-semibold text-text-primary">{stats.totalExports}</span>
+                  </div>
+                  <div className="bg-bg-base border border-border-subtle rounded-lg p-3 flex flex-col gap-1">
+                    <span className="text-[10px] uppercase text-text-muted tracking-wide">Ephemeral Exports</span>
+                    <span className="text-2xl font-semibold text-accent">{stats.ephemeralExports}</span>
+                  </div>
+                </div>
               </div>
-              <div className="bg-bg-base border border-border-subtle rounded-lg p-3 flex flex-col gap-1">
-                <span className="text-xs text-text-muted flex items-center gap-1"><FileJson size={12}/> Included Files</span>
-                <span className="text-xl font-semibold text-text-primary">42 / 1,204</span>
+
+              {stats.fileFrequencies && Object.keys(stats.fileFrequencies).length > 0 && (
+                <div>
+                  <h2 className="text-[10px] uppercase font-semibold text-text-muted mb-3 tracking-widest">Most Exported Files</h2>
+                  <div className="bg-bg-base border border-border-subtle rounded-lg overflow-hidden divide-y divide-border-subtle">
+                    {Object.entries(stats.fileFrequencies)
+                      .sort(([, a], [, b]) => (b as number) - (a as number))
+                      .slice(0, 5)
+                      .map(([file, count], i) => (
+                        <div key={file} className="flex items-center justify-between px-3 py-2 text-xs">
+                          <span className="truncate text-text-primary pr-2 font-mono flex items-center gap-2">
+                            <span className="text-[10px] text-text-muted w-3 text-right">{i + 1}.</span> 
+                            {file.split(/[/\\]/).pop()}
+                          </span>
+                          <span className="text-accent font-medium shrink-0 bg-accent/10 px-1.5 py-0.5 rounded">{count as React.ReactNode}x</span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+              
+              <div className="h-px bg-border-subtle my-2" />
+
+              <div>
+                <h2 className="text-xs uppercase font-semibold text-text-muted mb-3 tracking-widest">Live Selection Estimations</h2>
+                <div className="bg-bg-base border border-border-subtle rounded-lg p-3 flex flex-col gap-1 mb-2">
+                  <span className="text-xs text-text-muted flex items-center gap-1"><Zap size={12}/> Estimated Tokens</span>
+                  <span className="text-xl font-semibold text-text-primary">124,500</span>
+                  <span className="text-xs text-accent mt-1">-12,000 via Skips</span>
+                </div>
+                <div className="bg-bg-base border border-border-subtle rounded-lg p-3 flex flex-col gap-1">
+                  <span className="text-xs text-text-muted flex items-center gap-1"><FileJson size={12}/> Included Files</span>
+                  <span className="text-xl font-semibold text-text-primary">42 / 1,204</span>
+                </div>
               </div>
             </div>
           )}

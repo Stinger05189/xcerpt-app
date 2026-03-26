@@ -31,6 +31,8 @@ export const DEFAULT_CONFIG: AppConfig = {
 interface AppState {
   config: AppConfig;
   isSettingsOpen: boolean;
+  appVersion: string | null;
+  updateProgress: number | null;
 
   activeWorkspaceId: string | null;
   openTabs: TabData[];
@@ -40,6 +42,7 @@ interface AppState {
   loadConfig: () => Promise<void>;
   updateConfig: (newConfig: Partial<AppConfig> | ((prev: AppConfig) => AppConfig)) => void;
   setSettingsOpen: (isOpen: boolean) => void;
+  setUpdateProgress: (progress: number | null) => void;
 
   setActiveWorkspace: (id: string | null) => void;
   addWorkspaceTab: (id: string, title?: string) => void;
@@ -55,6 +58,8 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   config: DEFAULT_CONFIG,
   isSettingsOpen: false,
+  appVersion: null,
+  updateProgress: null,
 
   activeWorkspaceId: null,
   openTabs: [],
@@ -63,9 +68,16 @@ export const useAppStore = create<AppState>((set) => ({
 
   loadConfig: async () => {
     const loaded = await window.api.loadAppConfig();
+    const version = await window.api.getVersion().catch(() => null);
+    
     if (loaded) {
       // Deep merge to ensure missing keys from legacy configs are populated with defaults
-      set({ config: { ...DEFAULT_CONFIG, ...loaded, theme: { ...DEFAULT_CONFIG.theme, ...loaded.theme, colors: { ...DEFAULT_CONFIG.theme.colors, ...(loaded.theme?.colors || {}) } } } });
+      set({ 
+        appVersion: version,
+        config: { ...DEFAULT_CONFIG, ...loaded, theme: { ...DEFAULT_CONFIG.theme, ...loaded.theme, colors: { ...DEFAULT_CONFIG.theme.colors, ...(loaded.theme?.colors || {}) } } } 
+      });
+    } else {
+      set({ appVersion: version });
     }
   },
 
@@ -78,6 +90,7 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+  setUpdateProgress: (progress) => set({ updateProgress: progress }),
 
   setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
 

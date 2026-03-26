@@ -27,7 +27,11 @@ export function MainStage() {
     isStale,
     isBuilding,
     chunkPaths,
-    setExportState
+    setExportState,
+    paneWidths,
+    setPaneWidth,
+    fetchGitStatus,
+    incrementStat
   } = useWorkspaceStore();
 
   const [activePayload, setActivePayload] = useState<ReturnType<typeof generateExportPayload> | null>(null);
@@ -46,6 +50,9 @@ export function MainStage() {
     const cleanup = window.api.onFileChange((event, changedPath) => {
       console.log(`External edit detected [${event}]: ${changedPath}`);
       
+      // Refresh git status implicitly in background
+      fetchGitStatus();
+    
       // If a file was added or deleted, we need to rescan the affected root before rebuilding
       if (event === 'add' || event === 'unlink') {
         const normalizedChanged = changedPath.replace(/\\/g, '/');
@@ -59,7 +66,7 @@ export function MainStage() {
       setExportState({ isStale: true });
     });
     return cleanup;
-  }, [rootPaths, addRootPath, setExportState]);
+  }, [rootPaths, addRootPath, setExportState, fetchGitStatus]);
 
   // --- Auto-Build Pipeline: Mark Stale on Config Change ---
   useEffect(() => {
@@ -95,6 +102,34 @@ export function MainStage() {
     
     return () => clearTimeout(timer);
   }, [isStale, rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, setExportState]);
+
+  // --- Fetch Git Status on Tab Switch ---
+  useEffect(() => {
+    if (activeTab) {
+      fetchGitStatus();
+    }
+  }, [activeTab, fetchGitStatus]);
+
+  const handleTreeDragResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = paneWidths.tree;
+    
+    const onMove = (moveEvent: PointerEvent) => {
+      const newWidth = Math.max(200, Math.min(800, startWidth + (moveEvent.clientX - startX)));
+      setPaneWidth('tree', newWidth);
+    };
+    
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+    };
+    
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  };
 
   const activeTree = activeTab ? rawTrees[activeTab] : null;
   const hasFiles = chunkPaths.length > 0;
@@ -162,6 +197,8 @@ export function MainStage() {
                       onDragStart={(e) => {
                         e.preventDefault();
                         window.api.startDrag(dragFiles);
+                        // Log full workspace export stats
+                        incrementStat('totalExports', dragFiles.map(f => f.split(/[/\\]/).pop() || f));
                       }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-accent text-white hover:bg-accent/90 cursor-grab active:cursor-grabbing shadow-sm transition-all"
                       title={`Drag ${dragFiles.length} files to your browser`}
@@ -192,8 +229,19 @@ export function MainStage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Left Pane: Tree */}
         {activeTree ? (
-          <div className="w-1/3 min-w-62.5 max-w-100 h-full overflow-y-auto p-4 border-r border-border-subtle bg-bg-base shrink-0">
+          <div 
+            className="h-full overflow-y-auto p-4 bg-bg-base shrink-0 relative"
+            style={{ width: paneWidths.tree }}
+          >
             <FileTree node={activeTree} rootPath={activeTab!} relativePath="" />
+            
+            {/* Tree Drag Handle */}
+            <div 
+              className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-10 group flex justify-end"
+              onPointerDown={handleTreeDragResize}
+            >
+              <div className="w-px h-full bg-border-subtle group-hover:bg-accent transition-colors" />
+            </div>
           </div>
         ) : (
           <div className="flex-1 h-full flex flex-col items-center justify-center text-text-muted">

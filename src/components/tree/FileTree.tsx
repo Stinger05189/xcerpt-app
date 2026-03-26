@@ -288,10 +288,40 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (document.activeElement?.tagName === 'INPUT') return;
-      const state = useWorkspaceStore.getState();
+      // Prevent keybinds from firing inside search bars or the Monaco Editor
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
       
+      const state = useWorkspaceStore.getState();
+
+      // Select All binding (Ctrl+A / Cmd+A)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const allVisiblePatterns = flatNodesRef.current.map(fn => 
+          fn.node.type === 'directory' ? `${fn.relativePath}/` : fn.relativePath
+        );
+        state.setSelectedFiles(new Set(allVisiblePatterns));
+        return;
+      }
+      
+      // Stop execution for active-selection actions if nothing is selected
       if (state.selectedFiles.size === 0) return;
+
+      // Reveal in OS binding
+      if (e.shiftKey && e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        const firstSelected = Array.from(state.selectedFiles)[0];
+        if (firstSelected) {
+          const cleanPath = firstSelected.replace(/\/$/, '');
+          const absPath = `${rootPath}/${cleanPath}`.replace(/\\/g, '/');
+          window.api.showItemInFolder(absPath);
+        }
+        return;
+      }
+
+      // Ignore standard keybinds if the user is holding Ctrl/Cmd/Alt 
+      // (prevents conflict with Ctrl+A, Cmd+S, etc.)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
     
       switch(e.key.toLowerCase()) {
         case 'a': state.applyRuleToSelection('include'); break;
@@ -302,7 +332,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [rootPath]);
 
   return (
     <div className="flex flex-col h-full relative @container">

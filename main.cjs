@@ -8,20 +8,21 @@ const os = require('os');
 const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('electron');
 const chokidar = require('chokidar');
 const { performance, monitorEventLoopDelay } = require('perf_hooks');
-const fsSync = require('fs'); // Added for Synchronous testing
+const fsSync = require('fs');
+// Added for Synchronous testing
 const { autoUpdater } = require('electron-updater');
+const { exec } = require('child_process');
+const ignore = require('ignore');
 
 // Start monitoring the event loop for lag
 const elMonitor = monitorEventLoopDelay({ resolution: 10 });
 elMonitor.enable();
 
 const SESSIONS_DIR = path.join(app.getPath('userData'), 'XcerptSessions');
-
 let fileWatcher = null;
 let watchedPaths = new Set();
 let currentBlacklist = [];
 let mainWindow = null;
-
 let isWatcherUpdating = false;
 let pendingWatcherUpdate = false;
 
@@ -53,7 +54,6 @@ async function cleanupOldExports() {
 // --- File Scanner Logic ---
 async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relativeToRoot = '', isDir = true, context = { gitignoreRules: [], treeOnlyRules: [] }) {
   const name = path.basename(currentPath);
-
   const node = {
     path: currentPath,
     name: currentPath === rootPath ? rootPath : name,
@@ -95,8 +95,18 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     } catch (e) {}
   }
 
+  const ig = ignore();
+  ig.add(blacklist);
+  if (context.gitignoreRules.length > 0) {
+    ig.add(context.gitignoreRules);
+  }
+
   const sortedEntries = entries
-    .filter(entry => !blacklist.includes(entry.name))
+    .filter(entry => {
+      const childRelative = path.posix.join(relativeToRoot.replace(/\\/g, '/'), entry.name);
+      if (ig.ignores(childRelative) || blacklist.includes(entry.name)) return false;
+      return true;
+    })
     .sort((a, b) => {
       if (a.isDirectory() && !b.isDirectory()) return -1;
       if (!a.isDirectory() && b.isDirectory()) return 1;
@@ -106,7 +116,6 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
   for (const entry of sortedEntries) {
     const childPath = path.join(currentPath, entry.name);
     const childRelative = path.posix.join(relativeToRoot.replace(/\\/g, '/'), entry.name);
-    
     const { node: childNode } = await scanDirectory(
       rootPath, 
       blacklist, 
@@ -115,7 +124,6 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
       entry.isDirectory(), 
       context
     );
-    
     node.children.push(childNode);
     node.size += childNode.size;
   }
@@ -136,7 +144,7 @@ async function processExport(payload) {
     const chunkDir = path.join(exportDir, `chunk_${chunk.id}`);
     fsSync.mkdirSync(chunkDir, { recursive: true });
     chunkPaths.push(chunkDir);
-    
+
     if (chunk.id === 1) {
       fsSync.writeFileSync(path.join(chunkDir, 'ExportedFileTree.md'), payload.treeMarkdown, 'utf-8');
     }
@@ -149,6 +157,7 @@ async function processExport(payload) {
         
         const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
+         
           const skipCount = comp.endLine - comp.startLine + 1;
           const marker = `// ... [Skipped ${skipCount} lines] ...`;
           lines.splice(comp.startLine - 1, skipCount, marker);
@@ -158,6 +167,7 @@ async function processExport(payload) {
         fsSync.writeFileSync(outPath, lines.join('\n'), 'utf-8');
       } catch (err) {
         console.error(`Error processing file ${file.absolutePath}:`, err);
+ 
       }
     });
   }
@@ -170,7 +180,6 @@ async function processEphemeralExport(payload) {
   fsSync.mkdirSync(ephemeralDir, { recursive: true });
 
   const createdPaths = [];
-
   const treePath = path.join(ephemeralDir, 'ExportedFileTree.md');
   fsSync.writeFileSync(treePath, payload.treeMarkdown, 'utf-8');
   createdPaths.push(treePath);
@@ -184,6 +193,7 @@ async function processEphemeralExport(payload) {
       for (const comp of sortedComps) {
         const skipCount = comp.endLine - comp.startLine + 1;
         const marker = `// ... [Skipped ${skipCount} lines] ...`;
+   
         lines.splice(comp.startLine - 1, skipCount, marker);
       }
       
@@ -228,7 +238,7 @@ async function setupWatcher() {
         persistent: true,
         ignoreInitial: true,
       });
-    
+
       // 2. EVENT SHIELDING:
       // Do not attach the 'all' listener until the initial background scan is 100% complete.
       // This prevents thousands of 'add' events from flooding the IPC bridge and freezing React.
@@ -297,10 +307,12 @@ app.on('window-all-closed', () => {
 ipcMain.handle('ping', () => 'pong');
 
 ipcMain.handle('window:minimize', (e) => { BrowserWindow.fromWebContents(e.sender)?.minimize(); });
+
 ipcMain.handle('window:maximize', (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (win) win.isMaximized() ? win.unmaximize() : win.maximize();
 });
+
 ipcMain.handle('window:close', (e) => { BrowserWindow.fromWebContents(e.sender)?.close(); });
 
 ipcMain.handle('dialog:selectDirectory', async () => {
@@ -316,6 +328,14 @@ autoUpdater.on('update-available', () => {
 
 autoUpdater.on('update-downloaded', () => {
   if (mainWindow) mainWindow.webContents.send('updater:status', 'update-downloaded');
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+  if (mainWindow) mainWindow.webContents.send('updater:progress', progressObj.percent);
+});
+
+ipcMain.handle('updater:check', () => {
+  autoUpdater.checkForUpdatesAndNotify();
 });
 
 ipcMain.handle('updater:install', () => {
@@ -361,8 +381,31 @@ ipcMain.on('shell:showItemInFolder', (_, targetPath) => {
   shell.showItemInFolder(targetPath);
 });
 
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
+ipcMain.handle('git:getStatus', async (_, dirPath) => {
+  return new Promise((resolve) => {
+    exec('git status --porcelain', { cwd: dirPath }, (error, stdout) => {
+      if (error) {
+        resolve({});
+        return;
+      }
+      const statusMap = {};
+      const lines = stdout.split('\n').filter(line => line.trim().length > 0);
+      lines.forEach(line => {
+        const status = line.substring(0, 2);
+        const file = line.substring(3).trim().replace(/^"|"$/g, '');
+        statusMap[file] = status;
+      });
+      resolve(statusMap);
+    });
+  });
+});
+
 ipcMain.on('drag:start', (e, filePaths) => {
-  const iconPath = path.join(__dirname, 'public', 'drag-package.png');
+  const iconPath = app.isPackaged 
+    ? path.join(__dirname, 'dist', 'drag-package.png')
+    : path.join(__dirname, 'public', 'drag-package.png');
   const icon = nativeImage.createFromPath(iconPath);
   e.sender.startDrag({ files: filePaths, icon: icon });
 });

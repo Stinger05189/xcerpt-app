@@ -48,24 +48,25 @@ export function generateEphemeralPayload(
           let flatFileName = `${rootName}_${relativePath.replace(/[/\\]/g, '_')}`;
           let exportNote = "";
         
-          for (const [orig, override] of Object.entries(extensionOverrides)) {
-            if (flatFileName.endsWith(orig)) {
-              flatFileName = flatFileName.slice(0, -orig.length) + override;
-              exportNote = ` (Exported as ${flatFileName})`;
-              break;
-            }
+        for (const [orig, override] of Object.entries(extensionOverrides)) {
+          if (flatFileName.endsWith(orig)) {
+            flatFileName = flatFileName.slice(0, -orig.length) + override;
+            exportNote = ` (Exported as ${flatFileName})`;
+            break;
           }
-        
-          const fileComps = compressions[relativePath] || [];
-        
-          exportFiles.push({
-            absolutePath: `${rootPath}/${relativePath}`.replace(/\\/g, '/'),
-            relativePath: `${rootName}/${relativePath}`,
-            flatFileName,
-            compressions: fileComps
-          });
-        
-          const compCount = fileComps.length;
+        }
+      
+        const fileComps = compressions[relativePath] || [];
+      
+        exportFiles.push({
+          absolutePath: `${rootPath}/${relativePath}`.replace(/\\/g, '/'),
+          relativePath: `${rootName}/${relativePath}`,
+          flatFileName,
+          compressions: fileComps,
+          size: node.size
+        });
+      
+        const compCount = fileComps.length;
           const compStr = compCount > 0 ? ` [${compCount} skips]` : "";
           result += `${prefix}${connector}${node.name}${compStr}${exportNote}\n`;
         }
@@ -110,6 +111,7 @@ export function generateExportPayload(
   extensionOverrides: Record<string, string>
 ): ExportPayload {
   const exportFiles: ExportFile[] = [];
+  const metrics = { excluded: 0, treeOnly: 0, size: 0, tokens: 0 };
 
   let mdTree = `# Exported Workspace Context
 
@@ -166,7 +168,10 @@ export function generateExportPayload(
       }
       
       const status = getFileStatus(currRelative, isDir, includes, excludes, treeOnly);
-      if (status === 'excluded') return "";
+      if (status === 'excluded') {
+        if (!isDir) metrics.excluded++;
+        return "";
+      }
     
       let result = "";
       const connector = isLast ? "└── " : "├── ";
@@ -180,6 +185,7 @@ export function generateExportPayload(
           result += `${prefix}${connector}${collapsedName}/\n`;
         } else {
           if (status === 'tree-only') {
+            metrics.treeOnly++;
             result += `${prefix}${connector}${collapsedName} [-]\n`;
           } else {
             let flatFileName = `${rootName}_${currRelative.replace(/[/\\]/g, '_')}`;
@@ -195,11 +201,13 @@ export function generateExportPayload(
             
             const fileComps = compressions[currRelative] || [];
             
+            metrics.size += currNode.size;
             exportFiles.push({
               absolutePath: `${rootPath}/${currRelative}`.replace(/\\/g, '/'),
               relativePath: `${rootName}/${currRelative}`,
               flatFileName,
-              compressions: fileComps
+              compressions: fileComps,
+              size: currNode.size
             });
             
             const compCount = fileComps.length;
@@ -240,5 +248,7 @@ export function generateExportPayload(
     });
   }
 
-  return { chunks, treeMarkdown: mdTree };
+  metrics.tokens = Math.round(metrics.size / 4);
+
+  return { chunks, treeMarkdown: mdTree, metrics };
 }

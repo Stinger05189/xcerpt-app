@@ -27,6 +27,7 @@ export interface ExportFile {
   relativePath: string;
   flatFileName: string;
   compressions: CompressionRuleIPC[];
+  size: number;
 }
 
 export interface ExportChunk {
@@ -37,6 +38,7 @@ export interface ExportChunk {
 export interface ExportPayload {
   chunks: ExportChunk[];
   treeMarkdown: string;
+  metrics?: { excluded: number; treeOnly: number; size: number; tokens: number; };
 }
 
 export interface EphemeralPayload {
@@ -80,6 +82,11 @@ export interface WorkspaceMetadata {
   updatedAt: string;
   totalIncludedFiles: number;
   rootPaths: string[];
+  stats: {
+    totalExports: number;
+    ephemeralExports: number;
+    fileFrequencies: Record<string, number>;
+  };
 }
 
 export interface ExportHistory {
@@ -116,6 +123,7 @@ export interface WorkspacePayload {
   uiState: {
     expandedFolders: string[];
     activeTab: string | null;
+    paneWidths?: { sidebar: number; tree: number };
   };
 }
 
@@ -128,6 +136,10 @@ export interface ElectronAPI {
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
   setZoomFactor: (factor: number) => void;
+
+  // Git & App Version Info
+  getVersion: () => Promise<string>;
+  getGitStatus: (targetPath: string) => Promise<Record<string, string>>;
 
   // Export & OS API
   stageExport: (payload: ExportPayload) => Promise<string[]>;
@@ -149,6 +161,8 @@ export interface ElectronAPI {
 
   // Auto-Updater
   onUpdateStatus: (callback: (status: 'update-available' | 'update-downloaded') => void) => () => void;
+  onUpdateProgress: (callback: (percent: number) => void) => () => void;
+  checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
 
   // Event Listeners

@@ -1,11 +1,11 @@
 // src/components/layout/TitleBar.tsx
 import { useEffect, useState } from 'react';
-import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud } from 'lucide-react';
+import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
 export function TitleBar() {
-  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen } = useAppStore();
+  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen, updateProgress, appVersion } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
 
   const [updateStatus, setUpdateStatus] = useState<'none' | 'update-available' | 'update-downloaded'>('none');
@@ -15,7 +15,17 @@ export function TitleBar() {
     const cleanup = window.api.onUpdateStatus((status) => {
       setUpdateStatus(status);
     });
-    return cleanup;
+    
+    // We bind the progress listener in the Store initialization (loadConfig/Bootstrapper)
+    // but the actual progress bar UI renders here.
+    const cleanupProg = window.api.onUpdateProgress((percent) => {
+      useAppStore.getState().setUpdateProgress(percent);
+    });
+
+    return () => {
+      cleanup();
+      cleanupProg();
+    };
   }, []);
 
   const handleMinimize = () => window.api.minimizeWindow();
@@ -50,6 +60,18 @@ export function TitleBar() {
           title="Workspace Browser"
         >
           <img src="./icon.svg" alt="Xcerpt" className="w-4 h-4" />
+        </div>
+        
+        {/* Version & Updater Component */}
+        <div className="flex items-center h-full px-1 mb-1 gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          {appVersion && <span className="text-[10px] text-text-muted font-mono opacity-70 cursor-default">v{appVersion}</span>}
+          <button 
+            onClick={() => window.api.checkForUpdates()} 
+            title="Check for Updates" 
+            className="text-text-muted hover:text-accent p-1 rounded hover:bg-bg-hover transition-colors"
+          >
+            <RefreshCw size={10} />
+          </button>
         </div>
         
         {/* Global Settings Toggle */}
@@ -101,7 +123,18 @@ export function TitleBar() {
       </div>
     
       {/* OS Window Controls & Updater */}
-      <div className="flex h-full pb-1 items-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div className="flex h-full pb-1 items-center relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        
+        {/* Update Progress Indicator */}
+        {updateProgress !== null && updateProgress < 100 && updateStatus !== 'update-downloaded' && (
+          <div className="absolute -bottom-px left-0 right-0 h-0.5 bg-bg-hover overflow-hidden">
+            <div 
+              className="h-full bg-accent transition-all duration-300 ease-out" 
+              style={{ width: `${updateProgress}%` }} 
+            />
+          </div>
+        )}
+
         {updateStatus === 'update-downloaded' && (
           <button 
             onClick={() => window.api.installUpdate()}

@@ -24,6 +24,15 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
   const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath));
   const isActiveFile = useWorkspaceStore(s => s.activeFile === relativePath && !isDirectory);
   const isSelected = useWorkspaceStore(s => s.selectedFiles.has(pattern));
+  const gitStatusRaw = useWorkspaceStore(s => s.gitStatus[relativePath]);
+
+  // Map Git Status Codes (e.g., ' M', '??', 'A ')
+  let gitColorClass = '';
+  if (gitStatusRaw && !isDirectory) {
+    if (gitStatusRaw.includes('M')) gitColorClass = 'text-orange-400';
+    else if (gitStatusRaw.includes('A') || gitStatusRaw.includes('?')) gitColorClass = 'text-green-400';
+    else if (gitStatusRaw.includes('D')) gitColorClass = 'text-red-400 line-through opacity-70';
+  }
 
   const includes = useWorkspaceStore(s => s.includes);
   const excludes = useWorkspaceStore(s => s.excludes);
@@ -61,7 +70,7 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
           ${isExcluded ? 'opacity-40' : 'opacity-100'} 
           ${isActiveFile ? 'border-l-2 border-accent bg-accent/5' : 'border-l-2 border-transparent'}
           ${isSelected ? 'bg-bg-hover ring-1 ring-border-subtle' : 'hover:bg-bg-hover'}
-          ${isTreeOnly ? 'text-accent bg-accent/10' : ''}
+          ${isTreeOnly ? 'bg-accent/10' : ''}
         `}
         onPointerDown={onPointerDown}
         onDoubleClick={handleDoubleClick}
@@ -77,11 +86,11 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
           )}
         </div>
         
-        <span className="mr-2 text-text-muted opacity-80">
+        <span className={`mr-2 opacity-80 ${gitColorClass ? gitColorClass : 'text-text-muted'}`}>
           {isDirectory ? <Folder size={14} /> : <File size={14} />}
         </span>
         
-        <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium' : ''}`} title={node.name}>
+        <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium text-accent' : (gitColorClass ? gitColorClass : '')}`} title={node.name}>
           {node.name}
         </span>
         

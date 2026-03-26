@@ -17,6 +17,14 @@ interface WorkspaceState {
   workspaceName: string | null;
   createdAt: string | null;
 
+  stats: {
+    totalExports: number;
+    ephemeralExports: number;
+    fileFrequencies: Record<string, number>;
+  };
+  paneWidths: { sidebar: number; tree: number };
+  gitStatus: Record<string, string>;
+
   rootPaths: string[];
   rawTrees: Record<string, FileNode>;
 
@@ -55,6 +63,10 @@ interface WorkspaceState {
   // Actions
   hydrateWorkspace: (payload: import('../types/ipc').WorkspacePayload) => void;
   setMaxFilesPerChunk: (val: number) => void;
+  setPaneWidth: (pane: 'sidebar' | 'tree', width: number) => void;
+  incrementStat: (type: 'totalExports' | 'ephemeralExports', files?: string[]) => void;
+  fetchGitStatus: () => Promise<void>;
+
   setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[]; isEphemeralBuilding: boolean; ephemeralDragPaths: string[] | null; }>) => void;
   setSidebarOpen: (val: boolean) => void;
   setIsPainting: (val: boolean) => void;
@@ -100,6 +112,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaceId: null,
   workspaceName: null,
   createdAt: null,
+
+  stats: { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} },
+  paneWidths: { sidebar: 320, tree: 320 },
+  gitStatus: {},
 
   rootPaths: [],
   rawTrees: {},
@@ -171,6 +187,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       workspaceId: payload.id,
       workspaceName: payload.metadata.name,
       createdAt: payload.metadata.createdAt,
+      stats: payload.metadata.stats || { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} },
+      paneWidths: payload.uiState.paneWidths || { sidebar: 320, tree: 320 },
+      gitStatus: {},
       rootPaths: [], 
       rawTrees: {},
       hardBlacklist: payload.rules.hardBlacklist,
@@ -203,6 +222,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
+  setPaneWidth: (pane, width) => set(state => ({ paneWidths: { ...state.paneWidths, [pane]: width } })),
+
+  incrementStat: (type, files = []) => set(state => {
+    const newStats = { ...state.stats, fileFrequencies: { ...state.stats.fileFrequencies } };
+    if (type === 'totalExports') newStats.totalExports++;
+    if (type === 'ephemeralExports') newStats.ephemeralExports++;
+    files.forEach(f => {
+      newStats.fileFrequencies[f] = (newStats.fileFrequencies[f] || 0) + 1;
+    });
+    return { stats: newStats };
+  }),
+
+  fetchGitStatus: async () => {
+    const state = get();
+    if (!state.activeTab) return;
+    try {
+      const status = await window.api.getGitStatus(state.activeTab);
+      set({ gitStatus: status });
+    } catch (e) {
+      console.error('Failed to fetch git status:', e);
+    }
+  },
+
   setExportState: (newState) => set((state) => ({ ...state, ...newState })),
   setSidebarOpen: (val: boolean) => set({ isSidebarOpen: val }),
 

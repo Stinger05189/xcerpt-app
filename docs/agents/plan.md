@@ -16,17 +16,25 @@
 
 ## Current Macro-Objective
 
-**Epoch 4, Phase 15: Analytics & Updater UX Polish**
-_Context: The app is packaged and live. However, the background auto-updater currently lacks transparency, leading to UX ambiguity (silent failures or invisible downloads). We must expose updater states and current app versions to the UI. Additionally, we need to implement persistent workspace statistics to quantify the value of the compression engine (e.g., total tokens saved)._
+**Epoch 4, Phase 16: Post-Launch Stabilization & Edge Cases**
+_Context: The application now features robust analytics, full git integration, resizable layouts, and transparent updater UX. We are moving into a stabilization phase to catch edge cases, refine performance bottlenecks, and address real-world usage friction._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Enhanced Auto-Updater UX & Versioning**
-  - _Details:_ Expand the IPC bridge to pipe detailed `electron-updater` events (`checking-for-update`, `download-progress`, `error`) to the `AppStore`. Build a UI element (e.g., in the Settings Modal or a dedicated flyout) to display the current App Version and real-time download progress to resolve "blind" updating.
-- [ ] **Task 2: Workspace Statistics Implementation**
-  - _Details:_ Implement a tracking mechanism to aggregate metrics per workspace (e.g., "Total Tokens Saved via Skips", "Lines Compressed"). Display these global stats in the Sidebar or Workspace Browser to provide tangible feedback on context curation.
+- [ ] **Task 1: Post-Launch Bug Triage & Stabilization**
+  - _Details:_ Address any edge cases discovered during real-world usage of the packaged v1.0.1 environment, particularly surrounding the new Node.js Git execution, Chokidar stability on massive repos, and state serialization during fast workspace tab switching.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 3: Post-Launch Stabilization**
-  - _Details:_ Address any edge cases or UI bugs discovered during real-world usage of the packaged v1.0.1 environment.
+- [ ] **Task 2: AI Provider Direct Integrations (Exploratory)**
+  - _Details:_ Investigate bypassing manual drag-and-drop by integrating direct API hooks (e.g., OpenAI/Anthropic keys) or clipboard manipulations to push payloads directly to active web sessions.
+
+---
+
+**Completed in Last Session:**
+
+- [x] Enhanced Auto-Updater UX & Versioning.
+- [x] Workspace Statistics Implementation.
+- [x] Export Configuration Table Overhaul & Resizable Columns.
+- [x] Git Status integration and visual styling.
+- [x] `.gitignore` hard-blacklisting in the Node layer.

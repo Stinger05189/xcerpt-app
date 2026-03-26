@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('api', {
   closeWindow: () => ipcRenderer.invoke('window:close'),
   setZoomFactor: (factor) => webFrame.setZoomFactor(factor),
 
+  // Git & App Version Info
+  getVersion: () => ipcRenderer.invoke('app:getVersion'),
+  getGitStatus: (targetPath) => ipcRenderer.invoke('git:getStatus', targetPath),
+
   // Export Engine & Native OS
   stageExport: (payload) => ipcRenderer.invoke('fs:stageExport', payload),
   stageEphemeralExport: (payload) => ipcRenderer.invoke('fs:stageEphemeralExport', payload),
@@ -37,6 +41,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('updater:status', handler);
     return () => ipcRenderer.removeListener('updater:status', handler);
   },
+  onUpdateProgress: (callback) => {
+    const handler = (_, percent) => callback(percent);
+    ipcRenderer.on('updater:progress', handler);
+    return () => ipcRenderer.removeListener('updater:progress', handler);
+  },
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   installUpdate: () => ipcRenderer.invoke('updater:install'),
 
   // Listeners
