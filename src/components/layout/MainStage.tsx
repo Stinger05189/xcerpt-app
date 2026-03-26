@@ -17,6 +17,7 @@ export function MainStage() {
     setExportStaging, 
     addRootPath, 
     removeRootPath,
+    reorderRootPaths,
     setActiveTab, 
     rawTrees,
     includes,
@@ -35,6 +36,7 @@ export function MainStage() {
   } = useWorkspaceStore();
 
   const [activePayload, setActivePayload] = useState<ReturnType<typeof generateExportPayload> | null>(null);
+  const [draggedRootPath, setDraggedRootPath] = useState<string | null>(null);
 
   const extensionOverrides = useAppStore(s => s.config.extensionOverrides);
 
@@ -76,7 +78,7 @@ export function MainStage() {
       setExportState({ isStale: false, isBuilding: false, chunkPaths: [] });
       setTimeout(() => setActivePayload(null), 0);
     }
-  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, setExportState]);
+  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, setExportState]);
 
   // --- Auto-Build Pipeline: Debounce and Execute ---
   useEffect(() => {
@@ -139,33 +141,55 @@ export function MainStage() {
       {/* Top Tabs & Global Actions */}
       <div className="h-14 flex bg-bg-panel border-b border-border-subtle items-end px-2 gap-1 overflow-x-auto shrink-0 justify-between">
         <div className="flex items-end gap-1">
-          {rootPaths.map((path) => (
-            <div
-              key={path}
-              onClick={() => setActiveTab(path)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                window.api.showItemInFolder(path);
-              }}
-              className={`group flex items-center gap-2 px-3 py-2 text-sm rounded-t-md border border-b-0 max-w-64 cursor-pointer transition-colors
-                ${activeTab === path 
-                  ? 'bg-bg-base border-border-subtle text-text-primary' 
-                  : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover'}`}
-              title={path}
-            >
-              <span className="truncate flex-1">{path.split(/[/\\]/).pop()}</span>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeRootPath(path);
+          {rootPaths.map((path) => {
+            const isDragging = draggedRootPath === path;
+            
+            return (
+              <div
+                key={path}
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  setDraggedRootPath(path);
                 }}
-                className="p-0.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-border-subtle text-text-muted hover:text-red-400 transition-all"
-                title="Remove Root"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draggedRootPath && draggedRootPath !== path) {
+                    reorderRootPaths(draggedRootPath, path);
+                  }
+                  setDraggedRootPath(null);
+                }}
+                onDragEnd={() => setDraggedRootPath(null)}
+                onClick={() => setActiveTab(path)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  window.api.showItemInFolder(path);
+                }}
+                className={`group flex items-center gap-2 px-3 py-2 text-sm rounded-t-md border border-b-0 max-w-64 cursor-pointer transition-colors
+                  ${isDragging ? 'opacity-40' : 'opacity-100'}
+                  ${activeTab === path 
+                    ? 'bg-bg-base border-border-subtle text-text-primary' 
+                    : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover'}`}
+                title={path}
               >
-                <X size={14} />
-              </button>
-            </div>
-          ))}
+                <span className="truncate flex-1 pointer-events-none">{path.split(/[/\\]/).pop()}</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeRootPath(path);
+                  }}
+                  className="p-0.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-border-subtle text-text-muted hover:text-red-400 transition-all"
+                  title="Remove Root"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
           <button 
             onClick={handleAddRoot}
             className="px-3 py-2 text-text-muted hover:text-text-primary mb-1 ml-1 rounded-md hover:bg-bg-hover transition-colors flex items-center gap-1 text-sm font-medium"
@@ -226,11 +250,11 @@ export function MainStage() {
       </div>
     
       {/* Split Stage Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative z-10">
         {/* Left Pane: Tree */}
         {activeTree ? (
           <div 
-            className="h-full overflow-y-auto p-4 bg-bg-base shrink-0 relative"
+            className="h-full overflow-y-auto p-4 bg-bg-base/60 backdrop-blur-md border-r border-border-subtle shrink-0 relative"
             style={{ width: paneWidths.tree }}
           >
             <FileTree node={activeTree} rootPath={activeTab!} relativePath="" />
@@ -244,7 +268,7 @@ export function MainStage() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 h-full flex flex-col items-center justify-center text-text-muted">
+          <div className="flex-1 h-full flex flex-col items-center justify-center text-text-muted bg-transparent">
             <FolderOpen size={48} className="mb-4 opacity-50" />
             <p>No workspace loaded.</p>
           </div>
@@ -252,14 +276,17 @@ export function MainStage() {
         
         {/* Right Pane: Editor or Export Stage */}
         {activeTree && (
-          <div className="flex-1 h-full bg-bg-panel overflow-hidden relative">
+          <div className="flex-1 h-full bg-bg-panel/40 backdrop-blur-md overflow-hidden relative">
             {isExportStaging ? (
               <ExportStage />
             ) : activeFile ? (
               <ContextEditor key={activeFile} rootPath={activeTab!} relativePath={activeFile} />
             ) : (
-              <div className="flex h-full items-center justify-center text-text-muted text-sm">
-                Select a file to compress context.
+              <div className="flex h-full items-center justify-center text-text-muted text-sm bg-transparent">
+                <div className="flex flex-col items-center gap-3 opacity-50">
+                  {/* Explicitly perfectly clear window to the void */}
+                  <span className="tracking-widest uppercase text-xs">Awaiting Selection</span>
+                </div>
               </div>
             )}
           </div>

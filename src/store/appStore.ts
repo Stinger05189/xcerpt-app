@@ -50,6 +50,7 @@ interface AppState {
   updateTabTitle: (id: string, title: string) => void;
   setOpenTabs: (tabs: TabData[]) => void;
   setBrowserOpen: (isOpen: boolean) => void;
+  reorderWorkspaceTabs: (draggedId: string, targetId: string) => void;
 
   setWorkspaceSnapshots: (workspaceId: string, snapshots: Record<string, import('../types/ipc').Preset>) => void;
   deleteWorkspaceSnapshot: (workspaceId: string, presetId: string) => void;
@@ -116,6 +117,18 @@ export const useAppStore = create<AppState>((set) => ({
   })),
 
   setOpenTabs: (tabs) => set({ openTabs: tabs }),
+
+  reorderWorkspaceTabs: (draggedId, targetId) => set(state => {
+    const draggedIndex = state.openTabs.findIndex(t => t.id === draggedId);
+    const targetIndex = state.openTabs.findIndex(t => t.id === targetId);
+    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return state;
+    
+    const newTabs = [...state.openTabs];
+    const [draggedItem] = newTabs.splice(draggedIndex, 1);
+    newTabs.splice(targetIndex, 0, draggedItem);
+    
+    return { openTabs: newTabs };
+  }),
 
   setBrowserOpen: (isOpen) => set({ isBrowserOpen: isOpen }),
 

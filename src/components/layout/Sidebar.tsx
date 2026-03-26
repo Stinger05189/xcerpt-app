@@ -172,7 +172,7 @@ export function Sidebar() {
       {/* Unified Sliding Container */}
       <div className={`fixed top-10 bottom-0 left-0 z-40 flex transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <aside 
-          className="h-full bg-bg-panel border-r border-border-subtle flex flex-col shadow-2xl shrink-0 relative"
+          className="h-full bg-bg-panel/60 backdrop-blur-xl border-r border-border-subtle flex flex-col shadow-2xl shrink-0 relative"
           style={{ width: paneWidths.sidebar }}
         >
           {/* Drag Handle */}

@@ -68,6 +68,24 @@
 
 ---
 
+### Session 018
+
+- **Focus Area:** High-Fidelity Tokenization, UI Reactivity, Native Drag-and-Drop Tabs, and Workspace Browser Overhaul (Phase 16).
+- **Key Decisions:**
+  - **BPE Tokenization (`js-tiktoken`):** Replaced the generic byte-division heuristic with an exact `cl100k_base` BPE tokenizer. To protect the 60fps React marquee engine, file reading and tokenization were offloaded to a non-blocking Node.js IPC handler (`fs:calculateTokens`), triggered only after active UI painting concludes.
+  - **Native Tab Reordering:** Implemented standard HTML5 Drag-and-Drop (`draggable={true}`, `onDragStart`, `onDrop`) for both Workspace Tabs (TitleBar) and Root Path Tabs (MainStage), avoiding the bloat of third-party DND libraries.
+  - **Export Stage UX:** Refactored the payload chunk data tables from fixed absolute widths to responsive `w-full min-w-max` structures while retaining `<colgroup>` resizability. Added an absolute-positioned Markdown Preview Modal for `ExportedFileTree.md`.
+  - **Browser Brand Overhaul:** Redesigned the Workspace Browser with an embedded SVG geometric background, sort/filter controls (Recent, Name, Exports), and explicit data badges for historical payload metrics (`totalExports`, `ephemeralExports`).
+- **Roadblocks Resolved:**
+  - **Cross-Store Reactivity:** Fixed an issue where changing global `extensionOverrides` didn't rebuild the workspace payload. Bridged the stores by forcing `WorkspaceStore.getState().setExportState({ isStale: true })` whenever the AppStore configuration is updated.
+- **Core Files Modified:**
+  - `package.json`, `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+  - `src/components/tree/FileTree.tsx`, `src/components/export/ExportStage.tsx`
+  - `src/components/layout/TitleBar.tsx`, `src/components/layout/MainStage.tsx`, `src/components/layout/WorkspaceBrowser.tsx`
+  - `src/store/appStore.ts`, `src/store/workspaceStore.ts`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

@@ -4,7 +4,7 @@ import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateExportPayload } from '../../utils/exportEngine';
 import type { ExportFile } from '../../types/ipc';
-import { PackageOpen, Settings2, FileText, Database, Layers, Check, Infinity as InfinityIcon, ExternalLink, Ban, LayoutTemplate, ArrowUpDown, Zap } from 'lucide-react';
+import { PackageOpen, Settings2, FileText, Database, Layers, Check, Infinity as InfinityIcon, ExternalLink, Ban, LayoutTemplate, ArrowUpDown, Zap, X } from 'lucide-react';
 
 // Helper to wrap symbols in the brand accent color
 function formatWithSymbols(text: string) {
@@ -39,6 +39,7 @@ export function ExportStage() {
 
   const [sortConfig, setSortConfig] = useState<{ key: 'original' | 'exported' | 'size' | 'skips' | 'exports', direction: 'asc' | 'desc' }>({ key: 'original', direction: 'asc' });
   const [colWidths, setColWidths] = useState({ original: 200, exported: 250, size: 100, skips: 90, exports: 90 });
+  const [isPreviewOpen, setPreviewOpen] = useState(false);
 
   // Compute the payload purely for UI rendering so the user sees exactly what the LLM sees
   const payload = useMemo(() => {
@@ -108,7 +109,7 @@ export function ExportStage() {
   const totalTableWidth = colWidths.original + colWidths.exported + colWidths.size + colWidths.skips + colWidths.exports;
 
   return (
-    <div className="h-full flex flex-col bg-bg-base overflow-hidden">
+    <div className="h-full flex flex-col bg-bg-base overflow-hidden relative">
       {/* Header */}
       <div className="bg-bg-panel border-b border-border-subtle p-6 shrink-0 z-20">
         <div className="flex justify-between items-start mb-6">
@@ -125,15 +126,25 @@ export function ExportStage() {
           <div className="bg-bg-base border border-border-subtle rounded-lg p-4 flex flex-col gap-3 min-w-64 shadow-sm">
             <div className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2 text-text-primary font-medium"><Settings2 size={16} className="text-accent"/> Batch Size Limit</span>
-              <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer hover:text-text-primary transition-colors pl-2">
-                <input 
-                  type="checkbox" 
-                  checked={isUnlimited}
-                  onChange={(e) => setMaxFilesPerChunk(e.target.checked ? 100000 : 20)}
-                  className="accent-accent w-3.5 h-3.5"
-                />
-                Unlimited
-              </label>
+              
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setPreviewOpen(true)}
+                  className="flex items-center gap-1.5 text-xs text-accent hover:text-accent/80 transition-colors"
+                >
+                  <FileText size={14} /> Preview Markdown
+                </button>
+                <div className="w-px h-3 bg-border-subtle" />
+                <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer hover:text-text-primary transition-colors">
+                  <input 
+                    type="checkbox" 
+                    checked={isUnlimited}
+                    onChange={(e) => setMaxFilesPerChunk(e.target.checked ? 100000 : 20)}
+                    className="accent-accent w-3.5 h-3.5"
+                  />
+                  Unlimited
+                </label>
+              </div>
             </div>
             
             <div className="flex items-center gap-3">
@@ -176,12 +187,16 @@ export function ExportStage() {
           )}
         </div>
       </div>
-    
+        
       {/* Visual Chunk Overview */}
       <div className="p-6 flex-1 overflow-y-auto">
         <h3 className="text-xs uppercase font-semibold text-text-muted mb-4 px-1">Compiled Payload Overview</h3>
         <div className={isSingleChunk ? "flex flex-col h-full" : "grid grid-cols-1 xl:grid-cols-2 gap-6 items-start"}>
-          {payload.chunks.map((chunk, index) => (
+          {payload.chunks.map((chunk, index) => {
+            const chunkKb = (chunk.files.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(1);
+            const chunkTokens = Math.round(chunk.files.reduce((sum, f) => sum + f.size, 0) / 4).toLocaleString();
+            
+            return (
             <div key={index} className={`bg-bg-panel border border-border-subtle rounded-lg flex flex-col shadow-sm overflow-hidden ${isSingleChunk ? 'flex-1 min-h-0' : 'h-125'}`}>
               {/* Chunk Header */}
               <div className="flex items-center justify-between p-4 border-b border-border-subtle bg-bg-base/50 shrink-0">
@@ -190,7 +205,15 @@ export function ExportStage() {
                   <div className="text-xs text-text-muted mt-0.5 flex items-center gap-2">
                     <span>{chunk.files.length} files</span>
                     <span>•</span>
-                    {index === 0 && <span className="text-accent">Includes FileTree.md</span>}
+                    <span>{chunkKb} KB</span>
+                    <span>•</span>
+                    <span className="text-accent/80">~{chunkTokens} Tokens</span>
+                    {index === 0 && (
+                      <>
+                        <span>•</span>
+                        <span className="text-accent">Includes FileTree.md</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 text-green-400 text-sm font-medium bg-green-400/10 px-3 py-1.5 rounded-full">
@@ -200,7 +223,7 @@ export function ExportStage() {
               
               {/* Chunk File Table */}
               <div className="flex-1 overflow-auto">
-                <table className="text-left border-collapse whitespace-nowrap table-fixed" style={{ width: totalTableWidth }}>
+                <table className="w-full min-w-max text-left border-collapse whitespace-nowrap table-fixed" style={{ minWidth: totalTableWidth }}>
                   <colgroup>
                     <col style={{ width: colWidths.original }} />
                     <col style={{ width: colWidths.exported }} />
@@ -284,7 +307,8 @@ export function ExportStage() {
                 </table>
               </div>
             </div>
-          ))}
+            );
+          })}
           
           {payload.chunks.length === 0 && (
             <div className="text-center text-text-muted py-12 border border-dashed border-border-subtle rounded-lg bg-bg-panel h-full flex flex-col items-center justify-center col-span-full">
@@ -293,6 +317,38 @@ export function ExportStage() {
           )}
         </div>
       </div>
+      
+      {/* Markdown Preview Modal Overlay */}
+      {isPreviewOpen && (
+        <div className="absolute inset-0 z-50 bg-bg-base/95 backdrop-blur flex flex-col p-8 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between mb-4 shrink-0">
+            <div>
+              <h2 className="text-2xl font-semibold flex items-center gap-2 text-text-primary mb-1">
+                <FileText className="text-accent"/> ExportedFileTree.md Preview
+              </h2>
+              <p className="text-text-muted text-sm">This map is injected into Chunk 1 to provide spatial awareness to the LLM.</p>
+            </div>
+            <button 
+              onClick={() => setPreviewOpen(false)} 
+              className="p-3 bg-bg-panel border border-border-subtle hover:bg-bg-hover rounded-full text-text-muted hover:text-red-400 transition-colors shadow-lg"
+            >
+              <X size={24} />
+            </button>
+          </div>
+          
+          <div className="flex-1 bg-bg-panel border border-border-subtle rounded-xl overflow-hidden flex flex-col shadow-2xl">
+            <div className="bg-bg-base px-4 py-3 border-b border-border-subtle text-xs font-mono text-text-muted flex justify-between items-center">
+              <span className="flex items-center gap-2 text-text-primary"><FileText size={14} className="text-accent"/> File Output Preview</span>
+              <span className="bg-accent/10 text-accent px-2 py-1 rounded">~{Math.round(new Blob([payload.treeMarkdown]).size / 4).toLocaleString()} Tokens</span>
+            </div>
+            <textarea 
+              readOnly 
+              value={payload.treeMarkdown}
+              className="flex-1 w-full bg-transparent text-sm font-mono text-text-primary p-6 outline-none resize-none leading-relaxed"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

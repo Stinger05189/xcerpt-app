@@ -363,6 +363,28 @@ ipcMain.handle('fs:readFile', async (_, filePath) => {
   catch (error) { console.error('Error reading:', error); throw error; }
 });
 
+ipcMain.handle('fs:calculateTokens', async (_, filePaths) => {
+  try {
+    const { getEncoding } = require('js-tiktoken');
+    const enc = getEncoding("cl100k_base");
+    let totalTokens = 0;
+    
+    // Process files sequentially to avoid starving the I/O thread pool on massive selections
+    for (const filePath of filePaths) {
+      try {
+        const content = await fs.readFile(filePath, 'utf-8');
+        totalTokens += enc.encode(content).length;
+      } catch (e) {
+        // Ignore unreadable or locked files
+      }
+    }
+    return totalTokens;
+  } catch (error) {
+    console.error('Error calculating exact tokens:', error);
+    return 0;
+  }
+});
+
 ipcMain.handle('fs:stageExport', async (_, payload) => {
   try { return await processExport(payload); }
   catch (error) { console.error('Error staging export:', error); throw error; }

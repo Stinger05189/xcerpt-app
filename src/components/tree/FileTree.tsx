@@ -28,6 +28,9 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const [stats, setStats] = useState({ fileCount: 0, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 });
   const [hasSelection, setHasSelection] = useState(false);
 
+  const [exactTokens, setExactTokens] = useState<number | null>(null);
+  const [isCalculatingTokens, setIsCalculatingTokens] = useState(false);
+
   // --- Virtualization Architecture ---
   const expandedFolders = useWorkspaceStore(s => s.expandedFolders);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -100,6 +103,50 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     
     return unsub;
   }, [node]);
+
+  // Exact BPE Token Calculation Engine (Offline/Async)
+  useEffect(() => {
+    if (isPainting) {
+      setExactTokens(null);
+      setIsCalculatingTokens(false);
+      return;
+    }
+    
+    if (!hasSelection) {
+      setExactTokens(0);
+      setIsCalculatingTokens(false);
+      return;
+    }
+    
+    const calculateExactTokens = async () => {
+      setIsCalculatingTokens(true);
+      const state = useWorkspaceStore.getState();
+      
+      // Filter out directory stubs and map to absolute paths for Node.js
+      const filePaths = Array.from(state.selectedFiles)
+        .filter(p => !p.endsWith('/'))
+        .map(p => `${rootPath}/${p}`.replace(/\\/g, '/'));
+    
+      if (filePaths.length === 0) {
+        setExactTokens(0);
+        setIsCalculatingTokens(false);
+        return;
+      }
+    
+      try {
+        const tokens = await window.api.calculateTokens(filePaths);
+        setExactTokens(tokens);
+      } catch (e) {
+        console.error('Failed to calculate exact tokens:', e);
+      } finally {
+        setIsCalculatingTokens(false);
+      }
+    };
+    
+    // Debounce to ensure it only runs once a rapid click/select event settles
+    const timer = setTimeout(calculateExactTokens, 300);
+    return () => clearTimeout(timer);
+  }, [isPainting, hasSelection, stats.fileCount, rootPath]);
 
   const handleStageEphemeral = async () => {
     const state = useWorkspaceStore.getState();
@@ -415,7 +462,12 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
           <span className="font-medium text-text-primary">{hasSelection ? stats.fileCount : 0} Files Selected</span>
           <div className="flex gap-4">
             <span className="hidden @[200px]:inline">{stats.kb} KB</span>
-            <span className={hasSelection ? 'text-accent' : ''}>~{stats.tokens} Tokens</span>
+            <span className={`flex items-center gap-1.5 ${hasSelection ? 'text-accent' : ''}`}>
+              {isCalculatingTokens ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : <Zap size={12} />}
+              {exactTokens !== null ? exactTokens.toLocaleString() : `~${stats.tokens}`} Tokens
+            </span>
           </div>
         </div>
         

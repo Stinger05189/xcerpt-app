@@ -1,7 +1,7 @@
 {
   "name": "xcerpt-app",
   "private": false,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A premium, desktop-based Context Staging Environment for AI models.",
   "author": "Stinger05189",
   "license": "MIT",
@@ -64,6 +64,7 @@
     "chokidar": "^5.0.0",
     "electron-updater": "^6.8.3",
     "ignore": "^7.0.5",
+    "js-tiktoken": "^1.0.21",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

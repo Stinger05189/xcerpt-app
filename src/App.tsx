@@ -35,18 +35,43 @@ function App() {
     }
   }, [config.theme]);
 
-  return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-base border border-border-subtle relative">
-      <TitleBar />
-      <Bootstrapper>
-        {/* Dim the main UI when modals are open to preserve TitleBar drag integrity */}
-        <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
-          <Sidebar />
-          <MainStage />
-        </div>
-        {isBrowserOpen && <WorkspaceBrowser />}
-        {isSettingsOpen && <SettingsModal />}
-      </Bootstrapper>
+return (
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-base relative border border-border-subtle text-text-primary">
+      
+      {/* Global Dynamic Ambient Background */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-accent/20 blur-[120px] animate-pulse" />
+        <div className="absolute top-[60%] -right-[10%] w-[40%] h-[40%] rounded-full bg-accent/10 blur-[120px]" />
+        <div
+          className="absolute inset-[-50%] z-0"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, currentColor 1px, transparent 1px),
+              linear-gradient(to bottom, currentColor 1px, transparent 1px)
+            `,
+            backgroundSize: '4rem 4rem',
+            opacity: 0.04,
+            transform: 'perspective(1000px) rotateX(60deg) scale(1.5)',
+            transformOrigin: 'center 30%',
+            maskImage: 'radial-gradient(ellipse at center 40%, black 10%, transparent 60%)',
+            WebkitMaskImage: 'radial-gradient(ellipse at center 40%, black 10%, transparent 60%)'
+          }}
+        />
+      </div>
+    
+      {/* Main App Content Layer */}
+      <div className="relative z-10 flex flex-col h-full w-full">
+        <TitleBar />
+        <Bootstrapper>
+          {/* Dim the main UI when modals are open to preserve TitleBar drag integrity */}
+          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
+            <Sidebar />
+            <MainStage />
+          </div>
+          {isBrowserOpen && <WorkspaceBrowser />}
+          {isSettingsOpen && <SettingsModal />}
+        </Bootstrapper>
+      </div>
     </div>
   );
 }

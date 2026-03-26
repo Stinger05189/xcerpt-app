@@ -16,25 +16,29 @@
 
 ## Current Macro-Objective
 
-**Epoch 4, Phase 16: Post-Launch Stabilization & Edge Cases**
-_Context: The application now features robust analytics, full git integration, resizable layouts, and transparent updater UX. We are moving into a stabilization phase to catch edge cases, refine performance bottlenecks, and address real-world usage friction._
+**Epoch 4, Phase 17: External Integrations & Advanced Chunking**
+_Context: With the core application stabilized, high-fidelity tokenization integrated, and the UI overhauled for brand appeal, we are shifting focus to advanced payload delivery and intelligent context chunking._
 
 ## Active Queue (Current / Next Session)
 
-- [ ] **Task 1: Post-Launch Bug Triage & Stabilization**
-  - _Details:_ Address any edge cases discovered during real-world usage of the packaged v1.0.1 environment, particularly surrounding the new Node.js Git execution, Chokidar stability on massive repos, and state serialization during fast workspace tab switching.
+- [ ] **Task 1: AI Provider Direct Integrations (Exploratory)**
+  - _Details:_ Investigate bypassing manual drag-and-drop by integrating direct API hooks (e.g., OpenAI/Anthropic keys) or clipboard manipulations to push payloads directly to active web sessions.
+- [ ] **Task 2: Intelligent Semantic Chunking**
+  - _Details:_ Upgrade the `maxFilesPerChunk` logic to support `maxTokensPerChunk`, utilizing the newly integrated `js-tiktoken` engine to dynamically slice payloads based on strict LLM context window limits rather than arbitrary file counts.
 
 ## Pending Queue (Upcoming)
 
-- [ ] **Task 2: AI Provider Direct Integrations (Exploratory)**
-  - _Details:_ Investigate bypassing manual drag-and-drop by integrating direct API hooks (e.g., OpenAI/Anthropic keys) or clipboard manipulations to push payloads directly to active web sessions.
+- [ ] **Task 3: OS-Level Context Menus**
+  - _Details:_ Investigate adding "Open with Xcerpt" to Windows Explorer and macOS Finder context menus via Electron installer configurations.
+- [ ] **Task 4: Deep Linking**
+  - _Details:_ Implement custom URI schemes (`xcerpt://`) to allow external applications or terminal commands to quickly boot specific workspaces or presets.
 
 ---
 
 **Completed in Last Session:**
 
-- [x] Enhanced Auto-Updater UX & Versioning.
-- [x] Workspace Statistics Implementation.
-- [x] Export Configuration Table Overhaul & Resizable Columns.
-- [x] Git Status integration and visual styling.
-- [x] `.gitignore` hard-blacklisting in the Node layer.
+- [x] Integrated `js-tiktoken` for accurate BPE offline token calculation.
+- [x] Fixed cross-store reactivity for Global Extension Overrides.
+- [x] Overhauled ExportStage with Markdown Preview and responsive tables.
+- [x] Implemented Native HTML5 Drag-and-Drop reordering for UI Tabs.
+- [x] Workspace Browser brand overhaul and metadata sorting.

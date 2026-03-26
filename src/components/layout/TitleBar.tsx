@@ -5,10 +5,11 @@ import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
 export function TitleBar() {
-  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen, updateProgress, appVersion } = useAppStore();
+  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen, updateProgress, appVersion, reorderWorkspaceTabs } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
 
   const [updateStatus, setUpdateStatus] = useState<'none' | 'update-available' | 'update-downloaded'>('none');
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!window.api?.onUpdateStatus) return;
@@ -34,76 +35,95 @@ export function TitleBar() {
 
   return (
     <div 
-      className="h-10 flex shrink-0 items-end bg-bg-base border-b border-border-subtle select-none pl-2 pt-2"
+      className="h-10 flex shrink-0 items-end bg-bg-base/70 backdrop-blur-md border-b border-border-subtle select-none pl-2 pt-2 relative z-50"
       style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
     >
       
-      {/* <div className={`flex items-end h-full flex-1 overflow-x-hidden ${isBrowserOpen ? 'opacity-30 pointer-events-none' : ''}`}> */}
       {/* Locked Container for Header Tools when Overlays are Open */}
       <div className={`flex items-end h-full flex-1 overflow-x-hidden ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
         
         {/* Sidebar Toggle */}
         <div 
-          className={`flex items-center h-full px-2 mb-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors ${isSidebarOpen ? 'text-accent' : ''}`}
+          className={`flex items-center justify-center h-full px-2.5 mb-1 mr-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover cursor-pointer transition-colors ${isSidebarOpen ? 'text-accent' : ''}`}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           onClick={() => setSidebarOpen(!isSidebarOpen)}
           title="Toggle Rules Sidebar"
         >
-          <PanelLeft size={15} />
+          <PanelLeft size={16} />
         </div>
         
         {/* Xcerpt Logo / Browser Button */}
         <div 
-          className={`flex items-center h-full px-2 mb-1 rounded-md cursor-pointer transition-all ${isBrowserOpen ? 'opacity-100 scale-105' : 'opacity-70 hover:opacity-100 hover:bg-bg-hover'}`}
+          className={`flex items-center justify-center h-full px-3 mb-1 rounded-md cursor-pointer transition-all ${isBrowserOpen ? 'bg-accent/20 scale-105' : 'hover:bg-accent/10'}`}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           onClick={() => setBrowserOpen(!isBrowserOpen)}
           title="Workspace Browser"
         >
-          <img src="./icon.svg" alt="Xcerpt" className="w-4 h-4" />
+          <img src="./icon.svg" alt="Xcerpt" className="w-5 h-5 drop-shadow-sm" />
         </div>
         
         {/* Version & Updater Component */}
-        <div className="flex items-center h-full px-1 mb-1 gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-center h-full px-2 mb-1 gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           {appVersion && <span className="text-[10px] text-text-muted font-mono opacity-70 cursor-default">v{appVersion}</span>}
           <button 
             onClick={() => window.api.checkForUpdates()} 
             title="Check for Updates" 
-            className="text-text-muted hover:text-accent p-1 rounded hover:bg-bg-hover transition-colors"
+            className="text-text-muted hover:text-accent p-1.5 rounded-md hover:bg-bg-hover transition-colors"
           >
-            <RefreshCw size={10} />
+            <RefreshCw size={12} />
           </button>
         </div>
         
         {/* Global Settings Toggle */}
         <div 
-          className={`flex items-center h-full px-2 mb-1 rounded-md cursor-pointer transition-colors ${isSettingsOpen ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
+          className={`flex items-center justify-center h-full px-2.5 mb-1 rounded-md cursor-pointer transition-colors ${isSettingsOpen ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
           onClick={() => setSettingsOpen(!isSettingsOpen)}
           title="Global Settings"
         >
-          <Settings size={15} />
+          <Settings size={16} />
         </div>
         
-        <div className="w-px h-5 bg-border-subtle mx-2 mb-2 pointer-events-none" />
+        <div className="w-px h-6 bg-border-subtle mx-2 mb-1.5 pointer-events-none" />
         
         {/* Global Workspace Tabs Container */}
-        <div className="flex items-end h-full flex-1 overflow-x-hidden gap-0.5">
+        <div className="flex items-end h-full flex-1 overflow-x-hidden gap-0.5 pb-0">
           {openTabs.map(tab => {
             const isActive = activeWorkspaceId === tab.id;
+            const isDragging = draggedTabId === tab.id;
+            
             return (
               <div
                 key={tab.id}
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  setDraggedTabId(tab.id);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draggedTabId && draggedTabId !== tab.id) {
+                    reorderWorkspaceTabs(draggedTabId, tab.id);
+                  }
+                  setDraggedTabId(null);
+                }}
+                onDragEnd={() => setDraggedTabId(null)}
                 onClick={() => setActiveWorkspace(tab.id)}
                 style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                 className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md border border-b-0 cursor-pointer transition-colors max-w-48
+                  ${isDragging ? 'opacity-40' : 'opacity-100'}
                   ${isActive 
                     ? 'bg-bg-panel border-border-subtle text-text-primary -mb-px pb-1.75 z-20' 
                     : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover mb-0 pb-1.5'}`}
               >
-                <span className="truncate select-none font-medium">{tab.title}</span>
+                <span className="truncate select-none font-medium pointer-events-none">{tab.title}</span>
                 <button 
                   onClick={(e) => { e.stopPropagation(); removeWorkspaceTab(tab.id); }}
-                  className="p-0.5 rounded hover:bg-border-subtle opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="p-0.5 rounded hover:bg-red-400/20 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <X size={12} />
                 </button>
@@ -114,10 +134,10 @@ export function TitleBar() {
           <button 
             onClick={() => setBrowserOpen(true)} 
             style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            className="mb-1 ml-1 p-1.5 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
+            className="mb-1 ml-1 p-1.5 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded-md transition-colors"
             title="Browse or Create Workspace"
           >
-            <Plus size={14} />
+            <Plus size={16} />
           </button>
         </div>
       </div>

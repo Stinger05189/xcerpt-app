@@ -81,6 +81,7 @@ interface WorkspaceState {
 
   addRootPath: (path: string, forceRescan?: boolean) => Promise<void>;
   removeRootPath: (path: string) => void;
+  reorderRootPaths: (draggedPath: string, targetPath: string) => void;
   setActiveTab: (path: string) => void;
   setActiveFile: (path: string | null) => void;
   setSelectedFiles: (files: Set<string>) => void;
@@ -406,6 +407,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
     });
   },
+
+  reorderRootPaths: (draggedPath, targetPath) => set(state => {
+    const draggedIndex = state.rootPaths.indexOf(draggedPath);
+    const targetIndex = state.rootPaths.indexOf(targetPath);
+    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return state;
+    
+    const newPaths = [...state.rootPaths];
+    const [draggedItem] = newPaths.splice(draggedIndex, 1);
+    newPaths.splice(targetIndex, 0, draggedItem);
+    
+    return { rootPaths: newPaths };
+  }),
 
   setActiveTab: (path: string) => set({ activeTab: path }),
 

@@ -31,6 +31,7 @@
   - Never call synchronous `setState` in the top-level of a `useEffect`.
 - **Flat-State Sync Pattern:** To prevent deep selector render locks across the app, nested configuration objects (like `Presets`) must be unpacked into flat Zustand state properties (`includes`, `excludes`) upon activation, and repacked before saving or switching contexts.
 - **Session-Bound Snapshots:** Ephemeral session state that must survive workspace tab switches (like "Revert Changes" snapshots) should be hoisted to the global `AppStore` (`workspaceSnapshots`). The `WorkspaceStore` acts as the active consumer.
+- **Cross-Store Reactivity:** When global configurations in the `AppStore` (like `extensionOverrides`) dictate output behavior managed by the `WorkspaceStore`, you must explicitly bridge the stores. Invoke `useWorkspaceStore.getState().setExportState({ isStale: true })` inside the `AppStore` action to manually trigger the dependent pipeline.
 
 ## 3. Node.js & I/O
 
@@ -42,6 +43,7 @@
 - **Chokidar Windows Glob Fails:** Never use string globs (`**/dir/**`) for Chokidar `ignored` options on Windows. They fail silently. Always pass a Javascript function that splits the path `[\/\\]` and checks against the blacklist to ensure massive directories are dropped instantly, preventing 100% CPU utilization.
 - **Chokidar Event Shielding:** Always wrap `fileWatcher.on('all')` inside the `fileWatcher.on('ready')` callback. This prevents massive file trees from flooding the IPC bridge with thousands of initial `add` events, which crashes the React renderer and causes severe memory creep.
 - **Anti-Virus Folder Locks:** Never rapidly delete (`fs.rm`) and recreate (`fs.mkdir`) the same temporary directory during payload generation. Windows Defender flags this as ransomware and locks the folder, freezing the app's I/O. Always use unique, timestamped directory names.
+- **CPU-Bound I/O (Tokenization):** Never execute CPU-heavy, synchronous file-reading tasks (like BPE tokenization) in the React renderer. Always offload these to Node.js IPC endpoints (`ipcMain.handle`) to leverage the background I/O thread pool. This prevents blocking the main thread and protects tick-independent UI engines (like the 60fps marquee drag).
 
 ## 4. UI & Shell
 
@@ -55,6 +57,7 @@
 - **Virtualization & Fixed Positioning (CSS Transforms):** Virtualization relies on `transform: translateY(px)` to move rows. In CSS, `transform` instantly creates a new containing block, completely breaking `position: fixed` relative to the viewport. Any context menu or fixed overlay triggered from inside a virtualized list MUST use `createPortal(..., document.body)` to escape the transformed container.
 - **Tick-Independent Dragging:** For rapid, 60fps continuous selections (like marquee brushing), never rely on `onMouseEnter` or `onMouseOver`. Tick dependency drops frames when the mouse moves fast. Always use mathematical 1D indexing based on pointer coordinates (`Math.floor(offsetY / ROW_HEIGHT)`).
 - **Virtualization Stale Closures:** When calculating array ranges over a virtualized, `memo`'d list, never rely on closure variables passed down during the initial mount. Always read the current layout array from a mutable `useRef` to prevent mapping indices against ghost arrays (e.g., clicking on a file above a newly expanded folder).
+- **Native DND over Libraries:** For simple array reordering (like Workspace Tabs or Root Paths), strictly use native HTML5 drag-and-drop (`draggable={true}`, `onDragStart`, `onDrop`) paired with local React state for visual dimming. Do not introduce heavy third-party DND libraries.
 
 ## 5. Monaco Editor
 

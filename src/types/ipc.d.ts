@@ -132,6 +132,7 @@ export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>;
   scanDirectory: (path: string, blacklist: string[]) => Promise<ScanResult>;
   readFile: (path: string) => Promise<string>;
+  calculateTokens: (filePaths: string[]) => Promise<number>;
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   scanDirectory: (path, blacklist) => ipcRenderer.invoke('fs:scanDirectory', path, blacklist),
   readFile: (path) => ipcRenderer.invoke('fs:readFile', path),
+  calculateTokens: (filePaths) => ipcRenderer.invoke('fs:calculateTokens', filePaths),
 
   // Window Controls
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
