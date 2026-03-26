@@ -109,27 +109,12 @@ export function WorkspaceBrowser() {
   }, [metadata, searchQuery, sortBy]);
 
   return (
-    <div className="absolute inset-0 z-50 bg-bg-base/80 backdrop-blur flex flex-col items-center pt-16 pb-8 px-8 animate-in fade-in duration-200 overflow-hidden">
+    <div className="absolute inset-0 z-50 bg-bg-base/40 backdrop-blur-sm flex flex-col items-center pt-16 pb-8 px-8 animate-in fade-in duration-200 overflow-hidden">
       
-      {/* Background Brand SVG */}
-      <div className="absolute inset-0 pointer-events-none opacity-[0.03] flex items-center justify-center overflow-hidden">
-        <svg width="120%" height="120%" viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="1"/>
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-          <circle cx="500" cy="500" r="300" fill="none" stroke="var(--theme-accent)" strokeWidth="2" strokeDasharray="10 20" />
-          <circle cx="500" cy="500" r="450" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="5 10" />
-          <path d="M 200 200 L 800 800 M 200 800 L 800 200" stroke="var(--theme-accent)" strokeWidth="2" strokeDasharray="20 40" />
-        </svg>
-      </div>
-    
       {/* Prominent Absolute Close Button */}
       <button 
         onClick={() => setBrowserOpen(false)}
-        className="absolute top-8 right-8 p-3 bg-bg-panel hover:bg-bg-hover hover:text-red-400 border border-border-subtle hover:border-red-400/50 rounded-full text-text-muted transition-all shadow-lg"
+        className="absolute top-8 right-8 p-3 bg-bg-panel/60 backdrop-blur-md hover:bg-bg-hover hover:text-red-400 border border-border-subtle/50 hover:border-red-400/50 rounded-full text-text-muted transition-all shadow-lg"
         title="Close Browser (Esc)"
       >
         <X size={24} />
@@ -138,21 +123,21 @@ export function WorkspaceBrowser() {
       {/* Header & Search */}
       <div className="w-full max-w-6xl flex items-center justify-between mb-8 shrink-0 relative z-10">
         <div>
-          <h1 className="text-3xl font-semibold text-text-primary tracking-tight mb-2 flex items-center gap-3">
-            <img src="./icon.svg" className="w-8 h-8 opacity-80" alt="logo" /> Workspace Browser
+          <h1 className="text-3xl font-semibold text-text-primary tracking-tight mb-2 flex items-center gap-3 drop-shadow-md">
+            <img src="./icon.svg" className="w-8 h-8 opacity-90" alt="logo" /> Workspace Browser
           </h1>
-          <p className="text-text-muted text-sm">Access and manage your previously saved context environments.</p>
+          <p className="text-text-muted text-sm font-medium">Access and manage your previously saved context environments.</p>
         </div>
         
         <div className="flex items-center gap-4">
           <button 
             onClick={handleCreateNew}
-            className="flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-full text-sm font-medium hover:bg-accent/90 transition-colors shadow-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-accent/90 backdrop-blur-md text-white border border-accent rounded-full text-sm font-medium hover:bg-accent transition-colors shadow-lg shadow-accent/20"
           >
             <Plus size={16} /> New Workspace
           </button>
           
-          <div className="flex bg-bg-panel border border-border-subtle rounded-full overflow-hidden p-0.5 text-xs font-medium shadow-sm">
+          <div className="flex bg-bg-panel/60 backdrop-blur-md border border-border-subtle/50 rounded-full overflow-hidden p-0.5 text-xs font-medium shadow-sm">
             <button 
               onClick={() => setSortBy('recent')} 
               className={`px-4 py-1.5 rounded-full transition-colors ${sortBy === 'recent' ? 'bg-bg-hover text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}`}
@@ -181,7 +166,7 @@ export function WorkspaceBrowser() {
               placeholder="Search by name or root path..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-bg-panel border border-border-subtle rounded-full pl-9 pr-4 py-2 text-sm text-text-primary outline-none focus:border-accent transition-colors shadow-sm"
+              className="w-full bg-bg-panel/60 backdrop-blur-md border border-border-subtle/50 rounded-full pl-9 pr-4 py-2 text-sm text-text-primary outline-none focus:border-accent transition-colors shadow-sm"
             />
           </div>
         </div>
@@ -190,11 +175,11 @@ export function WorkspaceBrowser() {
       {/* Grid */}
       <div className="w-full max-w-6xl flex-1 overflow-y-auto pr-2 pb-4 relative z-10">
         {loading ? (
-          <div className="flex items-center justify-center h-64 text-text-muted animate-pulse">Scanning Disk...</div>
+          <div className="flex items-center justify-center h-64 text-text-muted animate-pulse font-medium">Scanning Disk...</div>
         ) : filteredMetadata.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-text-muted border border-dashed border-border-subtle rounded-xl bg-bg-panel/50">
+          <div className="flex flex-col items-center justify-center h-64 text-text-muted border border-dashed border-border-subtle/50 rounded-xl bg-transparent">
             <Folder size={48} className="mb-4 opacity-30" />
-            <p>No workspaces found matching "{searchQuery}"</p>
+            <p className="font-medium">No workspaces found matching "{searchQuery}"</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -209,7 +194,7 @@ export function WorkspaceBrowser() {
                 <div 
                   key={meta.id}
                   onClick={() => !isEditing && handleOpen(meta)}
-                  className="group relative bg-bg-panel border border-border-subtle rounded-xl p-5 hover:border-accent/50 hover:shadow-lg transition-all cursor-pointer flex flex-col h-56"
+                  className="group relative bg-bg-panel/40 backdrop-blur-md border border-border-subtle/50 rounded-xl p-5 hover:bg-bg-panel/60 hover:border-accent/50 hover:shadow-xl hover:shadow-accent/5 transition-all cursor-pointer flex flex-col h-56"
                 >
                   {/* Card Header */}
                   <div className="flex items-start justify-between mb-3">
@@ -222,12 +207,12 @@ export function WorkspaceBrowser() {
                           onKeyDown={e => e.key === 'Enter' && saveEdit(e, meta.id)}
                           className="flex-1 bg-bg-base border border-accent rounded px-2 py-1 text-sm text-text-primary outline-none"
                         />
-                        <button onClick={(e) => saveEdit(e, meta.id)} className="text-green-400 p-1 hover:bg-green-400/10 rounded">
+                        <button onClick={(e) => saveEdit(e, meta.id)} className="text-green-400 p-1 hover:bg-green-400/20 rounded transition-colors">
                           <Check size={16} />
                         </button>
                       </div>
                     ) : (
-                      <h2 className="text-base font-semibold text-text-primary truncate pr-16" title={displayName}>
+                      <h2 className="text-base font-semibold text-text-primary truncate pr-16 drop-shadow-sm" title={displayName}>
                         {displayName}
                       </h2>
                     )}
@@ -235,10 +220,10 @@ export function WorkspaceBrowser() {
                     {/* Hover Actions */}
                     {!isEditing && (
                       <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e) => startEdit(e, meta)} className="p-1.5 text-text-muted hover:text-accent hover:bg-bg-hover rounded transition-colors" title="Rename">
+                        <button onClick={(e) => startEdit(e, meta)} className="p-1.5 text-text-muted hover:text-accent hover:bg-bg-hover/80 rounded transition-colors" title="Rename">
                           <Edit2 size={14} />
                         </button>
-                        <button onClick={(e) => handleDelete(e, meta.id)} className="p-1.5 text-text-muted hover:text-red-400 hover:bg-bg-hover rounded transition-colors" title="Delete">
+                        <button onClick={(e) => handleDelete(e, meta.id)} className="p-1.5 text-text-muted hover:text-red-400 hover:bg-bg-hover/80 rounded transition-colors" title="Delete">
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -247,17 +232,17 @@ export function WorkspaceBrowser() {
                 
                   {/* Card Body: Paths */}
                   <div className="flex-1 overflow-hidden mt-1">
-                    <div className="text-xs uppercase tracking-wider text-text-muted/60 font-semibold mb-2">Root Paths</div>
+                    <div className="text-[10px] uppercase tracking-wider text-text-muted/80 font-semibold mb-2 drop-shadow-sm">Root Paths</div>
                     {meta.rootPaths.length > 0 ? (
                       <ul className="space-y-1.5">
                         {meta.rootPaths.slice(0, 2).map((path, idx) => (
-                          <li key={idx} className="text-xs font-mono text-text-muted truncate flex items-center gap-2">
+                          <li key={idx} className="text-xs font-mono text-text-muted truncate flex items-center gap-2 drop-shadow-sm">
                             <Folder size={12} className="shrink-0 opacity-50" />
                             <span className="truncate" title={path}>{path}</span>
                           </li>
                         ))}
                         {meta.rootPaths.length > 2 && (
-                          <li className="text-[10px] text-text-muted italic px-5">+{meta.rootPaths.length - 2} more paths</li>
+                          <li className="text-[10px] text-text-muted italic px-5 drop-shadow-sm">+{meta.rootPaths.length - 2} more paths</li>
                         )}
                       </ul>
                     ) : (
@@ -266,20 +251,20 @@ export function WorkspaceBrowser() {
                   </div>
                   
                   {/* Card Metrics Badge */}
-                  <div className="grid grid-cols-2 gap-2 mt-2 mb-3">
-                    <div className="bg-bg-base border border-border-subtle rounded-lg px-3 py-2 flex flex-col items-start justify-center">
+                  <div className="grid grid-cols-2 gap-2 mt-2 mb-3 relative z-10">
+                    <div className="bg-bg-base/40 border border-border-subtle/50 rounded-lg px-3 py-2 flex flex-col items-start justify-center shadow-sm">
                       <span className="text-[9px] uppercase tracking-widest text-text-muted flex items-center gap-1.5"><Database size={10}/> Full Exports</span>
-                      <span className="font-semibold text-text-primary text-sm mt-0.5">{totalExp}</span>
+                      <span className="font-semibold text-text-primary text-sm mt-0.5 drop-shadow-sm">{totalExp}</span>
                     </div>
-                    <div className="bg-bg-base border border-border-subtle rounded-lg px-3 py-2 flex flex-col items-start justify-center">
+                    <div className="bg-bg-base/40 border border-border-subtle/50 rounded-lg px-3 py-2 flex flex-col items-start justify-center shadow-sm">
                       <span className="text-[9px] uppercase tracking-widest text-text-muted flex items-center gap-1.5"><Zap size={10}/> Eph. Exports</span>
-                      <span className="font-semibold text-accent text-sm mt-0.5">{ephExp}</span>
+                      <span className="font-semibold text-accent text-sm mt-0.5 drop-shadow-sm">{ephExp}</span>
                     </div>
                   </div>
                 
                   {/* Card Footer: Meta Stats */}
-                  <div className="flex items-center justify-between border-t border-border-subtle pt-3 mt-auto shrink-0">
-                    <div className="flex items-center gap-4 text-xs text-text-muted">
+                  <div className="flex items-center justify-between border-t border-border-subtle/50 pt-3 mt-auto shrink-0 relative z-10">
+                    <div className="flex items-center gap-4 text-xs text-text-muted font-medium drop-shadow-sm">
                       <span className="flex items-center gap-1.5" title="Last Modified">
                         <Clock size={12} /> {timeAgo(meta.updatedAt)}
                       </span>
@@ -289,7 +274,7 @@ export function WorkspaceBrowser() {
                         </span>
                       )}
                     </div>
-                    <ExternalLink size={14} className="text-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <ExternalLink size={14} className="text-accent opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-sm" />
                   </div>
                 </div>
               );
