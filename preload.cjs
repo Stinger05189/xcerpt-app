@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   stageEphemeralExport: (payload) => ipcRenderer.invoke('fs:stageEphemeralExport', payload),
   startDrag: (filePaths) => ipcRenderer.send('drag:start', filePaths),
   openPath: (path) => ipcRenderer.invoke('shell:openPath', path),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   showItemInFolder: (path) => ipcRenderer.send('shell:showItemInFolder', path),
 
   // Persistence API

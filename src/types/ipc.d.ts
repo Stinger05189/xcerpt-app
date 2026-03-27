@@ -147,6 +147,7 @@ export interface ElectronAPI {
   stageEphemeralExport: (payload: EphemeralPayload) => Promise<string[]>;
   startDrag: (filePaths: string[]) => void;
   openPath: (path: string) => Promise<string>;
+  openExternal: (url: string) => Promise<void>;
   showItemInFolder: (path: string) => void;
 
   // Persistence API

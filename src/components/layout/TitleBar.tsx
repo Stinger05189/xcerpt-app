@@ -1,6 +1,6 @@
 // src/components/layout/TitleBar.tsx
 import { useEffect, useState } from 'react';
-import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw } from 'lucide-react';
+import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
@@ -72,6 +72,16 @@ export function TitleBar() {
           >
             <RefreshCw size={12} />
           </button>
+        </div>
+        
+        {/* Support / Buy Me A Coffee */}
+        <div 
+          className="flex items-center justify-center h-full px-2.5 mb-1 rounded-md cursor-pointer transition-colors text-text-muted hover:text-yellow-400 hover:bg-yellow-400/10"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onClick={() => window.api.openExternal('https://buymeacoffee.com/philipquicz')}
+          title="Support Xcerpt (Buy me a coffee)"
+        >
+          <Coffee size={16} />
         </div>
         
         {/* Global Settings Toggle */}

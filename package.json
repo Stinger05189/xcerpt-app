@@ -1,10 +1,27 @@
 {
   "name": "xcerpt-app",
   "private": false,
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "A premium, desktop-based Context Staging Environment for AI models.",
   "author": "Stinger05189",
   "license": "MIT",
+  "keywords": [
+    "ai",
+    "llm",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "context-management",
+    "electron",
+    "react",
+    "desktop-app",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/Stinger05189/xcerpt-app#readme",
+  "bugs": {
+    "url": "https://github.com/Stinger05189/xcerpt-app/issues"
+  },
+  "funding": "https://buymeacoffee.com/philipquicz",
   "repository": {
     "type": "git",
     "url": "https://github.com/Stinger05189/xcerpt-app.git"

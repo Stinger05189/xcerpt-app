@@ -399,6 +399,10 @@ ipcMain.handle('shell:openPath', async (_, targetPath) => {
   return await shell.openPath(targetPath);
 });
 
+ipcMain.handle('shell:openExternal', async (_, url) => {
+  return await shell.openExternal(url);
+});
+
 ipcMain.on('shell:showItemInFolder', (_, targetPath) => {
   shell.showItemInFolder(targetPath);
 });
