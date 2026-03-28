@@ -5,7 +5,7 @@ import { TreeNode } from './TreeNode';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
-import { Search, Plus, LayoutTemplate, EyeOff, X, Zap, Loader2, GripVertical } from 'lucide-react';
+import { Search, Plus, LayoutTemplate, EyeOff, X, Zap, Loader2, GripVertical, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useFlattenedTree } from './useFlattenedTree';
 
@@ -33,7 +33,33 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
   // --- Virtualization Architecture ---
   const expandedFolders = useWorkspaceStore(s => s.expandedFolders);
+  const hideExcluded = useWorkspaceStore(s => s.hideExcluded);
+  const hideTreeOnly = useWorkspaceStore(s => s.hideTreeOnly);
+  const setHideExcluded = useWorkspaceStore(s => s.setHideExcluded);
+  const setHideTreeOnly = useWorkspaceStore(s => s.setHideTreeOnly);
+  const expandAllFolders = useWorkspaceStore(s => s.expandAllFolders);
+  const collapseAllFolders = useWorkspaceStore(s => s.collapseAllFolders);
+  const includes = useWorkspaceStore(s => s.includes);
+  const excludes = useWorkspaceStore(s => s.excludes);
+  const treeOnly = useWorkspaceStore(s => s.treeOnly);
   const parentRef = useRef<HTMLDivElement>(null);
+
+  const bindScrollGetter = useWorkspaceStore(s => s.bindScrollGetter);
+  const targetScrollY = useWorkspaceStore(s => s.targetScrollY);
+  const setTargetScrollY = useWorkspaceStore(s => s.setTargetScrollY);
+
+  useEffect(() => {
+    bindScrollGetter(() => {
+      return parentRef.current ? parentRef.current.scrollTop : 0;
+    });
+  }, [bindScrollGetter]);
+
+  useEffect(() => {
+    if (targetScrollY !== null && parentRef.current) {
+      parentRef.current.scrollTop = targetScrollY;
+      setTargetScrollY(null);
+    }
+  }, [targetScrollY, setTargetScrollY]);
 
   // --- Marquee & Drag Engine ---
   const [marquee, setMarquee] = useState<{ startIndex: number; currentIndex: number; mode: 'add' | 'remove' } | null>(null);
@@ -193,7 +219,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     return visible;
   }, [node, searchQuery]);
 
-  const flatNodes = useFlattenedTree(node, expandedFolders, visiblePaths);
+  const flatNodes = useFlattenedTree(node, expandedFolders, visiblePaths, includes, excludes, treeOnly, hideExcluded, hideTreeOnly);
 
   // ANTI-STALE CLOSURE REF: Guarantees the drag engine always sees the live tree
   const flatNodesRef = useRef(flatNodes);
@@ -383,16 +409,51 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
   return (
     <div className="flex flex-col h-full relative @container">
-      {/* Local Tree Search */}
-      <div className="mb-4 relative shrink-0">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-        <input 
-          type="text" 
-          placeholder="Filter tree visually..." 
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full bg-bg-panel border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent transition-colors"
-        />
+      {/* Local Tree Search & Toggles */}
+      <div className="mb-4 flex flex-col gap-2 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input 
+              type="text" 
+              placeholder="Filter tree visually..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-bg-panel border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent transition-colors"
+            />
+          </div>
+          <div className="flex items-center bg-bg-panel border border-border-subtle rounded-md p-0.5 shrink-0">
+            <button
+              onClick={() => setHideExcluded(!hideExcluded)}
+              className={`p-1.5 rounded transition-colors ${hideExcluded ? 'bg-bg-hover text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
+              title="Toggle Excluded Files"
+            >
+              <EyeOff size={14} />
+            </button>
+            <button
+              onClick={() => setHideTreeOnly(!hideTreeOnly)}
+              className={`p-1.5 rounded transition-colors ${hideTreeOnly ? 'bg-bg-hover text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
+              title="Toggle Tree-Only Files"
+            >
+              <LayoutTemplate size={14} />
+            </button>
+            <div className="w-px h-4 bg-border-subtle mx-0.5" />
+            <button
+              onClick={expandAllFolders}
+              className="p-1.5 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
+              title="Expand All Folders"
+            >
+              <ChevronsUpDown size={14} />
+            </button>
+            <button
+              onClick={collapseAllFolders}
+              className="p-1.5 text-text-muted hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
+              title="Collapse All Folders"
+            >
+              <ChevronsDownUp size={14} />
+            </button>
+          </div>
+        </div>
       </div>
     
       {/* Scrollable Virtualized Tree Container */}

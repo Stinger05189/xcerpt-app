@@ -32,7 +32,7 @@ const generateFreshWorkspace = async (id: string) => {
     rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist },
     activePresetId: defaultPreset.id,
     presets: [defaultPreset],
-    uiState: { expandedFolders: [], activeTab: null, paneWidths: { sidebar: 320, tree: 320 } }
+    uiState: { expandedFolders: [], activeTab: null, paneWidths: { sidebar: 320, tree: 400 }, hideExcluded: true, hideTreeOnly: true }
   };
   await window.api.saveSession(id, freshPayload);
 };
@@ -57,7 +57,9 @@ const getWorkspacePayload = (state: ReturnType<typeof useWorkspaceStore.getState
   uiState: { 
     expandedFolders: Array.from(state.expandedFolders), 
     activeTab: state.activeTab,
-    paneWidths: state.paneWidths
+    paneWidths: state.paneWidths,
+    hideExcluded: state.hideExcluded,
+    hideTreeOnly: state.hideTreeOnly
   }
 });
 

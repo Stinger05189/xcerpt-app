@@ -86,6 +86,26 @@
 
 ---
 
+### Session 019
+
+- **Focus Area:** Tree Visibility Toggles, Expand/Collapse All, and Global Undo/Redo Architecture.
+- **Key Decisions:**
+  - **Global History Engine:** Implemented a cross-boundary `HistoryStore` using the Command Pattern. Instead of saving massive state snapshots, the system saves the inverse mutation closures (deltas) of user actions.
+  - **Async Context Resolution:** Built an autonomous environment switcher (`resolveContext`). When an undo is triggered, the engine automatically navigates to the correct Workspace Tab, switches to the correct Preset, and awaits the async disk-hydration sequence before executing the mutation.
+  - **LZ-String Compression:** Integrated `lz-string` to Base64-compress bulk array closures (like `Expand All` or large selections) before pushing to the history stack. This allows a massive 1000-step history limit with virtually zero memory footprint.
+  - **Scroll Anchoring:** Bound the `FileTree` scroll offset to a Zustand getter. History commands capture the exact Y-coordinate of the tree and instantly snap the virtualization engine back to that pixel upon Undo/Redo.
+  - **Tree Filtering Optimization:** Added "Hide Excluded" and "Hide Tree-Only" toggles. Moved the `ignore` evaluation into `useFlattenedTree` using a high-performance, single-pass pre-compiled regex engine to prevent garbage-collection thrashing.
+- **Roadblocks Resolved:**
+  - **Cascading Render Warnings:** Fixed React Strict Mode errors caused by synchronous `setState` updates inside the `ToastContainer` effect by deferring the visibility mutation to the macro-task queue (`setTimeout(() => setVisible(true), 0)`).
+- **Core Files Modified:**
+  - `package.json`
+  - `src/store/historyStore.ts`, `src/store/workspaceStore.ts`, `src/store/appStore.ts`
+  - `src/components/layout/ToastContainer.tsx`, `src/components/layout/TitleBar.tsx`, `src/components/layout/Bootstrapper.tsx`
+  - `src/components/tree/FileTree.tsx`, `src/components/tree/useFlattenedTree.ts`
+  - `src/App.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

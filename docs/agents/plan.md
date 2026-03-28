@@ -37,8 +37,8 @@ _Context: With the core application stabilized, high-fidelity tokenization integ
 
 **Completed in Last Session:**
 
-- [x] Integrated `js-tiktoken` for accurate BPE offline token calculation.
-- [x] Fixed cross-store reactivity for Global Extension Overrides.
-- [x] Overhauled ExportStage with Markdown Preview and responsive tables.
-- [x] Implemented Native HTML5 Drag-and-Drop reordering for UI Tabs.
-- [x] Workspace Browser brand overhaul and metadata sorting.
+- [x] Architected and implemented the Global Undo/Redo Engine (Command Pattern + LZ-String compression).
+- [x] Built async context resolution for cross-workspace undo/redo navigation.
+- [x] Added "Hide Excluded" and "Hide Tree-Only" filtering toggles.
+- [x] Added "Expand All" and "Collapse All" bulk folder actions.
+- [x] Integrated exact scroll restoration into the history commands.

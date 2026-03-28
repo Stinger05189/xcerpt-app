@@ -6,7 +6,9 @@ import { MainStage } from './components/layout/MainStage';
 import { Bootstrapper } from './components/layout/Bootstrapper';
 import { WorkspaceBrowser } from './components/layout/WorkspaceBrowser';
 import { SettingsModal } from './components/layout/SettingsModal';
+import { ToastContainer } from './components/layout/ToastContainer';
 import { useAppStore } from './store/appStore';
+import { useHistoryStore } from './store/historyStore';
 
 function App() {
   const isBrowserOpen = useAppStore(s => s.isBrowserOpen);
@@ -34,6 +36,26 @@ function App() {
       window.api.setZoomFactor(scale);
     }
   }, [config.theme]);
+
+  // Global Undo/Redo Keyboard Listeners
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Guard: Do not intercept typing inside inputs or Monaco editors
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          useHistoryStore.getState().redo();
+        } else {
+          useHistoryStore.getState().undo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
 return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-base relative border border-border-subtle text-text-primary">
@@ -70,6 +92,7 @@ return (
           </div>
           {isBrowserOpen && <WorkspaceBrowser />}
           {isSettingsOpen && <SettingsModal />}
+          <ToastContainer />
         </Bootstrapper>
       </div>
     </div>

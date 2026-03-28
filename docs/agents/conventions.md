@@ -32,6 +32,8 @@
 - **Flat-State Sync Pattern:** To prevent deep selector render locks across the app, nested configuration objects (like `Presets`) must be unpacked into flat Zustand state properties (`includes`, `excludes`) upon activation, and repacked before saving or switching contexts.
 - **Session-Bound Snapshots:** Ephemeral session state that must survive workspace tab switches (like "Revert Changes" snapshots) should be hoisted to the global `AppStore` (`workspaceSnapshots`). The `WorkspaceStore` acts as the active consumer.
 - **Cross-Store Reactivity:** When global configurations in the `AppStore` (like `extensionOverrides`) dictate output behavior managed by the `WorkspaceStore`, you must explicitly bridge the stores. Invoke `useWorkspaceStore.getState().setExportState({ isStale: true })` inside the `AppStore` action to manually trigger the dependent pipeline.
+- **The Global History Engine (Command Pattern):** Any state mutation triggered by a user action that modifies the `WorkspaceStore` or `AppStore` MUST be pushed to the global history stack using `useHistoryStore.getState().push()`. Never save full state snapshots. Save only the minimal inverse delta closures (e.g., `() => toggleFolderExpansion(path)`).
+- **LZ-String Compression for Bulk History:** When a History Command closure requires storing a massive array (e.g., "Expand All Folders", "Select All Files"), you MUST wrap the array in `compressHistoryPayload` before pushing it, and `decompressHistoryPayload` inside the undo/redo callbacks. This prevents the 1000-step history stack from causing memory leaks.
 
 ## 3. Node.js & I/O
 
@@ -73,6 +75,7 @@
 - **Nullish Coalescing in Zustand:** Zustand actions strictly enforce the types defined in their interfaces. When passing optional chains (`obj?.id`), always use nullish coalescing (`?? null`) to prevent `undefined` union type mismatches.
 - **Schema Migration Type Safety:** When handling legacy JSON payloads in Zustand hydration, strictly avoid `any` casts. Use `unknown` type intersections (e.g., `payload as unknown as { myLegacyProp?: string }`) to safely parse older schemas without triggering strict ESLint warnings.
 - **Defensive Array Mapping:** Always provide a fallback array (`?.myArray || []`) before calling `.map()` on properties derived from parsed JSON payloads to prevent crashes on legacy entries.
+- **Effect-Driven UI Mutations (Anti-Cascading):** When triggering visual UI changes (like Toast visibility) from within a `useEffect` that listens to global Zustand state, you MUST defer the `setState` call to the macro-task queue (e.g., `setTimeout(() => setVisible(true), 0)`). Synchronous `setState` inside an effect triggers strict-mode cascading render warnings and can interrupt CSS transition lifecycles.
 
 ## 7. UX, Theming & Data Integrity
 

@@ -56,6 +56,7 @@
 - **Multi-Workspace & Presets:** Maintain multiple independent visual exclusion rules and compression states within the same codebase (e.g., "UI Bug Context" vs "Database Context").
 - **AI Filter Bypassing:** Seamlessly bypass chat application file limits via Automated Chunking, and bypass arbitrary file-type rejections using Global Extension Overrides (e.g., map `.uproject` to `.json` on the fly).
 - **Implicit Auto-Saving:** Open the app and start working immediately. Every session, tab, and UI state is automatically saved in the background.
+- **Global Undo/Redo Engine:** Navigate safely with a comprehensive, cross-workspace history system that tracks and restores your visual tree rules, file selections, and context compressions, complete with pixel-perfect scroll restoration.
 
 ## 📥 Installation
 

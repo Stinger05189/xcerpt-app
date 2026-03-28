@@ -1,6 +1,7 @@
 // src/store/appStore.ts
 import { create } from 'zustand';
 import type { AppConfig } from '../types/ipc';
+import { useHistoryStore } from './historyStore';
 
 export interface TabData {
   id: string;
@@ -56,7 +57,7 @@ interface AppState {
   deleteWorkspaceSnapshot: (workspaceId: string, presetId: string) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   config: DEFAULT_CONFIG,
   isSettingsOpen: false,
   appVersion: null,
@@ -95,22 +96,47 @@ export const useAppStore = create<AppState>((set) => ({
 
   setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),
 
-  addWorkspaceTab: (id, title = "Untitled Workspace") => set((state) => {
-    if (state.openTabs.some(t => t.id === id)) return state;
-    return { openTabs: [...state.openTabs, { id, title }] };
-  }),
-
-  removeWorkspaceTab: (id) => set((state) => {
-    const newTabs = state.openTabs.filter(t => t.id !== id);
-    let nextActive = state.activeWorkspaceId;
+  addWorkspaceTab: (id, title = "Untitled Workspace") => {
+    const prevTabs = get().openTabs;
+    set((state) => {
+      if (state.openTabs.some(t => t.id === id)) return state;
+      return { openTabs: [...state.openTabs, { id, title }] };
+    });
+    const nextTabs = get().openTabs;
     
-    // If we closed the active tab, fallback to the right-most adjacent tab
-    if (state.activeWorkspaceId === id) {
-      nextActive = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+    // Only log if a change actually occurred
+    if (prevTabs.length !== nextTabs.length) {
+      useHistoryStore.getState().push(`Open Tab '${title}'`, 
+        () => set({ openTabs: prevTabs }),
+        () => set({ openTabs: nextTabs })
+      );
     }
+  },
+
+  removeWorkspaceTab: (id) => {
+    const prevTabs = get().openTabs;
+    const prevActiveId = get().activeWorkspaceId;
+    const targetTab = prevTabs.find((t: TabData) => t.id === id);
     
-    return { openTabs: newTabs, activeWorkspaceId: nextActive };
-  }),
+    set((state) => {
+      const newTabs = state.openTabs.filter(t => t.id !== id);
+      let nextActive = state.activeWorkspaceId;
+      if (state.activeWorkspaceId === id) {
+        nextActive = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+      }
+      return { openTabs: newTabs, activeWorkspaceId: nextActive };
+    });
+    
+    const nextTabs = get().openTabs;
+    const nextActiveId = get().activeWorkspaceId;
+    
+    if (targetTab) {
+      useHistoryStore.getState().push(`Close Tab '${targetTab.title}'`, 
+        () => set({ openTabs: prevTabs, activeWorkspaceId: prevActiveId }),
+        () => set({ openTabs: nextTabs, activeWorkspaceId: nextActiveId })
+      );
+    }
+  },
 
   updateTabTitle: (id, title) => set((state) => ({
     openTabs: state.openTabs.map(t => t.id === id ? { ...t, title } : t)
@@ -118,17 +144,25 @@ export const useAppStore = create<AppState>((set) => ({
 
   setOpenTabs: (tabs) => set({ openTabs: tabs }),
 
-  reorderWorkspaceTabs: (draggedId, targetId) => set(state => {
-    const draggedIndex = state.openTabs.findIndex(t => t.id === draggedId);
-    const targetIndex = state.openTabs.findIndex(t => t.id === targetId);
-    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return state;
-    
-    const newTabs = [...state.openTabs];
-    const [draggedItem] = newTabs.splice(draggedIndex, 1);
-    newTabs.splice(targetIndex, 0, draggedItem);
-    
-    return { openTabs: newTabs };
-  }),
+  reorderWorkspaceTabs: (draggedId, targetId) => {
+    const prevTabs = get().openTabs;
+    set(state => {
+      const draggedIndex = state.openTabs.findIndex(t => t.id === draggedId);
+      const targetIndex = state.openTabs.findIndex(t => t.id === targetId);
+      if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return state;
+      
+      const newTabs = [...state.openTabs];
+      const [draggedItem] = newTabs.splice(draggedIndex, 1);
+      newTabs.splice(targetIndex, 0, draggedItem);
+      
+      return { openTabs: newTabs };
+    });
+    const nextTabs = get().openTabs;
+    useHistoryStore.getState().push(`Reorder Tabs`, 
+      () => set({ openTabs: prevTabs }),
+      () => set({ openTabs: nextTabs })
+    );
+  },
 
   setBrowserOpen: (isOpen) => set({ isBrowserOpen: isOpen }),
 

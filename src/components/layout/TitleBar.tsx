@@ -1,12 +1,14 @@
 // src/components/layout/TitleBar.tsx
 import { useEffect, useState } from 'react';
-import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee } from 'lucide-react';
+import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee, Undo2, Redo2 } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useHistoryStore } from '../../store/historyStore';
 
 export function TitleBar() {
   const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen, updateProgress, appVersion, reorderWorkspaceTabs } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
+  const { undoStack, redoStack, undo, redo } = useHistoryStore();
 
   const [updateStatus, setUpdateStatus] = useState<'none' | 'update-available' | 'update-downloaded'>('none');
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
@@ -83,6 +85,30 @@ export function TitleBar() {
         >
           <Coffee size={16} />
         </div>
+        
+        <div className="w-px h-6 bg-border-subtle mx-1 mb-1.5 pointer-events-none" />
+        
+        {/* Global Undo / Redo */}
+        <div className="flex items-center h-full px-1 mb-1 gap-0.5" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button 
+            onClick={undo}
+            disabled={undoStack.length === 0}
+            className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 size={14} />
+          </button>
+          <button 
+            onClick={redo}
+            disabled={redoStack.length === 0}
+            className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+            title="Redo (Ctrl+Shift+Z)"
+          >
+            <Redo2 size={14} />
+          </button>
+        </div>
+        
+        <div className="w-px h-6 bg-border-subtle mx-1 mb-1.5 pointer-events-none" />
         
         {/* Global Settings Toggle */}
         <div 

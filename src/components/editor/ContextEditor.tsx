@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
+import { useHistoryStore } from '../../store/historyStore';
 import { FileCode2, Undo2, Trash2, Eye, Code2 } from 'lucide-react';
 
 type MonacoEditor = Parameters<OnMount>[0];
@@ -27,14 +28,14 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     addCompressions, 
     removeCompression, 
     clearCompressions, 
-    undoLastCompression, 
     compressions, 
-    compressionHistory
   } = useWorkspaceStore();
+
+  const canUndo = useHistoryStore(s => s.undoStack.length > 0);
+  const globalUndo = useHistoryStore(s => s.undo);
 
   const rawCompressions = compressions[relativePath];
   const fileCompressions = useMemo(() => rawCompressions || [], [rawCompressions]);
-  const hasHistory = (compressionHistory[relativePath]?.length || 0) > 0;
 
   // Load File, Auto-Heal Drift, and Watch for Live External Edits
   useEffect(() => {
@@ -221,15 +222,15 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
           </span>
         )}
       </div>
-    
+      
       <div className="h-9 bg-bg-panel flex items-center px-4 border-b border-border-subtle shrink-0 gap-3 text-xs text-text-muted">
         <button 
-          onClick={() => undoLastCompression(relativePath)}
-          disabled={!hasHistory || isPreviewMode}
+          onClick={() => globalUndo()}
+          disabled={!canUndo || isPreviewMode}
           className="flex items-center gap-1.5 hover:text-text-primary disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
-          title="Undo last skip action"
+          title="Undo last action (Ctrl+Z)"
         >
-          <Undo2 size={14} /> Undo Skip
+          <Undo2 size={14} /> Undo
         </button>
         <button 
           onClick={() => clearCompressions(relativePath)}

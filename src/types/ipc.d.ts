@@ -124,6 +124,8 @@ export interface WorkspacePayload {
     expandedFolders: string[];
     activeTab: string | null;
     paneWidths?: { sidebar: number; tree: number };
+    hideExcluded?: boolean;
+    hideTreeOnly?: boolean;
   };
 }
 
