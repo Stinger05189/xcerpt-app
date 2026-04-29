@@ -39,11 +39,13 @@ export interface ExportPayload {
   chunks: ExportChunk[];
   treeMarkdown: string;
   metrics?: { excluded: number; treeOnly: number; size: number; tokens: number; };
+  mergeToSingleFile?: boolean;
 }
 
 export interface EphemeralPayload {
   files: ExportFile[];
   treeMarkdown: string;
+  mergeToSingleFile?: boolean;
 }
 
 // --- App Config Schema ---
@@ -114,6 +116,7 @@ export interface WorkspacePayload {
   metadata: WorkspaceMetadata;
   settings: {
     maxFilesPerChunk: number;
+    mergeToSingleFile?: boolean;
   };
   rules: {
     hardBlacklist: string[];

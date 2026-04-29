@@ -42,6 +42,7 @@ interface WorkspaceState {
   compressions: Record<string, CompressionRule[]>;
 
   maxFilesPerChunk: number;
+  mergeToSingleFile: boolean;
 
   activeTab: string | null;
   activeFile: string | null;
@@ -71,6 +72,7 @@ interface WorkspaceState {
   // Actions
   hydrateWorkspace: (payload: import('../types/ipc').WorkspacePayload) => void;
   setMaxFilesPerChunk: (val: number) => void;
+  setMergeToSingleFile: (val: boolean) => void;
   setPaneWidth: (pane: 'sidebar' | 'tree', width: number) => void;
   incrementStat: (type: 'totalExports' | 'ephemeralExports', files?: string[]) => void;
   fetchGitStatus: () => Promise<void>;
@@ -146,6 +148,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   compressions: {},
   maxFilesPerChunk: 100000,
+  mergeToSingleFile: false,
 
   activeTab: null,
   activeFile: null,
@@ -224,6 +227,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       compressions: activePreset.compressions,
 
       maxFilesPerChunk: payload.settings.maxFilesPerChunk,
+      mergeToSingleFile: payload.settings.mergeToSingleFile ?? false,
       activeTab: payload.uiState.activeTab,
       expandedFolders: new Set(payload.uiState.expandedFolders),
       hideExcluded: payload.uiState.hideExcluded ?? true,
@@ -242,6 +246,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
+  setMergeToSingleFile: (val: boolean) => set({ mergeToSingleFile: val, isStale: true }),
   setPaneWidth: (pane, width) => set(state => ({ paneWidths: { ...state.paneWidths, [pane]: width } })),
 
   incrementStat: (type, files = []) => set(state => {
@@ -663,7 +668,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     );
   },
 
-  setCompressions: (relativePath, rules) => set(state => ({ compressions: { ...state.compressions, [relativePath]: rules }, isStale: true })),
+  setCompressions: (relativePath, rules) => {
+    const prevComp = get().compressions[relativePath] || [];
+    set(state => ({ compressions: { ...state.compressions, [relativePath]: rules }, isStale: true }));
+    useHistoryStore.getState().push(`Update Skips`, 
+      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: prevComp }, isStale: true })),
+      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: rules }, isStale: true }))
+    );
+  },
 
   removeCompression: (relativePath, id) => {
     const prevComp = get().compressions[relativePath] || [];

@@ -180,7 +180,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     setHasLoggedDrag(false); 
     
     try {
-      const payload = generateEphemeralPayload(rootPath, node, state.selectedFiles, state.compressions, config.extensionOverrides);
+      const payload = generateEphemeralPayload(rootPath, node, state.selectedFiles, state.compressions, config.extensionOverrides, state.mergeToSingleFile);
       const paths = await window.api.stageEphemeralExport(payload);
       state.setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
     } catch (e) {

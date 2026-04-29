@@ -129,7 +129,7 @@ export function Sidebar() {
     setHistoryStates(prev => ({ ...prev, [h.id]: { loading: true, paths: null } }));
     
     try {
-      const payload = generateEphemeralPayload(root, tree, new Set(h.files), compressions, extensionOverrides);
+      const payload = generateEphemeralPayload(root, tree, new Set(h.files), useWorkspaceStore.getState().compressions, extensionOverrides, useWorkspaceStore.getState().mergeToSingleFile);
       const paths = await window.api.stageEphemeralExport(payload);
       setHistoryStates(prev => ({ ...prev, [h.id]: { loading: false, paths } }));
       useWorkspaceStore.getState().incrementStat('ephemeralExports', h.files);

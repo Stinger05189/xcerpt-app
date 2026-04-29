@@ -1,7 +1,7 @@
 // src/components/editor/ContextEditor.tsx
 import { useEffect, useState, useRef, useMemo } from 'react';
 import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
-import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useWorkspaceStore, type CompressionRule } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { FileCode2, Undo2, Trash2, Eye, Code2 } from 'lucide-react';
@@ -25,9 +25,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const config = useAppStore(s => s.config);
 
   const { 
-    addCompressions, 
-    removeCompression, 
-    clearCompressions, 
+    setCompressions, 
     compressions, 
   } = useWorkspaceStore();
 
@@ -36,6 +34,48 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
 
   const rawCompressions = compressions[relativePath];
   const fileCompressions = useMemo(() => rawCompressions || [], [rawCompressions]);
+
+  // Local Draft Engine
+  const [draftCompressions, setDraftCompressions] = useState<CompressionRule[]>(fileCompressions);
+  const lastGlobalStrRef = useRef<string>(JSON.stringify(fileCompressions));
+
+  // Resync draft state securely if it changes externally (e.g. Undo/Redo/Drift Heal)
+  useEffect(() => {
+    const currentGlobalStr = JSON.stringify(fileCompressions);
+    if (currentGlobalStr !== lastGlobalStrRef.current) {
+      setTimeout(() => setDraftCompressions(fileCompressions), 0);
+      lastGlobalStrRef.current = currentGlobalStr;
+    }
+  }, [fileCompressions]);
+
+  // Pure calculation during render, avoiding Ref reads
+  const isDirty = JSON.stringify(draftCompressions) !== JSON.stringify(fileCompressions);
+
+  const handleSave = () => {
+    setCompressions(relativePath, draftCompressions);
+  };
+
+  const handleDiscard = () => {
+    setDraftCompressions(fileCompressions);
+  };
+
+  // Metrics Calculations
+  const stats = useMemo(() => {
+    if (!content) return { lines: 0, kb: '0.0', estLines: 0, estKb: '0.0' };
+    const lines = content.split('\n').length;
+    const kb = new Blob([content]).size / 1024;
+
+    const skippedLines = draftCompressions.reduce((acc, c) => acc + c.lineCount, 0);
+    const estLines = Math.max(0, lines - skippedLines);
+    const estKb = lines > 0 ? (estLines / lines) * kb : 0;
+
+    return {
+      lines,
+      kb: kb.toFixed(1),
+      estLines,
+      estKb: estKb.toFixed(1)
+    };
+  }, [content, draftCompressions]);
 
   // Load File, Auto-Heal Drift, and Watch for Live External Edits
   useEffect(() => {
@@ -115,7 +155,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const previewContent = useMemo(() => {
     if (!isPreviewMode) return content;
     const lines = content.split('\n');
-    const sortedComps = [...fileCompressions].sort((a, b) => b.startLine - a.startLine);
+    const sortedComps = [...draftCompressions].sort((a, b) => b.startLine - a.startLine);
     
     const resultLines = [...lines];
     sortedComps.forEach(comp => {
@@ -125,7 +165,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     });
     
     return resultLines.join('\n');
-  }, [content, fileCompressions, isPreviewMode]);
+  }, [content, draftCompressions, isPreviewMode]);
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
@@ -146,9 +186,10 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         const selections = ed.getSelections();
         const model = ed.getModel();
         if (selections && selections.length > 0 && model) {
-          const rules = selections
+          const newRules = selections
             .filter(sel => !sel.isEmpty())
             .map(sel => ({
+              id: Math.random().toString(36).substr(2, 9),
               startLine: sel.startLineNumber,
               endLine: sel.endLineNumber,
               type: 'SKIP' as const,
@@ -156,8 +197,25 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
               lineCount: sel.endLineNumber - sel.startLineNumber + 1
             }));
             
-          if (rules.length > 0) {
-            addCompressions(relativePath, rules);
+          if (newRules.length > 0) {
+            setDraftCompressions(prev => {
+              const combined = [...prev, ...newRules].sort((a, b) => a.startLine - b.startLine);
+              const merged: CompressionRule[] = [];
+              for (const curr of combined) {
+                if (merged.length === 0) {
+                  merged.push({ ...curr });
+                  continue;
+                }
+                const last = merged[merged.length - 1];
+                if (curr.startLine <= last.endLine + 1) { // Overlaps or is adjacent
+                  last.endLine = Math.max(last.endLine, curr.endLine);
+                  last.lineCount = last.endLine - last.startLine + 1;
+                } else {
+                  merged.push({ ...curr });
+                }
+              }
+              return merged;
+            });
             ed.setSelection({ startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 });
           }
         }
@@ -172,10 +230,9 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
       run: (ed: MonacoEditor) => {
         const position = ed.getPosition();
         if (position) {
-          const target = useWorkspaceStore.getState().compressions[relativePath]?.find(
-            c => position.lineNumber >= c.startLine && position.lineNumber <= c.endLine
-          );
-          if (target) removeCompression(relativePath, target.id);
+          setDraftCompressions(prev => prev.filter(
+            c => !(position.lineNumber >= c.startLine && position.lineNumber <= c.endLine)
+          ));
         }
       }
     });
@@ -189,12 +246,16 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     // Safety check: ensure Monaco has actually loaded the string content
     if (editor.getModel()?.getValue() !== content) return;
     
-    const newDecorations = fileCompressions.map(comp => ({
+    const newDecorations = draftCompressions.map(comp => ({
       range: new monaco.Range(comp.startLine, 1, comp.endLine, 1),
       options: {
         isWholeLine: true,
         className: 'monaco-skip-block-line',
         glyphMarginClassName: 'monaco-skip-block-margin',
+        overviewRuler: {
+          color: 'rgba(234, 179, 8, 0.7)',
+          position: monaco.editor.OverviewRulerLane.Full
+        }
       }
     }));
     
@@ -207,7 +268,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     return () => {
       if (decorationsCollectionRef.current) decorationsCollectionRef.current.clear();
     };
-  }, [fileCompressions, monaco, isPreviewMode, content]);
+  }, [draftCompressions, monaco, isPreviewMode, content]);
 
   const fileName = relativePath.split(/[/\\]/).pop();
 
@@ -216,38 +277,56 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
       <div className="h-10 bg-bg-hover flex items-center px-4 border-b border-border-subtle shrink-0 gap-2">
         <FileCode2 size={16} className="text-accent" />
         <span className="text-sm font-medium">{fileName}</span>
-        {fileCompressions.length > 0 && (
+        {draftCompressions.length > 0 && (
           <span className="ml-2 text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full">
-            {fileCompressions.length} Skips Applied
+            {draftCompressions.length} Skips Applied
           </span>
         )}
       </div>
       
-      <div className="h-9 bg-bg-panel flex items-center px-4 border-b border-border-subtle shrink-0 gap-3 text-xs text-text-muted">
-        <button 
-          onClick={() => globalUndo()}
-          disabled={!canUndo || isPreviewMode}
-          className="flex items-center gap-1.5 hover:text-text-primary disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
-          title="Undo last action (Ctrl+Z)"
-        >
-          <Undo2 size={14} /> Undo
-        </button>
-        <button 
-          onClick={() => clearCompressions(relativePath)}
-          disabled={fileCompressions.length === 0 || isPreviewMode}
-          className="flex items-center gap-1.5 hover:text-red-400 disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
-        >
-          <Trash2 size={14} /> Clear All
-        </button>
-        <div className="w-px h-4 bg-border-subtle mx-1" />
-        <button 
-          onClick={() => setIsPreviewMode(!isPreviewMode)}
-          className={`flex items-center gap-1.5 transition-colors px-2 py-1 rounded ${isPreviewMode ? 'bg-accent/20 text-accent' : 'hover:text-text-primary'}`}
-        >
-          {isPreviewMode ? <Code2 size={14} /> : <Eye size={14} />}
-          {isPreviewMode ? 'Exit Preview' : 'Preview Output'}
-        </button>
-        <span className="ml-auto opacity-50 text-[10px]">Ctrl/Cmd + Backspace to Skip</span>
+      <div className="h-10 bg-bg-panel flex items-center px-4 border-b border-border-subtle shrink-0 gap-3 text-xs text-text-muted justify-between">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => globalUndo()}
+            disabled={!canUndo || isPreviewMode}
+            className="flex items-center gap-1.5 hover:text-text-primary disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
+            title="Undo last action (Ctrl+Z)"
+          >
+            <Undo2 size={14} /> Undo
+          </button>
+          <button 
+            onClick={() => setDraftCompressions([])}
+            disabled={draftCompressions.length === 0 || isPreviewMode}
+            className="flex items-center gap-1.5 hover:text-red-400 disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
+          >
+            <Trash2 size={14} /> Clear All
+          </button>
+          <div className="w-px h-4 bg-border-subtle mx-1" />
+          <button 
+            onClick={() => setIsPreviewMode(!isPreviewMode)}
+            className={`flex items-center gap-1.5 transition-colors px-2 py-1 rounded ${isPreviewMode ? 'bg-accent/20 text-accent' : 'hover:text-text-primary'}`}
+          >
+            {isPreviewMode ? <Code2 size={14} /> : <Eye size={14} />}
+            {isPreviewMode ? 'Exit Preview' : 'Preview Output'}
+          </button>
+          <span className="ml-2 opacity-50 text-[10px]">Ctrl/Cmd + Backspace to Skip</span>
+        </div>
+        
+        <div className="flex items-center gap-3">
+           <div className="flex items-center gap-2 font-mono text-[10px]">
+              <span>{stats.kb} KB ({stats.lines} L)</span>
+              <span>→</span>
+              <span className={isDirty ? "text-yellow-400" : "text-green-400"}>
+                {stats.estKb} KB ({stats.estLines} L)
+              </span>
+           </div>
+           {isDirty && (
+             <div className="flex items-center gap-2 ml-1">
+               <button onClick={handleDiscard} className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded transition-colors font-medium">Discard</button>
+               <button onClick={handleSave} className="px-2 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded transition-colors font-medium">Save Skips</button>
+             </div>
+           )}
+        </div>
       </div>
       
       <div className="flex-1 relative">
@@ -264,8 +343,8 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
           onMount={handleEditorMount}
           options={{
             fontSize: config.theme.font.size,
-            readOnly: true, // App operates assuming external edits only
-            minimap: { enabled: true, scale: 0.75, renderCharacters: false },
+            readOnly: true, 
+            minimap: { enabled: true, scale: 0.75, renderCharacters: false, showSlider: 'always', size: 'fill' },
             glyphMargin: !isPreviewMode,
             lineNumbersMinChars: 4,
             scrollBeyondLastLine: false,

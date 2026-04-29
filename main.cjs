@@ -139,6 +139,40 @@ async function processExport(payload) {
 
   const chunkPaths = [];
 
+  if (payload.mergeToSingleFile) {
+    const chunkDir = path.join(exportDir, `chunk_1`);
+    fsSync.mkdirSync(chunkDir, { recursive: true });
+    chunkPaths.push(chunkDir);
+
+    let combinedContent = `# Exported Workspace Context\n\n`;
+    combinedContent += `## File Tree\n\`\`\`text\n${payload.treeMarkdown}\n\`\`\`\n\n`;
+    combinedContent += `## Files\n\n`;
+
+    if (payload.chunks.length > 0) {
+      payload.chunks[0].files.forEach((file) => {
+        try {
+          const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
+          let lines = content.split('\n');
+          const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
+          for (const comp of sortedComps) {
+            const skipCount = comp.endLine - comp.startLine + 1;
+            const marker = `// ... [Skipped ${skipCount} lines] ...`;
+            lines.splice(comp.startLine - 1, skipCount, marker);
+          }
+          
+          const ext = path.extname(file.flatFileName).slice(1) || 'text';
+          combinedContent += `### ${file.relativePath}\n\n`;
+          combinedContent += `\`\`\`${ext}\n${lines.join('\n')}\n\`\`\`\n\n`;
+        } catch (err) {
+          console.error(`Error processing file ${file.absolutePath}:`, err);
+        }
+      });
+    }
+
+    fsSync.writeFileSync(path.join(chunkDir, 'context.md'), combinedContent, 'utf-8');
+    return chunkPaths;
+  }
+
   for (let i = 0; i < payload.chunks.length; i++) {
     const chunk = payload.chunks[i];
     const chunkDir = path.join(exportDir, `chunk_${chunk.id}`);
@@ -180,6 +214,37 @@ async function processEphemeralExport(payload) {
   fsSync.mkdirSync(ephemeralDir, { recursive: true });
 
   const createdPaths = [];
+
+  if (payload.mergeToSingleFile) {
+    let combinedContent = `# Ephemeral Quick Export\n\n`;
+    combinedContent += `## File Tree\n\`\`\`text\n${payload.treeMarkdown}\n\`\`\`\n\n`;
+    combinedContent += `## Files\n\n`;
+
+    payload.files.forEach((file) => {
+      try {
+        const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
+        let lines = content.split('\n');
+        const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
+        for (const comp of sortedComps) {
+          const skipCount = comp.endLine - comp.startLine + 1;
+          const marker = `// ... [Skipped ${skipCount} lines] ...`;
+          lines.splice(comp.startLine - 1, skipCount, marker);
+        }
+        
+        const ext = path.extname(file.flatFileName).slice(1) || 'text';
+        combinedContent += `### ${file.relativePath}\n\n`;
+        combinedContent += `\`\`\`${ext}\n${lines.join('\n')}\n\`\`\`\n\n`;
+      } catch (err) {
+        console.error(`Error processing ephemeral file ${file.absolutePath}:`, err);
+      }
+    });
+
+    const contextPath = path.join(ephemeralDir, 'context.md');
+    fsSync.writeFileSync(contextPath, combinedContent, 'utf-8');
+    createdPaths.push(contextPath);
+    return createdPaths;
+  }
+
   const treePath = path.join(ephemeralDir, 'ExportedFileTree.md');
   fsSync.writeFileSync(treePath, payload.treeMarkdown, 'utf-8');
   createdPaths.push(treePath);

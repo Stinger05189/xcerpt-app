@@ -8,7 +8,8 @@ export function generateEphemeralPayload(
   tree: FileNode,
   selectedFiles: Set<string>,
   compressions: Record<string, CompressionRule[]>,
-  extensionOverrides: Record<string, string>
+  extensionOverrides: Record<string, string>,
+  mergeToSingleFile: boolean
 ) {
   const exportFiles: ExportFile[] = [];
   const rootName = rootPath.split(/[/\\]/).pop() || 'root';
@@ -97,7 +98,7 @@ export function generateEphemeralPayload(
   mdTree += traverse(tree, "", true, "", false);
   mdTree += "```\n";
 
-  return { files: exportFiles, treeMarkdown: mdTree };
+  return { files: exportFiles, treeMarkdown: mdTree, mergeToSingleFile };
 }
 
 export function generateExportPayload(
@@ -108,7 +109,8 @@ export function generateExportPayload(
   treeOnly: string[],
   compressions: Record<string, CompressionRule[]>,
   maxFilesPerChunk: number,
-  extensionOverrides: Record<string, string>
+  extensionOverrides: Record<string, string>,
+  mergeToSingleFile: boolean
 ): ExportPayload {
   const exportFiles: ExportFile[] = [];
   const metrics = { excluded: 0, treeOnly: 0, size: 0, tokens: 0 };
@@ -239,7 +241,7 @@ export function generateExportPayload(
   mdTree += "```\n";
 
   const chunks = [];
-  const limit = maxFilesPerChunk >= 100000 ? exportFiles.length || 1 : maxFilesPerChunk;
+  const limit = (mergeToSingleFile || maxFilesPerChunk >= 100000) ? exportFiles.length || 1 : maxFilesPerChunk;
 
   for (let i = 0; i < exportFiles.length; i += limit) {
     chunks.push({
@@ -250,5 +252,5 @@ export function generateExportPayload(
 
   metrics.tokens = Math.round(metrics.size / 4);
 
-  return { chunks, treeMarkdown: mdTree, metrics };
+  return { chunks, treeMarkdown: mdTree, metrics, mergeToSingleFile };
 }

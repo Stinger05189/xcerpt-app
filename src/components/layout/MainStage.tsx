@@ -32,7 +32,8 @@ export function MainStage() {
     paneWidths,
     setPaneWidth,
     fetchGitStatus,
-    incrementStat
+    incrementStat,
+    mergeToSingleFile
   } = useWorkspaceStore();
 
   const [activePayload, setActivePayload] = useState<ReturnType<typeof generateExportPayload> | null>(null);
@@ -78,7 +79,7 @@ export function MainStage() {
       setExportState({ isStale: false, isBuilding: false, chunkPaths: [] });
       setTimeout(() => setActivePayload(null), 0);
     }
-  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, setExportState]);
+  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, mergeToSingleFile, setExportState]);
 
   // --- Auto-Build Pipeline: Debounce and Execute ---
   useEffect(() => {
@@ -87,7 +88,7 @@ export function MainStage() {
     const timer = setTimeout(async () => {
       setExportState({ isBuilding: true });
       try {
-        const payload = generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides);
+        const payload = generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, mergeToSingleFile);
         setActivePayload(payload);
         
         if (payload.chunks.length > 0 && payload.chunks[0].files.length > 0) {
@@ -103,7 +104,7 @@ export function MainStage() {
     }, 1500);
     
     return () => clearTimeout(timer);
-  }, [isStale, rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, setExportState]);
+  }, [isStale, rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, mergeToSingleFile, setExportState]);
 
   // --- Fetch Git Status on Tab Switch ---
   useEffect(() => {
@@ -211,8 +212,14 @@ export function MainStage() {
               ) : hasFiles ? (
                 chunkPaths.map((chunkDir, idx) => {
                   const chunkData = activePayload?.chunks[idx];
-                  const dragFiles = chunkData?.files.map(f => `${chunkDir}/${f.flatFileName}`) || [];
-                  if (idx === 0) dragFiles.push(`${chunkDir}/ExportedFileTree.md`);
+                  
+                  let dragFiles: string[] = [];
+                  if (activePayload?.mergeToSingleFile) {
+                    dragFiles.push(`${chunkDir}/context.md`);
+                  } else {
+                    dragFiles = chunkData?.files.map(f => `${chunkDir}/${f.flatFileName}`) || [];
+                    if (idx === 0) dragFiles.push(`${chunkDir}/ExportedFileTree.md`);
+                  }
                 
                   return (
                     <button

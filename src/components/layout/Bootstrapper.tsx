@@ -28,7 +28,7 @@ const generateFreshWorkspace = async (id: string) => {
       rootPaths: [],
       stats: { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} }
     },
-    settings: { maxFilesPerChunk: 100000 },
+    settings: { maxFilesPerChunk: 100000, mergeToSingleFile: false },
     rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist },
     activePresetId: defaultPreset.id,
     presets: [defaultPreset],
@@ -50,7 +50,7 @@ const getWorkspacePayload = (state: ReturnType<typeof useWorkspaceStore.getState
     rootPaths: state.rootPaths,
     stats: state.stats
   },
-  settings: { maxFilesPerChunk: state.maxFilesPerChunk },
+  settings: { maxFilesPerChunk: state.maxFilesPerChunk, mergeToSingleFile: state.mergeToSingleFile },
   rules: { hardBlacklist: state.hardBlacklist },
   activePresetId: state.activePresetId!,
   presets: state.getPackedPresets(),

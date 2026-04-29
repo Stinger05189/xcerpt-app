@@ -14,11 +14,6 @@
 
 ---
 
-## Current Macro-Objective
-
-**Epoch 4, Phase 17: External Integrations & Advanced Chunking**
-_Context: With the core application stabilized, high-fidelity tokenization integrated, and the UI overhauled for brand appeal, we are shifting focus to advanced payload delivery and intelligent context chunking._
-
 ## Active Queue (Current / Next Session)
 
 - [ ] **Task 1: AI Provider Direct Integrations (Exploratory)**
@@ -37,8 +32,6 @@ _Context: With the core application stabilized, high-fidelity tokenization integ
 
 **Completed in Last Session:**
 
-- [x] Architected and implemented the Global Undo/Redo Engine (Command Pattern + LZ-String compression).
-- [x] Built async context resolution for cross-workspace undo/redo navigation.
-- [x] Added "Hide Excluded" and "Hide Tree-Only" filtering toggles.
-- [x] Added "Expand All" and "Collapse All" bulk folder actions.
-- [x] Integrated exact scroll restoration into the history commands.
+- [x] Implemented "Merge to single context.md file" monolithic export capability.
+- [x] Decoupled editor modifications from instantaneous global state updates via a localized Draft/Dirty state.
+- [x] Upgraded Monaco editor with multi-cursor mathematical range merging, minimap constraints, and scrollbar skip-block decorations.

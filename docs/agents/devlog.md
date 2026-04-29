@@ -106,6 +106,23 @@
 
 ---
 
+### Session 020
+
+- **Focus Area:** Editor UX Refinement, Monolithic Context Export, and Deferred State Management (Phase 17).
+- **Key Decisions:**
+  - **Monolithic Context Export:** Added a `mergeToSingleFile` workspace configuration. The Node.js backend intercepts the standard multi-file chunking loop to physically construct a unified `context.md` file containing the markdown tree and all code blocks, fulfilling specific LLM context requirements.
+  - **Deferred Editor State (Dirty Engine):** Decoupled the Monaco editor's skip-block mutations from the global `workspaceStore`. `ContextEditor.tsx` now uses a localized `draftCompressions` state, preventing instantaneous background payload rebuilds and UI event-loop starvation during rapid highlighting. Added explicit Save/Discard toolbar controls.
+  - **Multi-Cursor & Monaco Overhauls:** Upgraded the `xcerpt-skip-block` action to iterate through `editor.getSelections()`, sorting and mathematically merging overlapping ranges to prevent corrupted skip markers. Enforced `showSlider: 'always'` and `size: 'fill'` on the minimap, and injected skip-block visualizations into the scrollbar via `overviewRuler`.
+- **Roadblocks Resolved:**
+  - **Refs in Render Phase:** Fixed strict-mode ESLint crashes caused by reading `lastSavedRef.current` during the render phase to calculate the `isDirty` state. Converted the check to a pure string comparison against the prop.
+  - **Verbatim Module Syntax:** Resolved TypeScript compilation errors in `ContextEditor.tsx` by explicitly using `type` imports for `CompressionRule`.
+- **Core Files Modified:**
+  - `src/store/workspaceStore.ts`, `src/types/ipc.d.ts`
+  - `main.cjs`, `src/utils/exportEngine.ts`
+  - `src/components/editor/ContextEditor.tsx`, `src/components/export/ExportStage.tsx`, `src/components/layout/MainStage.tsx`
+
+---
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

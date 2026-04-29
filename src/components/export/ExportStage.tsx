@@ -30,7 +30,9 @@ export function ExportStage() {
     setMaxFilesPerChunk, 
     compressions, 
     chunkPaths,
-    stats
+    stats,
+    mergeToSingleFile,
+    setMergeToSingleFile
   } = useWorkspaceStore();
 
   const extensionOverrides = useAppStore(s => s.config.extensionOverrides);
@@ -43,8 +45,8 @@ export function ExportStage() {
 
   // Compute the payload purely for UI rendering so the user sees exactly what the LLM sees
   const payload = useMemo(() => {
-    return generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides);
-  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides]);
+    return generateExportPayload(rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, mergeToSingleFile);
+  }, [rootPaths, rawTrees, includes, excludes, treeOnly, compressions, maxFilesPerChunk, extensionOverrides, mergeToSingleFile]);
 
   const totalFiles = payload.chunks.reduce((acc, c) => acc + c.files.length, 0);
   const filesWithCompressions = payload.chunks.flatMap(c => c.files).filter(f => f.compressions.length > 0).length;
@@ -160,6 +162,18 @@ export function ExportStage() {
               <span className="w-8 text-right font-mono text-sm text-text-primary">
                 {isUnlimited ? <InfinityIcon size={16} className="inline opacity-50"/> : maxFilesPerChunk}
               </span>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-border-subtle pt-3 mt-1">
+              <label className="flex items-center gap-2 cursor-pointer text-sm text-text-primary font-medium">
+                <input
+                  type="checkbox"
+                  checked={mergeToSingleFile}
+                  onChange={(e) => setMergeToSingleFile(e.target.checked)}
+                  className="accent-accent w-4 h-4"
+                />
+                Merge into single context.md
+              </label>
             </div>
           </div>
         </div>

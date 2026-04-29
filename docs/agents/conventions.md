@@ -34,6 +34,7 @@
 - **Cross-Store Reactivity:** When global configurations in the `AppStore` (like `extensionOverrides`) dictate output behavior managed by the `WorkspaceStore`, you must explicitly bridge the stores. Invoke `useWorkspaceStore.getState().setExportState({ isStale: true })` inside the `AppStore` action to manually trigger the dependent pipeline.
 - **The Global History Engine (Command Pattern):** Any state mutation triggered by a user action that modifies the `WorkspaceStore` or `AppStore` MUST be pushed to the global history stack using `useHistoryStore.getState().push()`. Never save full state snapshots. Save only the minimal inverse delta closures (e.g., `() => toggleFolderExpansion(path)`).
 - **LZ-String Compression for Bulk History:** When a History Command closure requires storing a massive array (e.g., "Expand All Folders", "Select All Files"), you MUST wrap the array in `compressHistoryPayload` before pushing it, and `decompressHistoryPayload` inside the undo/redo callbacks. This prevents the 1000-step history stack from causing memory leaks.
+- **Deferred Editor State (Anti-Lockup):** When handling rapid, continuous user inputs (such as adding multiple Monaco skip-blocks) that trigger heavy I/O payload regenerations, NEVER bind the input directly to a global Zustand mutation. Maintain a localized React state (e.g., `draftCompressions`), track dirty-status via stringified prop comparisons, and only commit to the global store via explicit user confirmation (Save/Discard).
 
 ## 3. Node.js & I/O
 
@@ -76,6 +77,8 @@
 - **Schema Migration Type Safety:** When handling legacy JSON payloads in Zustand hydration, strictly avoid `any` casts. Use `unknown` type intersections (e.g., `payload as unknown as { myLegacyProp?: string }`) to safely parse older schemas without triggering strict ESLint warnings.
 - **Defensive Array Mapping:** Always provide a fallback array (`?.myArray || []`) before calling `.map()` on properties derived from parsed JSON payloads to prevent crashes on legacy entries.
 - **Effect-Driven UI Mutations (Anti-Cascading):** When triggering visual UI changes (like Toast visibility) from within a `useEffect` that listens to global Zustand state, you MUST defer the `setState` call to the macro-task queue (e.g., `setTimeout(() => setVisible(true), 0)`). Synchronous `setState` inside an effect triggers strict-mode cascading render warnings and can interrupt CSS transition lifecycles.
+- **React Refs in Render (Purity):** Never access `useRef().current` during the React render phase to calculate derived state (e.g., `const isDirty = ref.current !== state`). Strict ESLint rules will flag this as a purity violation. Instead, use pure stringified comparisons against memoized props, or defer the ref-check to a `useEffect` if side-effects are necessary.
+- **Verbatim Module Syntax (Type Imports):** Because `tsconfig` enforces `verbatimModuleSyntax`, any TypeScript interface imported purely for typing MUST be explicitly prefixed (e.g., `import { useWorkspaceStore, type CompressionRule } from '...'`).
 
 ## 7. UX, Theming & Data Integrity
 
