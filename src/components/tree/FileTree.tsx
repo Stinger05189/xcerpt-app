@@ -69,6 +69,10 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const lastPointerYRef = useRef<number>(0);
   const autoScrollRafRef = useRef<number | null>(null);
 
+  const clickTargetRef = useRef<string | null>(null);
+  const hasDraggedRef = useRef<boolean>(false);
+  const startPointerYRef = useRef<number>(0);
+
   // Deferred Calculation Engine
   useEffect(() => {
     const calculateStats = (rootNode: FileNode, selFiles: Set<string>) => {
@@ -268,6 +272,11 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
   const handlePointerMove = (e: PointerEvent) => {
     lastPointerYRef.current = e.clientY;
+    
+    if (Math.abs(e.clientY - startPointerYRef.current) > 5) {
+      hasDraggedRef.current = true;
+    }
+
     updateSelectionFromPointer(e.clientY);
     
     if (!autoScrollRafRef.current) {
@@ -276,6 +285,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   };
 
   const startAutoScroll = () => {
+    hasDraggedRef.current = true;
     const loop = () => {
       if (!parentRef.current || !dragStateRef.current) {
         autoScrollRafRef.current = null;
@@ -316,6 +326,10 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     dragStateRef.current = null;
     setMarquee(null);
     useWorkspaceStore.getState().setIsPainting(false);
+    
+    if (clickTargetRef.current && !hasDraggedRef.current) {
+      useWorkspaceStore.getState().setActiveFile(clickTargetRef.current);
+    }
   };
 
   const handleRowPointerDown = (e: React.PointerEvent, index: number, pattern: string, isDirectory: boolean) => {
@@ -330,6 +344,10 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     const store = useWorkspaceStore.getState();
     const hasPattern = store.selectedFiles.has(pattern);
     
+    hasDraggedRef.current = false;
+    startPointerYRef.current = e.clientY;
+    clickTargetRef.current = !isDirectory ? pattern : null;
+    
     let mode: 'add' | 'remove' = 'add';
     let clearFirst = false;
     
@@ -339,7 +357,6 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     else {
       mode = 'add';
       clearFirst = true;
-      if (!isDirectory) store.setActiveFile(pattern);
     }
     
     const baseSelection = clearFirst ? new Set<string>() : new Set(store.selectedFiles);

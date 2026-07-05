@@ -1,5 +1,6 @@
 /* src/index.css */
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   --color-bg-base: var(--theme-bg-base, #0f0f11);

@@ -424,8 +424,47 @@ ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist) => {
 });
 
 ipcMain.handle('fs:readFile', async (_, filePath) => {
-  try { return await fs.readFile(filePath, 'utf-8'); } 
-  catch (error) { console.error('Error reading:', error); throw error; }
+  try {
+    const stats = await fs.stat(filePath);
+    if (stats.size > 5 * 1024 * 1024) {
+      throw new Error(`File is too large (${(stats.size / (1024 * 1024)).toFixed(2)} MB). Preview disabled to protect memory.`);
+    }
+
+    const fh = await fs.open(filePath, 'r');
+    const buffer = Buffer.alloc(4096);
+    const { bytesRead } = await fh.read(buffer, 0, 4096, 0);
+    await fh.close();
+
+    for (let i = 0; i < bytesRead; i++) {
+      if (buffer[i] === 0) {
+        throw new Error("Binary file detected. Preview disabled to protect memory.");
+      }
+    }
+
+    return await fs.readFile(filePath, 'utf-8');
+  } 
+  catch (error) { 
+    console.error('Error reading:', error); 
+    throw error; 
+  }
+});
+
+ipcMain.handle('fs:readImageBase64', async (_, filePath) => {
+  try {
+    const data = await fs.readFile(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    let mime = 'image/png';
+    if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+    else if (ext === '.gif') mime = 'image/gif';
+    else if (ext === '.svg') mime = 'image/svg+xml';
+    else if (ext === '.webp') mime = 'image/webp';
+    else if (ext === '.ico') mime = 'image/x-icon';
+
+    return `data:${mime};base64,${data.toString('base64')}`;
+  } catch (error) {
+    console.error('Error reading image:', error);
+    throw error;
+  }
 });
 
 ipcMain.handle('fs:calculateTokens', async (_, filePaths) => {

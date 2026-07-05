@@ -99,6 +99,31 @@ npm run dist
 
 The final executables will be output to the `release/` directory.
 
+### Publishing a New Release
+
+To compile the application, generate the executables, and push a draft release directly to GitHub, follow these steps:
+
+1. **Set your GitHub Token:** You must authenticate your terminal session before building. In PowerShell, set your environment variable like so:
+
+```powershell
+   $env:GH_TOKEN="ghp_YourTokenHere"
+```
+
+2. **Run the Publish Command:** Execute the distribution script with the publish flag:
+
+```bash
+npm run dist -- -p always
+```
+
+_This command leverages electron-builder to compile the application and automatically upload the artifacts to a new draft release on your GitHub repository._
+
+3. **Commit and Push:** Standardize your local branch by committing your version bump (in `package.json`) and pushing the changes to GitHub.
+4. **Finalize the Release:** Navigate to the **Releases** section of your GitHub repository.
+
+- Locate the newly generated draft.
+- Edit the draft to include your release notes and title.
+- Click **Publish release**.
+
 ## ☕ Support & Funding
 
 If Xcerpt has saved you tokens, time, or headaches while working with AI models, consider buying me a coffee! It helps keep the project maintained and the auto-updater servers running.

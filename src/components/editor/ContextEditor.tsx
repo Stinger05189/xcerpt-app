@@ -4,7 +4,9 @@ import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
 import { useWorkspaceStore, type CompressionRule } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { useHistoryStore } from '../../store/historyStore';
-import { FileCode2, Undo2, Trash2, Eye, Code2 } from 'lucide-react';
+import { FileCode2, Undo2, Trash2, Eye, Code2, BookOpen } from 'lucide-react';
+import { ImageViewer } from './ImageViewer';
+import { MarkdownViewer } from './MarkdownViewer';
 
 type MonacoEditor = Parameters<OnMount>[0];
 type EditorDecorationsCollection = ReturnType<MonacoEditor['createDecorationsCollection']>;
@@ -18,6 +20,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [isMarkdownRenderMode, setIsMarkdownRenderMode] = useState(true);
 
   const editorRef = useRef<MonacoEditor | null>(null);
   const decorationsCollectionRef = useRef<EditorDecorationsCollection | null>(null);
@@ -81,6 +84,17 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   useEffect(() => {
     let isMounted = true;
     const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
+    const isImage = /\.(png|jpe?g|gif|svg|ico|webp)$/i.test(relativePath);
+    
+    if (isImage) {
+      setTimeout(() => {
+        if (isMounted) {
+          setContent('');
+          setLoading(false);
+        }
+      }, 0);
+      return;
+    }
     
     const loadFile = async () => {
       setLoading(true);
@@ -271,6 +285,8 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   }, [draftCompressions, monaco, isPreviewMode, content]);
 
   const fileName = relativePath.split(/[/\\]/).pop();
+  const isImage = /\.(png|jpe?g|gif|svg|ico|webp)$/i.test(relativePath);
+  const isMarkdown = /\.(md|mdx)$/i.test(relativePath);
 
   return (
     <div className="h-full flex flex-col">
@@ -284,11 +300,12 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         )}
       </div>
       
+      {!isImage && (
       <div className="h-10 bg-bg-panel flex items-center px-4 border-b border-border-subtle shrink-0 gap-3 text-xs text-text-muted justify-between">
         <div className="flex items-center gap-3">
           <button 
             onClick={() => globalUndo()}
-            disabled={!canUndo || isPreviewMode}
+            disabled={!canUndo || isPreviewMode || (isMarkdown && isMarkdownRenderMode)}
             className="flex items-center gap-1.5 hover:text-text-primary disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
             title="Undo last action (Ctrl+Z)"
           >
@@ -296,19 +313,33 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
           </button>
           <button 
             onClick={() => setDraftCompressions([])}
-            disabled={draftCompressions.length === 0 || isPreviewMode}
+            disabled={draftCompressions.length === 0 || isPreviewMode || (isMarkdown && isMarkdownRenderMode)}
             className="flex items-center gap-1.5 hover:text-red-400 disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
           >
             <Trash2 size={14} /> Clear All
           </button>
           <div className="w-px h-4 bg-border-subtle mx-1" />
           <button 
-            onClick={() => setIsPreviewMode(!isPreviewMode)}
+            onClick={() => { setIsPreviewMode(!isPreviewMode); setIsMarkdownRenderMode(false); }}
             className={`flex items-center gap-1.5 transition-colors px-2 py-1 rounded ${isPreviewMode ? 'bg-accent/20 text-accent' : 'hover:text-text-primary'}`}
           >
             {isPreviewMode ? <Code2 size={14} /> : <Eye size={14} />}
             {isPreviewMode ? 'Exit Preview' : 'Preview Output'}
           </button>
+          
+          {isMarkdown && (
+            <>
+              <div className="w-px h-4 bg-border-subtle mx-1" />
+              <button 
+                onClick={() => { setIsMarkdownRenderMode(!isMarkdownRenderMode); setIsPreviewMode(false); }}
+                className={`flex items-center gap-1.5 transition-colors px-2 py-1 rounded ${isMarkdownRenderMode ? 'bg-blue-500/20 text-blue-400' : 'hover:text-text-primary'}`}
+              >
+                {isMarkdownRenderMode ? <Code2 size={14} /> : <BookOpen size={14} />}
+                {isMarkdownRenderMode ? 'Edit Raw' : 'Render MD'}
+              </button>
+            </>
+          )}
+          
           <span className="ml-2 opacity-50 text-[10px]">Ctrl/Cmd + Backspace to Skip</span>
         </div>
         
@@ -328,16 +359,23 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
            )}
         </div>
       </div>
+      )}
       
-      <div className="flex-1 relative">
+      <div className="flex-1 relative bg-bg-base">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-bg-panel z-10">
             <span className="text-text-muted animate-pulse">Loading {fileName}...</span>
           </div>
         )}
-        <Editor
-          height="100%"
-          defaultLanguage="typescript"
+        
+        {isImage ? (
+          <ImageViewer absolutePath={`${rootPath}/${relativePath}`.replace(/\\/g, '/')} />
+        ) : (isMarkdown && isMarkdownRenderMode && !isPreviewMode) ? (
+          <MarkdownViewer content={content} />
+        ) : (
+          <Editor
+            height="100%"
+            defaultLanguage="typescript"
           theme="vs-dark"
           value={isPreviewMode ? previewContent : content}
           onMount={handleEditorMount}
@@ -352,8 +390,9 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
             padding: { top: 16 },
             hover: { enabled: false },
             matchBrackets: 'never'
-          }}
-        />
+            }}
+          />
+        )}
       </div>
     </div>
   );
