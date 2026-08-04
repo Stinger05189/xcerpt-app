@@ -6,17 +6,19 @@ import { generateExportPayload } from '../../utils/exportEngine';
 import { FileTree } from '../tree/FileTree';
 import { ContextEditor } from '../editor/ContextEditor';
 import { ExportStage } from '../export/ExportStage';
-import { Plus, FolderOpen, X, GripVertical, Settings2, Loader2 } from 'lucide-react';
+import { Plus, FolderOpen, X, GripVertical, Settings2, Loader2, FolderSearch, AlertTriangle } from 'lucide-react';
 
 export function MainStage() {
   const { 
     rootPaths, 
+    missingRoots,
     activeTab, 
     activeFile, 
     isExportStaging, 
     setExportStaging, 
     addRootPath, 
     removeRootPath,
+    relocateRootPath,
     reorderRootPaths,
     setActiveTab, 
     rawTrees,
@@ -48,6 +50,13 @@ export function MainStage() {
     }
   };
 
+  const handleRelocateRoot = async (oldPath: string) => {
+    const newPath = await window.api.selectDirectory();
+    if (newPath) {
+      await relocateRootPath(oldPath, newPath);
+    }
+  };
+
   // --- External Edit Watcher ---
   useEffect(() => {
     const cleanup = window.api.onFileChange((event, changedPath) => {
@@ -62,7 +71,7 @@ export function MainStage() {
         const affectedRoot = rootPaths.find(root => normalizedChanged.startsWith(root.replace(/\\/g, '/')));
         
         if (affectedRoot) {
-          addRootPath(affectedRoot); // This inherently rescans and updates rawTrees
+          addRootPath(affectedRoot, true); // This inherently rescans and updates rawTrees
         }
       }
       
@@ -135,6 +144,7 @@ export function MainStage() {
   };
 
   const activeTree = activeTab ? rawTrees[activeTab] : null;
+  const isActiveMissing = activeTab ? missingRoots.has(activeTab) : false;
   const hasFiles = chunkPaths.length > 0;
 
   return (
@@ -144,6 +154,7 @@ export function MainStage() {
         <div className="flex items-end gap-1">
           {rootPaths.map((path) => {
             const isDragging = draggedRootPath === path;
+            const isMissing = missingRoots.has(path);
             
             return (
               <div
@@ -174,9 +185,11 @@ export function MainStage() {
                   ${isDragging ? 'opacity-40' : 'opacity-100'}
                   ${activeTab === path 
                     ? 'bg-bg-base border-border-subtle text-text-primary' 
-                    : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover'}`}
+                    : 'bg-transparent border-transparent text-text-muted hover:bg-bg-hover'}
+                  ${isMissing ? 'text-red-400 border-red-500/30' : ''}`}
                 title={path}
               >
+                {isMissing && <AlertTriangle size={14} className="text-red-400 shrink-0 animate-pulse" />}
                 <span className="truncate flex-1 pointer-events-none">{path.split(/[/\\]/).pop()}</span>
                 <button
                   onClick={(e) => {
@@ -258,44 +271,60 @@ export function MainStage() {
     
       {/* Split Stage Content */}
       <div className="flex-1 flex overflow-hidden relative z-10">
-        {/* Left Pane: Tree */}
-        {activeTree ? (
-          <div 
-            className="h-full overflow-y-auto p-4 bg-bg-base/60 backdrop-blur-md border-r border-border-subtle shrink-0 relative"
-            style={{ width: paneWidths.tree }}
-          >
-            <FileTree node={activeTree} rootPath={activeTab!} relativePath="" />
-            
-            {/* Tree Drag Handle */}
-            <div 
-              className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-10 group flex justify-end"
-              onPointerDown={handleTreeDragResize}
+        {isActiveMissing ? (
+          <div className="flex-1 h-full flex flex-col items-center justify-center p-8 text-center bg-bg-panel/40">
+            <AlertTriangle size={48} className="text-red-400 mb-4 animate-bounce" />
+            <h2 className="text-xl font-semibold text-text-primary mb-2">Directory Not Found</h2>
+            <p className="text-sm text-text-muted max-w-md mb-6 font-mono bg-bg-base p-3 rounded-lg border border-border-subtle">
+              {activeTab}
+            </p>
+            <p className="text-xs text-text-muted mb-6">
+              This path has been moved, renamed, or unmounted. Locate its new location to restore your saved rules and compressions.
+            </p>
+            <button
+              onClick={() => handleRelocateRoot(activeTab!)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-accent text-white font-medium rounded-lg hover:bg-accent/90 transition-colors shadow-lg"
             >
-              <div className="w-px h-full bg-border-subtle group-hover:bg-accent transition-colors" />
-            </div>
+              <FolderSearch size={16} /> Locate Directory
+            </button>
           </div>
+        ) : activeTree ? (
+          <>
+            {/* Left Pane: Tree */}
+            <div 
+              className="h-full overflow-y-auto p-4 bg-bg-base/60 backdrop-blur-md border-r border-border-subtle shrink-0 relative"
+              style={{ width: paneWidths.tree }}
+            >
+              <FileTree node={activeTree} rootPath={activeTab!} relativePath="" />
+              
+              {/* Tree Drag Handle */}
+              <div 
+                className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-10 group flex justify-end"
+                onPointerDown={handleTreeDragResize}
+              >
+                <div className="w-px h-full bg-border-subtle group-hover:bg-accent transition-colors" />
+              </div>
+            </div>
+
+            {/* Right Pane: Editor or Export Stage */}
+            <div className="flex-1 h-full bg-bg-panel/40 backdrop-blur-md overflow-hidden relative">
+              {isExportStaging ? (
+                <ExportStage />
+              ) : activeFile ? (
+                <ContextEditor key={activeFile} rootPath={activeTab!} relativePath={activeFile} />
+              ) : (
+                <div className="flex h-full items-center justify-center text-text-muted text-sm bg-transparent">
+                  <div className="flex flex-col items-center gap-3 opacity-50">
+                    <span className="tracking-widest uppercase text-xs">Awaiting Selection</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
         ) : (
           <div className="flex-1 h-full flex flex-col items-center justify-center text-text-muted bg-transparent">
             <FolderOpen size={48} className="mb-4 opacity-50" />
             <p>No workspace loaded.</p>
-          </div>
-        )}
-        
-        {/* Right Pane: Editor or Export Stage */}
-        {activeTree && (
-          <div className="flex-1 h-full bg-bg-panel/40 backdrop-blur-md overflow-hidden relative">
-            {isExportStaging ? (
-              <ExportStage />
-            ) : activeFile ? (
-              <ContextEditor key={activeFile} rootPath={activeTab!} relativePath={activeFile} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-text-muted text-sm bg-transparent">
-                <div className="flex flex-col items-center gap-3 opacity-50">
-                  {/* Explicitly perfectly clear window to the void */}
-                  <span className="tracking-widest uppercase text-xs">Awaiting Selection</span>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>

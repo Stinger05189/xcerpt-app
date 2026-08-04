@@ -1,6 +1,7 @@
 // src/components/layout/WorkspaceBrowser.tsx
 import { useEffect, useState, useMemo } from 'react';
 import { useAppStore } from '../../store/appStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 import type { WorkspaceMetadata } from '../../types/ipc';
 import { Search, Folder, Clock, FileJson, X, Edit2, Trash2, Check, ExternalLink, Plus, Database, Zap } from 'lucide-react';
 
@@ -78,6 +79,11 @@ export function WorkspaceBrowser() {
     const newName = editValue.trim() || "Untitled Workspace";
     await window.api.renameWorkspace(id, newName);
     
+    // Update active store state if the currently open workspace is being renamed
+    if (useWorkspaceStore.getState().workspaceId === id) {
+      useWorkspaceStore.getState().setWorkspaceName(newName);
+    }
+
     // Update local list & global tab if open
     setMetadata(prev => prev.map(m => m.id === id ? { ...m, name: newName, updatedAt: new Date().toISOString() } : m));
     useAppStore.getState().updateTabTitle(id, newName);

@@ -100,3 +100,10 @@
 
 - **Resizable Tables:** When building resizable tables in React/Tailwind, you must use `table-layout: fixed` and define a `<colgroup>`. Bind local React state `colWidths` to the respective `<col style={{ width }}>` elements, and configure `<td>` elements to strictly truncate (`truncate`, `max-w-*`). This prevents massive string lengths (like file paths) from breaking structural constraints and allows smooth column drag-resizing.
 - **Sub-Process Fallbacks:** Any CLI execution spawned in Node.js (like `child_process.exec('git status')`) must be wrapped in a fallback that resolves gracefully (e.g., returning an empty object). The app must never crash or throw unhandled IPC exceptions if the user lacks the required binaries (Git) or runs the app in an invalid directory context.
+
+## 10. Multi-Root Workspaces & Path Relocation
+
+- **Missing Path Resilience:** Scanning IPC endpoints must return `{ isMissing: true }` when encountering root-level `ENOENT` errors rather than throwing unhandled exceptions. The store tracks missing paths in a `missingRoots` Set and displays a fallback relocation UI.
+- **Root Relocation Pattern:** When a user relocates a missing path via `relocateRootPath(oldPath, newPath)`, swap the path keys in `rootPaths` and `rawTrees` while preserving preset rules, compression markers, and metadata.
+- **Root Disambiguation:** When generating flattened payloads for multi-root workspaces, check for duplicate leaf directory names (e.g., multiple roots named `src`). Dynamically append numerical suffixes (`src_1`, `src_2`) to prevent flat file path collisions and maintain spatial clarity in `ExportedFileTree.md`.
+- **State Synchronization before Disk Flushing:** When updating workspace metadata (such as `workspaceName`) via direct IPC calls, always update the active `WorkspaceStore` state in memory simultaneously. If the in-memory state is out of sync, background auto-save loops will overwrite disk changes back to state defaults.

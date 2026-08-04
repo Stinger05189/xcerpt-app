@@ -27,6 +27,7 @@ interface WorkspaceState {
   gitStatus: Record<string, string>;
 
   rootPaths: string[];
+  missingRoots: Set<string>;
   rawTrees: Record<string, FileNode>;
 
   hardBlacklist: string[];
@@ -43,6 +44,7 @@ interface WorkspaceState {
 
   maxFilesPerChunk: number;
   mergeToSingleFile: boolean;
+  respectGitignore: boolean;
 
   activeTab: string | null;
   activeFile: string | null;
@@ -71,8 +73,10 @@ interface WorkspaceState {
 
   // Actions
   hydrateWorkspace: (payload: import('../types/ipc').WorkspacePayload) => void;
+  setWorkspaceName: (name: string) => void;
   setMaxFilesPerChunk: (val: number) => void;
   setMergeToSingleFile: (val: boolean) => void;
+  setRespectGitignore: (val: boolean) => Promise<void>;
   setPaneWidth: (pane: 'sidebar' | 'tree', width: number) => void;
   incrementStat: (type: 'totalExports' | 'ephemeralExports', files?: string[]) => void;
   fetchGitStatus: () => Promise<void>;
@@ -93,6 +97,7 @@ interface WorkspaceState {
 
   addRootPath: (path: string, forceRescan?: boolean) => Promise<void>;
   removeRootPath: (path: string) => void;
+  relocateRootPath: (oldPath: string, newPath: string) => Promise<void>;
   reorderRootPaths: (draggedPath: string, targetPath: string) => void;
   setActiveTab: (path: string) => void;
   setActiveFile: (path: string | null) => void;
@@ -132,6 +137,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   gitStatus: {},
 
   rootPaths: [],
+  missingRoots: new Set<string>(),
   rawTrees: {},
   hardBlacklist: [
     '.git', 'node_modules', '__pycache__', 'dist', 'build', '.next', '.svelte-kit',
@@ -149,6 +155,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   compressions: {},
   maxFilesPerChunk: 100000,
   mergeToSingleFile: false,
+  respectGitignore: true,
 
   activeTab: null,
   activeFile: null,
@@ -173,6 +180,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setTargetScrollY: (y) => set({ targetScrollY: y }),
   bindScrollGetter: (getter) => set({ getScrollOffset: getter }),
+
+  setWorkspaceName: (name: string) => set({ workspaceName: name.trim() || null, isStale: true }),
 
   hydrateWorkspace: (payload) => set(() => {
     let activePresetId = payload.activePresetId;
@@ -213,6 +222,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       paneWidths: payload.uiState.paneWidths || { sidebar: 320, tree: 400 },
       gitStatus: {},
       rootPaths: [], 
+      missingRoots: new Set<string>(),
       rawTrees: {},
       hardBlacklist: payload.rules.hardBlacklist,
       pendingBlacklist: [],
@@ -228,6 +238,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
       maxFilesPerChunk: payload.settings.maxFilesPerChunk,
       mergeToSingleFile: payload.settings.mergeToSingleFile ?? false,
+      respectGitignore: payload.settings.respectGitignore ?? true,
       activeTab: payload.uiState.activeTab,
       expandedFolders: new Set(payload.uiState.expandedFolders),
       hideExcluded: payload.uiState.hideExcluded ?? true,
@@ -247,6 +258,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
   setMergeToSingleFile: (val: boolean) => set({ mergeToSingleFile: val, isStale: true }),
+  setRespectGitignore: async (val: boolean) => {
+    set({ respectGitignore: val, isStale: true });
+    for (const root of get().rootPaths) {
+      await get().addRootPath(root, true);
+    }
+  },
   setPaneWidth: (pane, width) => set(state => ({ paneWidths: { ...state.paneWidths, [pane]: width } })),
 
   incrementStat: (type, files = []) => set(state => {
@@ -261,7 +278,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   fetchGitStatus: async () => {
     const state = get();
-    if (!state.activeTab) return;
+    if (!state.activeTab || state.missingRoots.has(state.activeTab)) return;
     try {
       const status = await window.api.getGitStatus(state.activeTab);
       set({ gitStatus: status });
@@ -454,15 +471,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   addRootPath: async (rootPath: string, forceRescan = false) => {
     if (!forceRescan && get().rootPaths.includes(rootPath)) return;
     
-    const { node, rules, treeOnly } = await window.api.scanDirectory(rootPath, get().hardBlacklist);
+    const { node, rules, treeOnly, isMissing } = await window.api.scanDirectory(
+      rootPath, 
+      get().hardBlacklist,
+      get().respectGitignore
+    );
     
-    set((state) => ({
-      rootPaths: Array.from(new Set([...state.rootPaths, rootPath])),
-      rawTrees: { ...state.rawTrees, [rootPath]: node },
-      activeTab: state.activeTab || rootPath,
-      excludes: Array.from(new Set([...state.excludes, ...rules])),
-      treeOnly: Array.from(new Set([...state.treeOnly, ...(treeOnly || [])]))
-    }));
+    set((state) => {
+      const newMissing = new Set(state.missingRoots);
+      if (isMissing) {
+        newMissing.add(rootPath);
+      } else {
+        newMissing.delete(rootPath);
+      }
+
+      return {
+        rootPaths: Array.from(new Set([...state.rootPaths, rootPath])),
+        rawTrees: { ...state.rawTrees, [rootPath]: node },
+        missingRoots: newMissing,
+        activeTab: state.activeTab || rootPath,
+        excludes: isMissing ? state.excludes : Array.from(new Set([...state.excludes, ...rules])),
+        treeOnly: isMissing ? state.treeOnly : Array.from(new Set([...state.treeOnly, ...(treeOnly || [])]))
+      };
+    });
     
     if (!forceRescan) {
       useHistoryStore.getState().push(`Add Root '${rootPath.split(/[/\\]/).pop()}'`, 
@@ -481,9 +512,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const newPaths = state.rootPaths.filter(p => p !== pathToRemove);
       const newRawTrees = { ...state.rawTrees };
       delete newRawTrees[pathToRemove];
+
+      const newMissing = new Set(state.missingRoots);
+      newMissing.delete(pathToRemove);
     
       return {
         rootPaths: newPaths,
+        missingRoots: newMissing,
         rawTrees: newRawTrees,
         activeTab: state.activeTab === pathToRemove ? (newPaths[0] || null) : state.activeTab
       };
@@ -493,6 +528,35 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       () => set({ rootPaths: prevRoots, rawTrees: prevTrees, activeTab: prevActiveTab }),
       () => get().removeRootPath(pathToRemove)
     );
+  },
+
+  relocateRootPath: async (oldPath: string, newPath: string) => {
+    const { node, rules, treeOnly, isMissing } = await window.api.scanDirectory(
+      newPath,
+      get().hardBlacklist,
+      get().respectGitignore
+    );
+
+    set((state) => {
+      const newRoots = state.rootPaths.map(p => p === oldPath ? newPath : p);
+      const newTrees = { ...state.rawTrees };
+      delete newTrees[oldPath];
+      newTrees[newPath] = node;
+
+      const newMissing = new Set(state.missingRoots);
+      newMissing.delete(oldPath);
+      if (isMissing) newMissing.add(newPath);
+
+      return {
+        rootPaths: newRoots,
+        rawTrees: newTrees,
+        missingRoots: newMissing,
+        activeTab: state.activeTab === oldPath ? newPath : state.activeTab,
+        excludes: isMissing ? state.excludes : Array.from(new Set([...state.excludes, ...rules])),
+        treeOnly: isMissing ? state.treeOnly : Array.from(new Set([...state.treeOnly, ...(treeOnly || [])])),
+        isStale: true
+      };
+    });
   },
 
   reorderRootPaths: (draggedPath, targetPath) => {

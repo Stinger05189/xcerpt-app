@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer, webFrame } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   ping: () => ipcRenderer.invoke('ping'),
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
-  scanDirectory: (path, blacklist) => ipcRenderer.invoke('fs:scanDirectory', path, blacklist),
+  scanDirectory: (path, blacklist, respectGitignore) => ipcRenderer.invoke('fs:scanDirectory', path, blacklist, respectGitignore),
   readFile: (path) => ipcRenderer.invoke('fs:readFile', path),
   readImageBase64: (path) => ipcRenderer.invoke('fs:readImageBase64', path),
   calculateTokens: (filePaths) => ipcRenderer.invoke('fs:calculateTokens', filePaths),

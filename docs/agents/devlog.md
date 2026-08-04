@@ -123,6 +123,17 @@
 
 ---
 
+### Session 021
+
+- **Focus Area:** Gitignore Rule Overriding, Missing Path Relocation, Multi-Root Export Disambiguation, and Workspace Name Persistence.
+- **Key Decisions:**
+  - **Gitignore Rule Bypass:** Added a `respectGitignore` workspace setting. Updated `main.cjs` to conditionally bypass `.gitignore` parsing when set to false, allowing users to explicitly export git-ignored files via custom tree rules.
+  - **Missing Path Relocation:** Modified `scanDirectory` IPC to catch root `ENOENT` errors and return an explicit `isMissing: true` flag. Built `relocateRootPath` in `WorkspaceStore` and created a "Directory Not Found" fallback view in `MainStage` with a "Locate Directory" dialog picker.
+  - **Multi-Root Name Disambiguation:** Enhanced `generateExportPayload` in `exportEngine.ts` to detect identical root leaf folder names (e.g. two roots named `src`) and dynamically append occurrence suffixes (`src_1`, `src_2`) to prevent file collisions.
+  - **Workspace Name Persistence & Inspector Rename:** Added `setWorkspaceName` to Zustand. Fixed a race condition where auto-saving overwrote newly renamed workspaces back to `null`. Added inline workspace renaming directly to the Workspace Inspector header in `Sidebar.tsx`.
+- **Roadblocks Resolved:**
+  - Resolved workspace name reversion by syncing React store state in `WorkspaceBrowser` and `Sidebar` prior to background disk flushes.
+
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.

@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
-import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock, RefreshCw, ChevronDown, Edit2, Trash2, Plus, RotateCcw, Check, Loader2, GripVertical, MousePointer, Activity } from 'lucide-react';
+import { Settings, History, BarChart2, Zap, FileJson, Clock, FolderLock, RefreshCw, ChevronDown, Edit2, Trash2, Plus, RotateCcw, Check, Loader2, GripVertical, MousePointer, Activity, X } from 'lucide-react';
 import type { ExportHistory } from '../../types/ipc';
 
 type Tab = 'RULES' | 'STATS' | 'HISTORY';
@@ -21,9 +21,11 @@ const timeAgo = (dateStr: string) => {
 
 export function Sidebar() {
   const { 
+    workspaceId, workspaceName, setWorkspaceName,
     excludes, removeExcludeRule, includes, treeOnly, compressions,
     hardBlacklist, removeBlacklistRule, addBlacklistRule,
     pendingBlacklist, removePendingBlacklistRule, commitBlacklist,
+    respectGitignore, setRespectGitignore,
     isSidebarOpen, setSidebarOpen,
     activePresetId, presets, presetSnapshots, switchPreset, createPreset, renamePreset, deletePreset, revertPreset,
     setSelectedFiles, activeTab, rootPaths, rawTrees, paneWidths, setPaneWidth
@@ -34,6 +36,9 @@ export function Sidebar() {
   const [activeTabState, setActiveTabState] = useState<Tab>('RULES');
   const [newBlacklist, setNewBlacklist] = useState('');
   const [isCommitting, setIsCommitting] = useState(false);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');
 
   const [isPresetDropdownOpen, setIsPresetDropdownOpen] = useState(false);
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
@@ -160,6 +165,15 @@ export function Sidebar() {
     document.addEventListener('pointerup', onUp);
   };
 
+  const handleSaveWorkspaceName = async () => {
+    const trimmed = tempName.trim();
+    setWorkspaceName(trimmed);
+    if (workspaceId) {
+      await window.api.renameWorkspace(workspaceId, trimmed);
+    }
+    setIsEditingName(false);
+  };
+
   return (
     <>
       {isSidebarOpen && (
@@ -184,11 +198,39 @@ export function Sidebar() {
           </div>
           
           {/* Workspace Title Header */}
-        <div className="h-10 flex items-center px-4 border-b border-border-subtle shrink-0 bg-bg-base">
-          <h1 className="font-semibold tracking-wide text-xs text-text-primary uppercase opacity-80 flex items-center gap-2">
-            <FolderLock size={14} /> Workspace Inspector
-          </h1>
-        </div>
+          <div className="h-10 flex items-center justify-between px-4 border-b border-border-subtle shrink-0 bg-bg-base">
+            {isEditingName ? (
+              <div className="flex items-center gap-1.5 w-full">
+                <input 
+                  autoFocus
+                  value={tempName}
+                  onChange={e => setTempName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveWorkspaceName()}
+                  className="flex-1 bg-bg-panel border border-accent rounded px-2 py-0.5 text-xs text-text-primary outline-none"
+                  placeholder="Workspace Name"
+                />
+                <button onClick={handleSaveWorkspaceName} className="text-green-400 p-1 hover:bg-green-400/20 rounded transition-colors" title="Save Name">
+                  <Check size={14} />
+                </button>
+                <button onClick={() => setIsEditingName(false)} className="text-text-muted p-1 hover:bg-bg-hover rounded transition-colors" title="Cancel">
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <h1 className="font-semibold tracking-wide text-xs text-text-primary uppercase opacity-80 flex items-center gap-2 truncate pr-2" title={workspaceName || "Workspace Inspector"}>
+                  <FolderLock size={14} className="shrink-0" /> {workspaceName || "Workspace Inspector"}
+                </h1>
+                <button 
+                  onClick={() => { setTempName(workspaceName || ''); setIsEditingName(true); }}
+                  className="text-text-muted hover:text-accent p-1 rounded hover:bg-bg-hover transition-colors shrink-0"
+                  title="Rename Workspace"
+                >
+                  <Edit2 size={12} />
+                </button>
+              </>
+            )}
+          </div>
         
         {/* Preset Manager Block */}
         <div className="p-4 border-b border-border-subtle bg-bg-panel shrink-0 flex flex-col gap-3">
@@ -306,6 +348,16 @@ export function Sidebar() {
                   </p>
                 </div>
                 
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-text-primary mb-3 bg-bg-base border border-border-subtle p-2 rounded-md">
+                  <input 
+                    type="checkbox"
+                    checked={respectGitignore}
+                    onChange={(e) => setRespectGitignore(e.target.checked)}
+                    className="accent-accent w-3.5 h-3.5"
+                  />
+                  <span>Respect .gitignore rules</span>
+                </label>
+
                 <input 
                   type="text" 
                   value={newBlacklist}

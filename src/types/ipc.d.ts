@@ -11,6 +11,7 @@ export interface ScanResult {
   node: FileNode;
   rules: string[]; 
   treeOnly: string[];
+  isMissing?: boolean;
 }
 
 export interface CompressionRuleIPC {
@@ -117,6 +118,7 @@ export interface WorkspacePayload {
   settings: {
     maxFilesPerChunk: number;
     mergeToSingleFile?: boolean;
+    respectGitignore?: boolean;
   };
   rules: {
     hardBlacklist: string[];
@@ -135,7 +137,7 @@ export interface WorkspacePayload {
 export interface ElectronAPI {
   ping: () => Promise<string>;
   selectDirectory: () => Promise<string | null>;
-  scanDirectory: (path: string, blacklist: string[]) => Promise<ScanResult>;
+  scanDirectory: (path: string, blacklist: string[], respectGitignore?: boolean) => Promise<ScanResult>;
   readFile: (path: string) => Promise<string>;
   readImageBase64: (path: string) => Promise<string>;
   calculateTokens: (filePaths: string[]) => Promise<number>;

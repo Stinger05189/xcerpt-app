@@ -52,7 +52,7 @@ async function cleanupOldExports() {
 }
 
 // --- File Scanner Logic ---
-async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relativeToRoot = '', isDir = true, context = { gitignoreRules: [], treeOnlyRules: [] }) {
+async function scanDirectory(rootPath, blacklist, respectGitignore = true, currentPath = rootPath, relativeToRoot = '', isDir = true, context = { gitignoreRules: [], treeOnlyRules: [] }) {
   const name = path.basename(currentPath);
   const node = {
     path: currentPath,
@@ -61,6 +61,15 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     size: 0,
     children: []
   };
+
+  // Check if root directory exists
+  if (currentPath === rootPath) {
+    try {
+      await fs.stat(rootPath);
+    } catch (e) {
+      return { node, rules: [], treeOnly: [], isMissing: true };
+    }
+  }
 
   if (!isDir) {
     if (TREE_ONLY_REGEX.test(name) || TREE_ONLY_EXACT.includes(name)) {
@@ -72,32 +81,34 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     } catch (e) {
       node.size = 0;
     }
-    return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules };
+    return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules, isMissing: false };
   }
 
   let entries;
   try {
     entries = await fs.readdir(currentPath, { withFileTypes: true });
   } catch (e) {
-    return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules };
+    return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules, isMissing: false };
   }
 
-  const hasGitignore = entries.some(e => e.name === '.gitignore' && e.isFile());
-  if (hasGitignore) {
-    try {
-      const gitignorePath = path.join(currentPath, '.gitignore');
-      const content = await fs.readFile(gitignorePath, 'utf-8');
-      const lines = content.split('\n')
-        .map(l => l.trim())
-        .filter(l => l && !l.startsWith('#'))
-        .map(l => path.posix.join(relativeToRoot.replace(/\\/g, '/'), l));
-      context.gitignoreRules.push(...lines);
-    } catch (e) {}
+  if (respectGitignore) {
+    const hasGitignore = entries.some(e => e.name === '.gitignore' && e.isFile());
+    if (hasGitignore) {
+      try {
+        const gitignorePath = path.join(currentPath, '.gitignore');
+        const content = await fs.readFile(gitignorePath, 'utf-8');
+        const lines = content.split('\n')
+          .map(l => l.trim())
+          .filter(l => l && !l.startsWith('#'))
+          .map(l => path.posix.join(relativeToRoot.replace(/\\/g, '/'), l));
+        context.gitignoreRules.push(...lines);
+      } catch (e) {}
+    }
   }
 
   const ig = ignore();
   ig.add(blacklist);
-  if (context.gitignoreRules.length > 0) {
+  if (respectGitignore && context.gitignoreRules.length > 0) {
     ig.add(context.gitignoreRules);
   }
 
@@ -119,6 +130,7 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     const { node: childNode } = await scanDirectory(
       rootPath, 
       blacklist, 
+      respectGitignore,
       childPath, 
       childRelative, 
       entry.isDirectory(), 
@@ -128,7 +140,7 @@ async function scanDirectory(rootPath, blacklist, currentPath = rootPath, relati
     node.size += childNode.size;
   }
 
-  return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules };
+  return { node, rules: context.gitignoreRules, treeOnly: context.treeOnlyRules, isMissing: false };
 }
 
 // --- Export Engine Logic ---
@@ -407,12 +419,12 @@ ipcMain.handle('updater:install', () => {
   autoUpdater.quitAndInstall(false, true);
 });
 
-ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist) => {
+ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist, respectGitignore) => {
   try {
     watchedPaths.add(dirPath);
     currentBlacklist = blacklist;
     
-    const payload = await scanDirectory(dirPath, blacklist); 
+    const payload = await scanDirectory(dirPath, blacklist, respectGitignore); 
     
     setTimeout(() => {
       setupWatcher().catch(e => console.error("Watcher setup failed:", e));

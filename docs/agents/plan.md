@@ -32,6 +32,7 @@
 
 **Completed in Last Session:**
 
-- [x] Implemented "Merge to single context.md file" monolithic export capability.
-- [x] Decoupled editor modifications from instantaneous global state updates via a localized Draft/Dirty state.
-- [x] Upgraded Monaco editor with multi-cursor mathematical range merging, minimap constraints, and scrollbar skip-block decorations.
+- [x] Added `respectGitignore` toggle to allow manual inclusion/export of git-ignored files.
+- [x] Implemented missing directory detection (`isMissing`) and `relocateRootPath` migration workflow.
+- [x] Patched `exportEngine` to disambiguate identical root folder names in multi-root workspaces.
+- [x] Resolved workspace renaming persistence bug and added inline workspace renaming to `Sidebar.tsx`.

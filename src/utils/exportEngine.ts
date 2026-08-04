@@ -127,11 +127,25 @@ export function generateExportPayload(
 \`\`\`text
 `;
 
+  // Disambiguate duplicate root folder names across multiple roots
+  const rootNameCounts: Record<string, number> = {};
+  rootPaths.forEach(rp => {
+    const name = rp.split(/[/\\]/).pop() || 'root';
+    rootNameCounts[name] = (rootNameCounts[name] || 0) + 1;
+  });
+
+  const rootNameOccurrences: Record<string, number> = {};
+
   rootPaths.forEach(rootPath => {
     const tree = rawTrees[rootPath];
     if (!tree) return;
     
-    const rootName = rootPath.split(/[/\\]/).pop() || 'root';
+    const baseName = rootPath.split(/[/\\]/).pop() || 'root';
+    let rootName = baseName;
+    if (rootNameCounts[baseName] > 1) {
+      rootNameOccurrences[baseName] = (rootNameOccurrences[baseName] || 0) + 1;
+      rootName = `${baseName}_${rootNameOccurrences[baseName]}`;
+    }
     
     const traverse = (node: FileNode, prefix: string, isLast: boolean, relativePath: string): string => {
       let currNode = node;
@@ -145,9 +159,6 @@ export function generateExportPayload(
       }) : [];
     
       // --- The Single-Child Collapse Algorithm ---
-      // If this is a directory and it only has EXACTLY ONE included child,
-      // we fast-forward and collapse the names together (e.g., "src" + "utils" -> "src/utils")
-      // We do not collapse the very root node (currRelative === "") to keep the top-level distinct.
       let collapsedName = currNode.name;
       
       while (isDir && includedChildren.length === 1 && currRelative !== "") {
@@ -181,7 +192,7 @@ export function generateExportPayload(
     
       // Root Node (Special Formatting)
       if (relativePath === "") {
-        result += `${collapsedName}/\n`;
+        result += `${rootName}/\n`;
       } else {
         if (isDir) {
           result += `${prefix}${connector}${collapsedName}/\n`;
