@@ -14,25 +14,38 @@
 
 ---
 
-## Active Queue (Current / Next Session)
+## Active Queue: Version 1.6.0 (Zero-Hitch Foundation & Curation Polish)
 
-- [ ] **Task 1: AI Provider Direct Integrations (Exploratory)**
-  - _Details:_ Investigate bypassing manual drag-and-drop by integrating direct API hooks (e.g., OpenAI/Anthropic keys) or clipboard manipulations to push payloads directly to active web sessions.
-- [ ] **Task 2: Intelligent Semantic Chunking**
-  - _Details:_ Upgrade the `maxFilesPerChunk` logic to support `maxTokensPerChunk`, utilizing the newly integrated `js-tiktoken` engine to dynamically slice payloads based on strict LLM context window limits rather than arbitrary file counts.
+- [ ] **WP-01: Performance & Virtual In-Memory Export Engine**
+  - _Details:_ Rip out eager disk-staging debounces in `MainStage.tsx` and synchronous writes in `main.cjs`. Build the in-memory Virtual Payload Graph in `exportEngine.ts`. Implement the JIT physical staging pipeline with dual-state readiness feedback.
+- [ ] **WP-02: Scoped Rule Architecture & Read-Only File Locking Eradication**
+  - _Details:_ Refactor `WorkspaceStore` and `filterEngine` to scope curation rules using `${rootId}::${relativePath}` composite keys. Audit `main.cjs` file handle operations, adding `try/finally` blocks to guarantee handle release and eliminate OS file locks.
+- [ ] **WP-03: Hierarchical Payload Preview Tree & True Size Metrics**
+  - _Details:_ Replace the batch size chunk slider with a binary toggle (`All Files` vs `Single Unified context.md`). Replace the flat chunk table in `ExportStage.tsx` with a virtualized hierarchical tree showing true skip-deducted sizes, live BPE tokens, and inline exclude/tree-only action buttons.
+- [ ] **WP-04: Tab Lifecycle, Multi-Root Ephemeral Packaging & Ergonomics**
+  - _Details:_ Implement VS Code-style transient vs. pinned tab lifecycle with context menu actions. Add tab bar overflow horizontal mouse-wheel and right-click drag scrolling. Implement unified multi-root ephemeral selections with JIT preview overlay. Add pencil skip badges to `TreeNode.tsx` and wire up live sidebar statistics.
+- [ ] **WP-05: Descriptive Manifest Naming & In-Line Protocol Option**
+  - _Details:_ Upgrade manifest naming to `Xcerpt_Manifest_<Roots>.md`. Add export toggle to embed `Skill_code_generation_protocol.md` directly into the generated manifest prompt.
 
-## Pending Queue (Upcoming)
+## Pending Queue: Version 2.0.0 (LLM Dev Session & Diff Merge Studio)
 
-- [ ] **Task 3: OS-Level Context Menus**
-  - _Details:_ Investigate adding "Open with Xcerpt" to Windows Explorer and macOS Finder context menus via Electron installer configurations.
-- [ ] **Task 4: Deep Linking**
-  - _Details:_ Implement custom URI schemes (`xcerpt://`) to allow external applications or terminal commands to quickly boot specific workspaces or presets.
+- [ ] **WP-06: Dev Session Domain Architecture & State Machine**
+  - _Details:_ Implement `DevSession`, `ParsedFileAction`, and `DiffHunk` domain schemas. Build session switcher, disk persistence in `XcerptSessions/<id>/sessions/`, and session navigation lifecycles.
+- [ ] **WP-07: Fault-Tolerant Protocol-Compliant Response Parser**
+  - _Details:_ Build off-thread Web Worker parser supporting the Code Generation Protocol. Implement depth-aware backtick counting, heuristic recovery for missing code fences, extension-preserving deduplication, multi-file section association, and action extraction fallbacks.
+- [ ] **WP-08: Monaco Side-by-Side Diff Merge Studio & Skip Visibility**
+  - _Details:_ Mount Monaco Diff Editor comparing incoming LLM code against local workspace files. Build hunk-level merging, dedicated `[NEW]` and `[DELETED]` review modes, auto-advance on action completion, and transparent skip block visualizations.
+- [ ] **WP-09: Co-Located Explanation & Reasoning Drawer**
+  - _Details:_ Extract and co-locate architectural intent and pre-code explanations in an expandable drawer directly above the active diff editor.
+- [ ] **WP-10: Checkpoint Engine & Non-Invasive Git Safety**
+  - _Details:_ Build pre-session file snapshot and rollback engine. Integrate Git working tree probing (`git status`), optional checkpoint commit tagging, and per-file commit history diffing.
 
 ---
 
-**Completed in Last Session:**
+**Completed in Architecture & Planning Session:**
 
-- [x] Added `respectGitignore` toggle to allow manual inclusion/export of git-ignored files.
-- [x] Implemented missing directory detection (`isMissing`) and `relocateRootPath` migration workflow.
-- [x] Patched `exportEngine` to disambiguate identical root folder names in multi-root workspaces.
-- [x] Resolved workspace renaming persistence bug and added inline workspace renaming to `Sidebar.tsx`.
+- [x] Triangulated root causes of v1.5.0 hitches, file locks, and cross-root rule pollution.
+- [x] Defined the finish line vision: Xcerpt as a bidirectional Context Staging & LLM Dev Studio.
+- [x] Authored comprehensive technical specification for v1.6.0 (`docs/4_v1.6_Zero_Hitch_Optimization_Spec.md`).
+- [x] Authored comprehensive technical specification for v2.0.0 (`docs/5_v2.0_LLM_Dev_Studio_Spec.md`).
+- [x] Updated `conventions.md` and `plan.md` with new architectural standards and roadmap queues.

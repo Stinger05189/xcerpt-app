@@ -107,3 +107,19 @@
 - **Root Relocation Pattern:** When a user relocates a missing path via `relocateRootPath(oldPath, newPath)`, swap the path keys in `rootPaths` and `rawTrees` while preserving preset rules, compression markers, and metadata.
 - **Root Disambiguation:** When generating flattened payloads for multi-root workspaces, check for duplicate leaf directory names (e.g., multiple roots named `src`). Dynamically append numerical suffixes (`src_1`, `src_2`) to prevent flat file path collisions and maintain spatial clarity in `ExportedFileTree.md`.
 - **State Synchronization before Disk Flushing:** When updating workspace metadata (such as `workspaceName`) via direct IPC calls, always update the active `WorkspaceStore` state in memory simultaneously. If the in-memory state is out of sync, background auto-save loops will overwrite disk changes back to state defaults.
+
+## 11. Virtual Staging & Zero-Hitch I/O (v1.6+)
+
+- **Virtual In-Memory Payload Rule:** Never write physical files to disk merely because curation rules, selections, or skip blocks changed. The payload graph (tokens, sizes, true-skip calculations, tree strings) must be computed 100% in RAM.
+- **JIT Physical Staging Pipeline:** Physical disk exports are strictly Just-In-Time (JIT). Physical file generation occurs ONLY when the user explicitly triggers an export or on `onDragStart`. The UI must provide unambiguous visual ready-states (`Virtual Preview` -> `Staging...` -> `Ready: Drag or Copy`).
+- **Root-Qualified Rule Keys:** All file-level preset rules (includes, excludes, tree-only, compressions) MUST be stored using composite scoped keys: `${rootId}::${relativePath}`. Only directory-name blacklist rules (`hardBlacklist`) remain global across all roots.
+- **Safe Handle Releases (Zero File Locks):** Any routine reading files in Node.js (like `fs:readFile` binary inspection) MUST wrap file handles in `try ... finally { if (fh) await fh.close(); }` to prevent Windows file-locking bugs.
+
+## 12. LLM Dev Sessions & Diff Merge Studio (v2.0+)
+
+- **Depth-Aware Code Fence Parsing:** When parsing incoming LLM Markdown, fence counters must match outer multi-backtick blocks (` ```` `) against matching closing depths to prevent nested markdown or bash blocks from prematurely truncating files.
+- **Fence Heuristic Recovery:** If EOF or a primary header boundary is encountered while a code fence is open, the parser must auto-close the buffer and surface an amber recovery badge rather than failing the entire parse.
+- **Action Invariant Fallbacks:** When an LLM omits the standard `// [ACTION]` line 1 comment, check file existence on disk: nonexistent -> infer `[NEW]`; existing -> infer `[MODIFIED]`. Flag partial snippets without full context as `[PARTIAL_DIFF]` with an actionable prompt warning.
+- **Protocol Action Header Stripping (Zero Scaffolding Pollution):** The parser must sanitize the line 1 action comment (e.g., `// [MODIFIED] path/to/file.ext`, `# [NEW] ...`) immediately upon extraction. `proposedContent` must have all protocol scaffolding stripped before rendering in Monaco Diff or writing to disk. Transient protocol tags must never contaminate user source files or trigger artificial diff conflicts.
+- **Skip Block Transparency in Diff Merge:** Never synthesize artificial file bodies to hide skip blocks. All skip markers (`// ... [Skipped: N lines] ...`) must remain visible in Monaco Diff as distinct semantic regions with line-count indicators, empowering the human developer to verify intent.
+- **Session Checkpoint Isolation:** Before writing merged files to disk, the session engine must store a pre-session file snapshot in memory and disk state. Rolling back a session must restore files instantly to their exact pre-session snapshot, fully decoupled from external Git branches.
