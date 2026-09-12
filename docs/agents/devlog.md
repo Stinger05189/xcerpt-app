@@ -18,20 +18,27 @@
 
 ## Active Epoch: 05 - Bidirectional LLM Dev Studio (v2.0.0)
 
-### Session 024
+### Session 025
 
-- **Focus Area:** Version 1.6.1 Path Normalization Hardening, Tree-Only Metric Omission, Setting Persistence Parity, and Windows CRLF Normalization.
+- **Focus Area:** Inbound Dev Session Domain Architecture, Standalone Protocol Parser, Monaco Diff Merge Viewers, and Diagnostic Test Suite.
 - **Key Decisions:**
-  - **Double-Slash (`//`) Eradication:** Resolved the defect where concatenating child nodes onto trailing-slash directories produced double slashes (e.g. `src/components//Button.tsx`), causing exact `compressions[scopedKey]` lookups and `treeOnlyExact` checks to fail during export generation.
-  - **Redundant Slash Collapsing in `normalizePath` & `canonicalizePath`:** Injected `clean = clean.replace(/\/+/g, '/')` across `filterEngine.ts` to mathematically guarantee single-slash POSIX paths at arbitrary tree depths while preserving directory trailing slashes.
-  - **Tree-Only 0-Byte Accounting:** Re-architected `buildNode` in `exportEngine.ts` to zero out exported sizes (`size: 0`, `trueSize: 0`, `tokens: 0`) for any leaf node where `status !== 'included'`. Parent directory aggregations now accurately reflect physical export payloads, and `PayloadPreviewTree.tsx` renders clean em-dashes (`—`) for tree-only items.
-  - **Workspace Setting Persistence Parity:** Added `embedProtocol: state.embedProtocol` to `getWorkspacePayload` and `generateFreshWorkspace` in `Bootstrapper.tsx`, ensuring protocol injection preferences persist cleanly to disk.
-  - **Windows CRLF Line-Ending Normalization:** Updated `processExport` and `processEphemeralExport` in `main.cjs` to normalize raw disk files via `.replace(/\r\n/g, '\n')` prior to splicing skip markers, eliminating trailing `\r` corruption and offset drift on Windows.
-  - **Suite 8 Diagnostic Regression:** Expanded `scripts/run-diagnostics.mjs` with Suite 8, asserting zero double slashes in virtual nodes/export files, exact compressions key matching, and strict omission of tree-only/excluded files from physical chunk lists.
+  - **Decoupled Feature Enclave (`src/features/session/`):** Established the inbound dev session studio completely isolated from `workspaceStore.ts`. Designed `sessionStore.ts` to manage active sessions, file actions, review statuses (`PENDING`, `MERGED`, `REJECTED`), pre-session file snapshots, and physical mutations via dedicated IPC handlers (`session:*`).
+  - **Protocol-Compliant Parsing Engine (`sessionParser.ts`):** Implemented an off-thread pure parser supporting depth-aware backtick code fence parsing, extension-preserving deduplication (`.Part2.ext`), unclosed fence auto-recovery at header boundaries, and automated regex stripping (`stripProtocolScaffolding`) to purge line-1 action comments from diff inputs across C-style, Python, HTML, and SQL comment formats.
+  - **Monaco Diff & Specialized Viewers:** Integrated `@monaco-editor/react` `DiffEditor` for side-by-side and inline visual comparisons, paired with `NewFilePreview.tsx` (syntax-highlighted single editor for `[NEW]`) and `DeletedFileBanner.tsx` (tombstone view for `[DELETED]`).
+  - **Reasoning Drawer & Full Plan Viewer:** Built a collapsible drawer rendering pre-code summaries and linked architectural intent directly above diffs, and created `FullPlanViewer.tsx` to display unadulterated markdown commentary.
+  - **Diagnostic Test Harness (`scripts/test-session-parser.mjs`):** Built a standalone Node.js diagnostic suite achieving 22 passing assertions across 6 suites.
+  - **Identified Roadblocks for Session 026:**
+    - _Suite 1 Nested Fence Defect:_ In `sessionParser.ts`, when `inCodeBlock === true` with outer fence length $N=4$, an inner 3-backtick fence with an info string (` ```bash `) was falsely matched as `isNewOpeningFenceWhileUnclosed`. Any fence where `length < codeFenceLength` must be strictly treated as text.
+    - _Monaco Diff Interactivity:_ Need interactive merge gutter actions / arrows to cherry-pick individual hunks, and verify full-file disk writing for modified files.
+    - _Markdown File Ingestion:_ Files targeting `.md` or `.mdx` require specialized fence escaping so their contents are not swallowed by outer markdown fences.
+    - _Modal Header Dragging:_ `DevStudioModal` header needs `WebkitAppRegion: 'drag'` with `'no-drag'` leaf controls to restore native window movement.
 - **Core Files Modified:**
-  - `src/utils/filterEngine.ts`, `src/utils/exportEngine.ts`, `main.cjs`
-  - `src/components/layout/Bootstrapper.tsx`, `src/components/export/PayloadPreviewTree.tsx`
-  - `scripts/run-diagnostics.mjs`
+  - `src/features/session/types/session.ts`, `src/features/session/engine/sessionParser.ts`
+  - `src/features/session/engine/diffHunkEngine.ts`, `src/features/session/engine/checkpointEngine.ts`
+  - `src/features/session/store/sessionStore.ts`, `src/features/session/components/diff/*`
+  - `src/features/session/components/drawer/*`, `src/features/session/components/DevStudioModal.tsx`
+  - `src/components/layout/TitleBar.tsx`, `src/App.tsx`, `main.cjs`, `preload.cjs`, `package.json`
+  - `scripts/test-session-parser.mjs`
 
 ---
 

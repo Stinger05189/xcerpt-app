@@ -83,3 +83,19 @@
   2. Ancestor directory lookups MUST evaluate bottom-up (closest/deepest ancestor first via `cleanRel.lastIndexOf('/')`). The closest ancestor's rule wins.
 - **Exclusion Synthesis for Selection Presets:** "Create Preset from Selection" must generate real, compacted directory exclusions (`generateExclusionsForSelection`) for all unselected files and subtrees rather than relying on implicit runtime flags, ensuring standard, transparent preset curation.
 - **Inclusion Punch-Through Independence:** In default curation mode, explicit inclusions punch through ancestor exclusions without inverting the rest of the workspace into a whitelist.
+
+## 8. Inbound Dev Session & Diff Merge Architecture (v2.0+)
+
+- **Subsystem Enclave Decoupling:** All dev session studio logic MUST reside within `src/features/session/`. `sessionStore.ts` must maintain strict zero-state bleed with `workspaceStore.ts`—it receives only `workspaceId` and `rootPaths` as operational parameters.
+- **Nested Code Fence Depth Invariant (BUG-02 Resolution):** When `inCodeBlock === true` with outer fence length $N$ (e.g. 4 backticks ` ```` `):
+  - A closing fence MUST have length $\ge N$ with zero trailing info string characters (`fenceMatch[2].trim().length === 0`).
+  - Any candidate fence with length $< N$ (such as inner 3-backtick blocks ` ```bash `) MUST be treated strictly as code content. It MUST NOT trigger `isNewOpeningFenceWhileUnclosed` or close the active block.
+- **Unclosed Code Fence Boundary Auto-Recovery:** If a new primary markdown header (`# [WORK PACKET]`, `### Pre-Code Summary`) or a new opening fence with an explicit info string of length $\ge N$ is encountered while `inCodeBlock === true`, the parser must auto-close the previous block with an informational warning and immediately begin the subsequent section.
+- **The Purity Invariant (Scaffolding Comment Stripping):**
+  - `rawPayloadContent`: Preserves the verbatim code block extracted from the markdown stream for diagnostic auditing.
+  - `proposedContent`: The sanitized code payload used for Monaco Diff comparison and physical disk writes. All line-1 protocol action comments (`// [NEW]`, `# [MODIFIED]`, `<!-- [DELETED] -->`, `-- [ACTION]`, and path-only header comments) MUST be purged before entering Monaco Diff to eliminate false line-1 conflict markers.
+- **Skip Block Transparency Directive:** Xcerpt strictly prohibits synthesizing artificial code to hide skip blocks. If the model emits `// ... [Skipped: N lines] ...`, the skip marker is rendered directly in the diff stream with an amber decoration badge, empowering the developer to verify intentional skips versus accidental omissions.
+- **Extension-Preserving Deduplication:** If an LLM restates a file in multiple parts without closing tags, subsequent occurrences append `.PartN` before the file extension (e.g. `src/App.Part2.tsx`), preserving syntax highlighting and language server features.
+- **Safe Test Fixtures (Preventing Markdown Fence Collisions):** Never write literal triple backticks inside template strings in `.mjs`, `.js`, or `.ts` test scripts. Markdown code block extractors will misinterpret inner triple backticks as closing fences and truncate the file. Always use string concatenation: `const B3 = '`' + '`' + '`';`.
+- **JSON File Purity:** Never inject line-1 comment headers (`// path/to/file.json`) into `.json` files (`package.json`, `tsconfig*.json`). Node.js and Electron native JSON loaders strictly reject comments with `SyntaxError: Unexpected token /`.
+- **Frameless Window Dragging in Full-Screen Overlays:** Full-screen overlays and modals (such as `DevStudioModal`) that obscure the main title bar MUST apply `WebkitAppRegion: 'drag'` to their top header bar, and `WebkitAppRegion: 'no-drag'` to all interior interactive controls (buttons, inputs, tabs), preventing the window from becoming unmovable during review sessions.

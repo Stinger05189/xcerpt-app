@@ -1,8 +1,13 @@
 // src/features/session/components/DevStudioModal.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSessionStore } from '../store/sessionStore';
 import { useWorkspaceStore } from '../../../store/workspaceStore';
 import { ActionChecklist } from './ActionChecklist';
+import { SessionDiffEditor } from './diff/SessionDiffEditor';
+import { NewFilePreview } from './diff/NewFilePreview';
+import { DeletedFileBanner } from './diff/DeletedFileBanner';
+import { ReasoningDrawer } from './drawer/ReasoningDrawer';
+import { FullPlanViewer } from './drawer/FullPlanViewer';
 import { 
   X, 
   Sparkles, 
@@ -12,7 +17,11 @@ import {
   FileText, 
   CheckCheck, 
   Code2, 
-  AlertCircle 
+  AlertCircle,
+  Columns,
+  SquareSplitHorizontal,
+  FileCode2,
+  BookOpen
 } from 'lucide-react';
 
 export function DevStudioModal() {
@@ -38,6 +47,24 @@ export function DevStudioModal() {
 
   const [rawText, setRawText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [studioViewMode, setStudioViewMode] = useState<'diff' | 'plan'>('diff');
+  const [renderSideBySide, setRenderSideBySide] = useState(true);
+
+  // Global Keyboard listener: Ctrl+Enter to apply active action, Esc to exit
+  useEffect(() => {
+    if (!isStudioOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        applyCurrentAction();
+      }
+      if (e.key === 'Escape' && !isIngestionModalOpen) {
+        setStudioOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isStudioOpen, isIngestionModalOpen, applyCurrentAction, setStudioOpen]);
 
   if (!isIngestionModalOpen && !isStudioOpen) return null;
 
@@ -142,7 +169,34 @@ export function DevStudioModal() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <div className="flex bg-bg-base border border-border-subtle rounded-lg p-0.5 text-xs">
+                <button
+                  onClick={() => setStudioViewMode('diff')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${studioViewMode === 'diff' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'}`}
+                >
+                  <FileCode2 size={13} /> Diff Studio
+                </button>
+                <button
+                  onClick={() => setStudioViewMode('plan')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors ${studioViewMode === 'plan' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'}`}
+                >
+                  <BookOpen size={13} /> Full Markdown Plan
+                </button>
+              </div>
+
+              {studioViewMode === 'diff' && (
+                <button
+                  onClick={() => setRenderSideBySide(!renderSideBySide)}
+                  className={`p-2 rounded-lg border text-text-muted hover:text-text-primary transition-colors ${renderSideBySide ? 'bg-bg-hover border-border-subtle text-accent' : 'border-transparent'}`}
+                  title={renderSideBySide ? "Switch to Inline Unified Diff" : "Switch to Side-by-Side Diff"}
+                >
+                  {renderSideBySide ? <Columns size={15} /> : <SquareSplitHorizontal size={15} />}
+                </button>
+              )}
+
+              <div className="w-px h-5 bg-border-subtle mx-1" />
+
               <button
                 onClick={() => revertCurrentSession()}
                 disabled={isApplying}
@@ -165,7 +219,7 @@ export function DevStudioModal() {
               <button
                 onClick={() => setStudioOpen(false)}
                 className="p-2 text-text-muted hover:text-text-primary rounded-lg hover:bg-bg-hover transition-colors"
-                title="Close Studio"
+                title="Close Studio (Esc)"
               >
                 <X size={18} />
               </button>
@@ -173,71 +227,85 @@ export function DevStudioModal() {
           </header>
 
           <div className="flex-1 flex overflow-hidden">
-            <ActionChecklist
-              actions={activeSession.actions}
-              activeActionId={activeActionId}
-              onSelectAction={setActiveActionId}
-            />
+            {studioViewMode === 'diff' ? (
+              <>
+                <ActionChecklist
+                  actions={activeSession.actions}
+                  activeActionId={activeActionId}
+                  onSelectAction={setActiveActionId}
+                />
 
-            <main className="flex-1 flex flex-col bg-bg-base overflow-hidden">
-              {activeAction ? (
-                <div className="flex-1 flex flex-col h-full overflow-hidden">
-                  <div className="h-10 px-4 bg-bg-panel border-b border-border-subtle flex items-center justify-between shrink-0 text-xs">
-                    <span className="font-mono text-text-primary flex items-center gap-2">
-                      <FileText size={14} className="text-accent" />
-                      {activeAction.targetRelativePath}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={rejectCurrentAction}
-                        className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-xs font-medium transition-colors"
-                      >
-                        Reject
-                      </button>
-                      <button
-                        onClick={applyCurrentAction}
-                        disabled={isApplying}
-                        className="flex items-center gap-1.5 px-4 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-semibold shadow-sm transition-all"
-                      >
-                        <Check size={13} />
-                        {activeAction.actionType === 'NEW' ? 'Create File' : activeAction.actionType === 'DELETED' ? 'Confirm Deletion' : 'Accept & Next'}
-                        <ArrowRight size={12} />
-                      </button>
-                    </div>
-                  </div>
+                <main className="flex-1 flex flex-col bg-bg-base overflow-hidden">
+                  <ReasoningDrawer
+                    explanations={activeSession.explanations}
+                    activeActionId={activeActionId}
+                    overallIntent={activeSession.summary.architecturalIntent}
+                  />
 
-                  <div className="flex-1 grid grid-cols-2 divide-x divide-border-subtle overflow-hidden">
-                    <div className="flex flex-col h-full overflow-hidden">
-                      <div className="px-3 py-1.5 bg-bg-panel/50 border-b border-border-subtle text-[11px] font-semibold text-text-muted flex justify-between">
-                        <span>Incoming Proposed Code</span>
-                        <span className="text-[10px] text-accent font-mono">{activeAction.proposedContent.split('\n').length} Lines</span>
+                  {activeAction ? (
+                    <div className="flex-1 flex flex-col h-full overflow-hidden">
+                      <div className="h-10 px-4 bg-bg-panel border-b border-border-subtle flex items-center justify-between shrink-0 text-xs">
+                        <span className="font-mono text-text-primary flex items-center gap-2">
+                          <FileText size={14} className="text-accent" />
+                          {activeAction.targetRelativePath}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={rejectCurrentAction}
+                            className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-xs font-medium transition-colors"
+                          >
+                            Reject
+                          </button>
+                          <button
+                            onClick={applyCurrentAction}
+                            disabled={isApplying}
+                            className="flex items-center gap-1.5 px-4 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-semibold shadow-sm transition-all"
+                            title="Accept and auto-advance to next pending file (Ctrl+Enter)"
+                          >
+                            <Check size={13} />
+                            {activeAction.actionType === 'NEW' ? 'Create File' : activeAction.actionType === 'DELETED' ? 'Confirm Deletion' : 'Accept & Next'}
+                            <ArrowRight size={12} />
+                          </button>
+                        </div>
                       </div>
-                      <textarea
-                        readOnly
-                        value={activeAction.proposedContent}
-                        className="flex-1 w-full bg-transparent p-4 font-mono text-xs text-text-primary outline-none resize-none overflow-auto"
-                      />
-                    </div>
 
-                    <div className="flex flex-col h-full overflow-hidden">
-                      <div className="px-3 py-1.5 bg-bg-panel/50 border-b border-border-subtle text-[11px] font-semibold text-text-muted flex justify-between">
-                        <span>Original Disk File</span>
-                        <span className="text-[10px] text-text-muted font-mono">{activeAction.originalContent ? `${activeAction.originalContent.split('\n').length} Lines` : 'Non-existent'}</span>
+                      <div className="flex-1 overflow-hidden">
+                        {activeAction.actionType === 'NEW' ? (
+                          <NewFilePreview
+                            content={activeAction.proposedContent}
+                            filename={activeAction.targetRelativePath}
+                            onAccept={applyCurrentAction}
+                            isApplying={isApplying}
+                          />
+                        ) : activeAction.actionType === 'DELETED' ? (
+                          <DeletedFileBanner
+                            relativePath={activeAction.targetRelativePath}
+                            originalContent={activeAction.originalContent}
+                            onConfirmDelete={applyCurrentAction}
+                            isApplying={isApplying}
+                          />
+                        ) : (
+                          <SessionDiffEditor
+                            originalContent={activeAction.originalContent}
+                            proposedContent={activeAction.proposedContent}
+                            filename={activeAction.targetRelativePath}
+                            renderSideBySide={renderSideBySide}
+                            hasSkipBlocks={activeAction.hasSkipBlocks}
+                            skipBlockCount={activeAction.skipBlockCount}
+                          />
+                        )}
                       </div>
-                      <textarea
-                        readOnly
-                        value={activeAction.originalContent || '/* File does not currently exist on disk */'}
-                        className="flex-1 w-full bg-transparent p-4 font-mono text-xs text-text-muted outline-none resize-none overflow-auto"
-                      />
                     </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-text-muted text-xs">
-                  No active file action selected.
-                </div>
-              )}
-            </main>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-text-muted text-xs">
+                      No active file action selected.
+                    </div>
+                  )}
+                </main>
+              </>
+            ) : (
+              <FullPlanViewer rawMarkdown={activeSession.rawMarkdown} />
+            )}
           </div>
         </div>
       )}

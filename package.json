@@ -35,7 +35,8 @@
     "pack": "npm run build && electron-builder --dir",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:diagnostics": "node scripts/run-diagnostics.mjs"
+    "test:diagnostics": "node scripts/run-diagnostics.mjs",
+    "test:session": "node scripts/test-session-parser.mjs"
   },
   "build": {
     "appId": "com.xcerpt.app",

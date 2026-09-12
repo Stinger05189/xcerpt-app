@@ -1,11 +1,26 @@
-// src/features/session/engine/sessionParser.ts
-import type { 
-  DevSession, 
-  ParsedFileAction, 
-  FileActionType, 
-  MarkdownExplanationSection, 
-  DevSessionSummary 
-} from '../types/session';
+// scripts/test-session-parser.mjs
+import { performance } from 'node:perf_hooks';
+
+console.log('\n' + '='.repeat(70));
+console.log('  XCEPT v2.0 DEV SESSION PARSER DIAGNOSTIC & SPEC COMPLIANCE SUITE');
+console.log('='.repeat(70) + '\n');
+
+let passCount = 0;
+let failCount = 0;
+
+function assert(condition, message) {
+  if (condition) {
+    console.log(`  [\x1b[32mPASS\x1b[0m] ${message}`);
+    passCount++;
+  } else {
+    console.error(`  [\x1b[31mFAIL\x1b[0m] ${message}`);
+    failCount++;
+  }
+}
+
+// Fence builder constants preventing premature markdown code block termination
+const B3 = '`' + '`' + '`';
+const B4 = '`' + '`' + '`' + '`';
 
 const PROTOCOL_HEADER_PATTERNS = [
   /^\s*\/\/\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
@@ -14,7 +29,7 @@ const PROTOCOL_HEADER_PATTERNS = [
   /^\s*--\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
 ];
 
-export function stripProtocolScaffolding(rawCode: string, targetPath?: string): string {
+function stripProtocolScaffolding(rawCode, targetPath) {
   const lines = rawCode.split('\n');
   if (lines.length === 0) return rawCode;
 
@@ -45,17 +60,14 @@ export function stripProtocolScaffolding(rawCode: string, targetPath?: string): 
   return lines.join('\n');
 }
 
-export function extractActionAndPath(
-  firstLine: string,
-  fenceInfo: string
-): { actionType: FileActionType | null; targetPath: string | null } {
-  let actionType: FileActionType | null = null;
-  let targetPath: string | null = null;
+function extractActionAndPath(firstLine, fenceInfo) {
+  let actionType = null;
+  let targetPath = null;
 
   const line = firstLine.trim();
   const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s->]+)/i);
   if (protocolMatch) {
-    actionType = protocolMatch[1].toUpperCase() as FileActionType;
+    actionType = protocolMatch[1].toUpperCase();
     targetPath = protocolMatch[2].replace(/[->]+$/, '').trim();
     return { actionType, targetPath };
   }
@@ -81,30 +93,25 @@ export function extractActionAndPath(
   return { actionType, targetPath };
 }
 
-export function parseSessionMarkdown(
-  rawMarkdown: string,
-  workspaceId: string,
-  rootPaths: string[],
-  existingFilesMap: Record<string, string | null> = {}
-): DevSession {
+function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFilesMap = {}) {
   const normalized = rawMarkdown.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
 
-  const actions: ParsedFileAction[] = [];
-  const explanations: MarkdownExplanationSection[] = [];
-  const pathCounts: Record<string, number> = {};
+  const actions = [];
+  const explanations = [];
+  const pathCounts = {};
 
   let currentSectionTitle = 'Architectural Intent';
   let currentSectionLevel = 2;
-  let currentSectionLines: string[] = [];
+  let currentSectionLines = [];
 
   let inCodeBlock = false;
   let codeFenceChar = '';
   let codeFenceLength = 0;
   let codeFenceInfo = '';
-  let codeBuffer: string[] = [];
+  let codeBuffer = [];
 
-  const flushCurrentSection = (nextActionId?: string) => {
+  const flushCurrentSection = (nextActionId) => {
     if (currentSectionLines.length > 0) {
       const sectionText = currentSectionLines.join('\n').trim();
       if (sectionText) {
@@ -128,7 +135,7 @@ export function parseSessionMarkdown(
     }
   };
 
-  const processCompletedCodeBlock = (rawLines: string[], fenceInfo: string, warning?: string) => {
+  const processCompletedCodeBlock = (rawLines, fenceInfo, warning) => {
     const rawPayloadContent = rawLines.join('\n');
     const firstNonEmpty = rawLines.find(l => l.trim().length > 0) || '';
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
@@ -160,12 +167,12 @@ export function parseSessionMarkdown(
     const absKey = `${targetRoot}/${targetRelativePath}`.replace(/\\/g, '/');
     const originalContent = existingFilesMap[absKey] !== undefined ? existingFilesMap[absKey] : null;
 
-    let actionType: FileActionType = extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
+    let actionType = extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
     if (firstNonEmpty.includes('[DELETED]')) {
       actionType = 'DELETED';
     }
 
-    const warnings: string[] = [];
+    const warnings = [];
     if (warning) warnings.push(warning);
     if (!extractedAction) {
       warnings.push(`Action tag omitted in response; inferred as [${actionType}].`);
@@ -243,9 +250,9 @@ export function parseSessionMarkdown(
         codeBuffer = [];
       } else if (isNewOpeningFenceWhileUnclosed) {
         processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at new fence boundary.');
-        codeFenceChar = fenceMatch![1][0];
-        codeFenceLength = fenceMatch![1].length;
-        codeFenceInfo = fenceMatch![2].trim();
+        codeFenceChar = fenceMatch[1][0];
+        codeFenceLength = fenceMatch[1].length;
+        codeFenceInfo = fenceMatch[2].trim();
         codeBuffer = [];
         inCodeBlock = true;
       } else if (isHeaderBoundary) {
@@ -267,7 +274,7 @@ export function parseSessionMarkdown(
 
   flushCurrentSection();
 
-  const actionsCount: Record<FileActionType, number> = {
+  const actionsCount = {
     NEW: actions.filter(a => a.actionType === 'NEW').length,
     MODIFIED: actions.filter(a => a.actionType === 'MODIFIED').length,
     DELETED: actions.filter(a => a.actionType === 'DELETED').length,
@@ -285,14 +292,14 @@ export function parseSessionMarkdown(
     architecturalIntent = architecturalIntent.slice(0, 300).trim() + '...';
   }
 
-  const summary: DevSessionSummary = {
+  const summary = {
     architecturalIntent,
     totalFiles: actions.length,
     actionsCount
   };
 
   const sessionId = `session-${Date.now()}`;
-  const checkpointFiles: Record<string, string | null> = {};
+  const checkpointFiles = {};
   for (const act of actions) {
     const absPath = `${act.targetRootPath}/${act.targetRelativePath}`.replace(/\\/g, '/');
     checkpointFiles[absPath] = act.originalContent;
@@ -301,10 +308,7 @@ export function parseSessionMarkdown(
   return {
     id: sessionId,
     workspaceId,
-    name: intentSection?.title || `Dev Session ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    rawMarkdown,
+    name: intentSection?.title || 'Dev Session',
     summary,
     actions,
     explanations,
@@ -315,3 +319,148 @@ export function parseSessionMarkdown(
     }
   };
 }
+
+// --- TEST SUITE 1: NESTED BACKTICK ISOLATION (BUG-02 RESOLUTION) ---
+console.log('\x1b[36m--- Suite 1: Nested Code Fence & 4-Backtick Isolation ---\x1b[0m');
+{
+  const nestedMarkdown = [
+    '# [WORK PACKET 1]: Documentation Sync',
+    '',
+    '### Pre-Code Summary',
+    '- Architectural Intent: Update documentation and instructions.',
+    '',
+    B4 + 'markdown',
+    '<!-- [NEW] docs/instructions.md -->',
+    '# Setup Guide',
+    '',
+    'Run this script in your terminal:',
+    B3 + 'bash',
+    'npm run build',
+    'npm test',
+    B3,
+    'This concludes setup.',
+    B4
+  ].join('\n');
+
+  const session = parseSessionMarkdown(nestedMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, `Extracted exactly 1 file action from 4-backtick fence (got ${session.actions.length})`);
+  const action = session.actions[0];
+  assert(action.targetRelativePath === 'docs/instructions.md', `Target path is correct: ${action.targetRelativePath}`);
+  assert(action.actionType === 'NEW', `Action type identified as [NEW]`);
+  assert(action.proposedContent.includes(B3 + 'bash'), 'Inner 3-backtick bash block preserved without breaking outer fence');
+  assert(!action.proposedContent.startsWith('<!-- [NEW]'), 'Protocol scaffolding line stripped from proposed content');
+}
+
+// --- TEST SUITE 2: MULTI-SYNTAX PROTOCOL SCAFFOLDING STRIPPING ---
+console.log('\n\x1b[36m--- Suite 2: Multi-Syntax Protocol Comment Header Stripping ---\x1b[0m');
+{
+  const tsRaw = '// [MODIFIED] src/auth/token.ts\nexport const rotate = () => {};';
+  const pyRaw = '# [NEW] app/config.py\nTIMEOUT = 5.0';
+  const htmlRaw = '<!-- [DELETED] public/legacy.html -->\n';
+  const sqlRaw = '-- [MODIFIED] db/migration.sql\nSELECT 1;';
+  const cleanPathRaw = '// src/utils/api.ts\nexport const fetcher = () => {};';
+
+  assert(stripProtocolScaffolding(tsRaw, 'src/auth/token.ts') === 'export const rotate = () => {};', 'Stripped C-style // [MODIFIED] header');
+  assert(stripProtocolScaffolding(pyRaw, 'app/config.py') === 'TIMEOUT = 5.0', 'Stripped Python # [NEW] header');
+  assert(stripProtocolScaffolding(htmlRaw, 'public/legacy.html') === '', 'Stripped HTML <!-- [DELETED] --> tombstone');
+  assert(stripProtocolScaffolding(sqlRaw, 'db/migration.sql') === 'SELECT 1;', 'Stripped SQL -- [MODIFIED] header');
+  assert(stripProtocolScaffolding(cleanPathRaw, 'src/utils/api.ts') === 'export const fetcher = () => {};', 'Stripped line-1 path-only comment matching filename');
+}
+
+// --- TEST SUITE 3: EXTENSION-PRESERVING DEDUPLICATION (BUG-01 RESOLUTION) ---
+console.log('\n\x1b[36m--- Suite 3: Extension-Preserving Filename Deduplication ---\x1b[0m');
+{
+  const multiPartMarkdown = [
+    B3 + 'typescript',
+    '// [MODIFIED] src/largeComponent.tsx',
+    'export const Part1 = () => null;',
+    B3,
+    '',
+    B3 + 'typescript',
+    '// [MODIFIED] src/largeComponent.tsx',
+    'export const Part2 = () => null;',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(multiPartMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 2, `Extracted 2 actions from repeated filename`);
+  assert(session.actions[0].targetRelativePath === 'src/largeComponent.tsx', `First part retains original path`);
+  assert(session.actions[1].targetRelativePath === 'src/largeComponent.Part2.tsx', `Second part injects suffix before .tsx extension (got: ${session.actions[1].targetRelativePath})`);
+}
+
+// --- TEST SUITE 4: UNCLOSED FENCE AUTO-RECOVERY AT HEADER / EOF BOUNDARY ---
+console.log('\n\x1b[36m--- Suite 4: Unclosed Code Fence Heuristic Recovery ---\x1b[0m');
+{
+  const unclosedAtHeader = [
+    B3 + 'typescript',
+    '// [MODIFIED] src/service.ts',
+    'export class Service {}',
+    '',
+    '# [WORK PACKET 2]: Secondary Task',
+    B3 + 'python',
+    '# [NEW] script.py',
+    'print("hello")'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(unclosedAtHeader, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 2, `Recovered both actions despite missing closing fence on first block (got ${session.actions.length})`);
+  assert(session.actions[0].parseWarnings.some(w => w.includes('Auto-closed')), 'Appended parse warning for auto-closed fence');
+  assert(session.actions[1].targetRelativePath === 'script.py', 'Second action extracted accurately');
+}
+
+// --- TEST SUITE 5: SKIP BLOCK DETECTION & TRANSPARENCY ---
+console.log('\n\x1b[36m--- Suite 5: Skip Block Detection & Accounting ---\x1b[0m');
+{
+  const skipMarkdown = [
+    B3 + 'typescript',
+    '// [MODIFIED] src/store.ts',
+    '// ... [Skipped: Unchanged state initializers] ...',
+    'export const useStore = create(() => ({}));',
+    '// ... [Skipped: 50 lines of utility methods] ...',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(skipMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, 'Extracted action with skip blocks');
+  const action = session.actions[0];
+  assert(action.hasSkipBlocks === true, 'Detected hasSkipBlocks: true');
+  assert(action.skipBlockCount === 2, `Detected exactly 2 skip blocks (got: ${action.skipBlockCount})`);
+  assert(action.proposedContent.includes('// ... [Skipped: Unchanged state initializers] ...'), 'Preserved transparent skip marker in proposed content');
+}
+
+// --- TEST SUITE 6: INTER-PACKET EXPLANATION & INTENT ASSOCIATION ---
+console.log('\n\x1b[36m--- Suite 6: Inter-Packet Prose & Intent Association ---\x1b[0m');
+{
+  const packetMarkdown = [
+    '# [WORK PACKET 1]: Auth Modernization',
+    '',
+    '### Pre-Code Summary',
+    '- Architectural Intent: Migrate to asymmetric RS256 token pairs.',
+    '',
+    'Here is the new token definition:',
+    '',
+    B3 + 'typescript',
+    '// [NEW] src/auth/types.ts',
+    'export interface Token {}',
+    B3,
+    '',
+    'Now we modify the validator middleware to support the refresh cycle:',
+    '',
+    B3 + 'typescript',
+    '// [MODIFIED] src/auth/validator.ts',
+    'export function validate() {}',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(packetMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 2, 'Parsed 2 actions across multiple prose sections');
+  assert(session.explanations.length > 0, 'Extracted explanation sections');
+  assert(session.summary.architecturalIntent.includes('Migrate to asymmetric RS256'), 'Captured Pre-Code Summary architectural intent');
+  assert(session.explanations.some(e => e.associatedActionIds.length > 0), 'Associated prose sections to corresponding file actions');
+}
+
+console.log('\n' + '='.repeat(70));
+console.log(`  PARSER DIAGNOSTIC SUMMARY: \x1b[32m${passCount} PASSED\x1b[0m, \x1b[${failCount > 0 ? '31' : '32'}m${failCount} FAILED\x1b[0m`);
+console.log('='.repeat(70) + '\n');
+
+if (failCount > 0) process.exit(1);

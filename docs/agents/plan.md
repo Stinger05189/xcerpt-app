@@ -16,32 +16,30 @@
 
 ---
 
-## Active Queue: Version 2.0.0 (LLM Dev Session & Diff Merge Studio)
+## Active Queue: Version 2.0.0 (Session 026 Focus)
 
-- [ ] **WP-01: Dev Session Domain Architecture & Store Foundation**
-  - _Details:_ Implement domain schemas in `src/types/session.ts` (`DevSession`, `ParsedFileAction`, `DiffHunk`, `MarkdownExplanationSection`). Implement `sessionStore.ts` and IPC persistence under `XcerptSessions/<workspaceId>/sessions/<sessionId>.json`.
-- [ ] **WP-02: Fault-Tolerant Protocol-Compliant Response Parser (Worker Engine)**
-  - _Details:_ Build an off-thread Web Worker parsing engine capable of depth-aware code fence matching, nested backtick handling, heuristic fence recovery for unclosed blocks, extension-preserving deduplication, and automated protocol header comment stripping (`stripProtocolScaffolding`).
-- [ ] **WP-03: Monaco Side-by-Side Diff Merge Studio & Hunk Engine**
-  - _Details:_ Implement the Dev Session Main Stage with Monaco side-by-side diffing comparing incoming LLM code against live disk files. Wire hunk-level merge actions, full file accept/reject workflows, and dedicated modes for `[NEW]` files and `[DELETED]` tombstones.
-- [ ] **WP-04: Co-Located Explanation & Reasoning Drawer**
-  - _Details:_ Build a collapsible, split-pane Architectural Intent & Reasoning Drawer above the diff editor that renders parsed markdown rationale and links sections dynamically to affected file actions.
-- [ ] **WP-05: Ephemeral Pre-Session Checkpoints & Non-Invasive Git Safety**
-  - _Details:_ Implement in-memory and disk-backed pre-merge file snapshots (`snapshotFiles`), non-destructive `[Revert Session]` rollback, Git status probing (`git status --porcelain`), and optional commit generator pre-populated with architectural intent.
+- [ ] **WP-01: Nested Code Fence & Markdown File Ingestion Hardening**
+  - _Details:_ In `sessionParser.ts` and `test-session-parser.mjs`, enforce strict depth checking: when inside an outer block of length $N$ (e.g. 4 backticks), any candidate fence with length $< N$ must be treated strictly as content lines. Add robust handling for Markdown (`.md`, `.mdx`) target files containing nested code blocks to ensure they parse into actions cleanly. Bring `npm run test:session` to 24/24 PASS.
+- [ ] **WP-02: Monaco Diff Merge Actions & Physical Disk Modification Pipeline**
+  - _Details:_ Upgrade `SessionDiffEditor.tsx` to allow full file merges and hunk cherry-picking. Verify that clicking "Accept & Next" or "Merge Full File" accurately writes the proposed file to disk, updates the active file buffer, and triggers the active review queue auto-advance.
+- [ ] **WP-03: Frameless Window Dragging & Dev Studio Header Polish**
+  - _Details:_ Apply `WebkitAppRegion: 'drag'` to the header of `DevStudioModal.tsx`, and add `'no-drag'` to interactive buttons (action toggles, merge buttons, tabs, close icon) so the window can be moved freely while in session review.
+- [ ] **WP-04: Non-Invasive Git Integration & Post-Session Commit Generator**
+  - _Details:_ Implement pre-session git status inspection (`git status --porcelain`) and post-session commit creation offering a commit message pre-populated with the parsed architectural intent.
 
 ---
 
-## Completed in Version 1.6.1 (Session 023 & Session 024)
+## Completed in Version 2.0.0 (Session 025)
 
-- [x] **WP-01: Export Traversal Path Normalization & Double-Slash Eradication**
-  - Replaced `${cleanRelative}/${child.name}` with `${cleanRelative}${child.name}` and added redundant slash collapsing (`/\/+/g, '/'`) across `normalizePath` and `canonicalizePath`.
-- [x] **WP-02: Tree-Only & Skip Block Physical Staging Verification**
-  - Verified omission of tree-only files from chunk file lists and normalized CRLF line endings to `\n` in `main.cjs` to eliminate Windows line drift.
-- [x] **WP-03: Diagnostic Regression Suite for Path Slashes & Export Integrity**
-  - Added Suite 8 to `scripts/run-diagnostics.mjs`, verifying zero double slashes, exact compressions key matching, and strict exclusion of tree-only/excluded files from export files.
-- [x] **WP-04: Workspace Persistence for `embedProtocol` Setting**
-  - Added `embedProtocol` to `getWorkspacePayload` and `generateFreshWorkspace` in `Bootstrapper.tsx` to ensure preferences persist to disk.
-- [x] **WP-05: Tree-Only Metric Zeroing & Preview Tree Polish**
-  - Zeroed out `trueSize`, `tokens`, and `size` on tree-only/excluded nodes in `exportEngine.ts` and rendered em-dashes (`—`) in `PayloadPreviewTree.tsx`.
-- [x] **WP-06: Bottom-Up Hierarchical Specificity & Compaction**
-  - Optimized rule resolution order (`lastIndexOf`) and implemented `generateExclusionsForSelection` for automated preset curation.
+- [x] **WP-01: Dev Session Domain Architecture & Store Foundation**
+  - Implemented domain schemas in `src/features/session/types/session.ts` and standalone `sessionStore.ts` with pre-session checkpoint rollback.
+- [x] **WP-02: Fault-Tolerant Protocol Parser & Header Stripping Engine**
+  - Implemented `sessionParser.ts` with `stripProtocolScaffolding`, extension-preserving deduplication, unclosed fence auto-recovery, and intent extraction.
+- [x] **WP-03: IPC Persistence Layer for Dev Sessions**
+  - Registered `session:save`, `session:load`, `session:list`, `session:delete`, `session:applyAction`, and `session:revertCheckpoint` in `main.cjs` and `preload.cjs`.
+- [x] **WP-04: Monaco Side-by-Side Diff Editor & Specialized Action Viewers**
+  - Built `SessionDiffEditor.tsx`, `NewFilePreview.tsx` (for `[NEW]`), and `DeletedFileBanner.tsx` (for `[DELETED]`).
+- [x] **WP-05: Co-Located Reasoning Drawer & Full Plan Viewer**
+  - Built `ReasoningDrawer.tsx` linked to active action IDs and `FullPlanViewer.tsx` for rendered and raw markdown views.
+- [x] **WP-06: Standalone Diagnostic Test Suite**
+  - Created `scripts/test-session-parser.mjs` and wired `npm run test:session`.
