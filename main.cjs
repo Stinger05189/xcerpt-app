@@ -159,8 +159,9 @@ async function processExport(payload) {
     const allFiles = payload.chunks.flatMap(c => c.files);
     allFiles.forEach((file) => {
       try {
-        const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
-        let lines = content.split('\n');
+        const rawContent = fsSync.readFileSync(file.absolutePath, 'utf-8');
+        const normalizedContent = rawContent.replace(/\r\n/g, '\n');
+        let lines = normalizedContent.split('\n');
         const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
           const skipCount = comp.endLine - comp.startLine + 1;
@@ -192,8 +193,9 @@ async function processExport(payload) {
     
     chunk.files.forEach((file) => {
       try {
-        const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
-        let lines = content.split('\n');
+        const rawContent = fsSync.readFileSync(file.absolutePath, 'utf-8');
+        const normalizedContent = rawContent.replace(/\r\n/g, '\n');
+        let lines = normalizedContent.split('\n');
         
         const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
@@ -227,8 +229,9 @@ async function processEphemeralExport(payload) {
 
     payload.files.forEach((file) => {
       try {
-        const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
-        let lines = content.split('\n');
+        const rawContent = fsSync.readFileSync(file.absolutePath, 'utf-8');
+        const normalizedContent = rawContent.replace(/\r\n/g, '\n');
+        let lines = normalizedContent.split('\n');
         const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
           const skipCount = comp.endLine - comp.startLine + 1;
@@ -256,8 +259,9 @@ async function processEphemeralExport(payload) {
 
   payload.files.forEach((file) => {
     try {
-      const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
-      let lines = content.split('\n');
+      const rawContent = fsSync.readFileSync(file.absolutePath, 'utf-8');
+      const normalizedContent = rawContent.replace(/\r\n/g, '\n');
+      let lines = normalizedContent.split('\n');
       
       const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
       for (const comp of sortedComps) {

@@ -11,6 +11,7 @@ export function canonicalizePath(p: string): string {
   if (code0 >= 97 && code0 <= 122 && normalized.charCodeAt(1) === 58 /* ':' */) {
     normalized = String.fromCharCode(code0 - 32) + normalized.slice(1);
   }
+  normalized = normalized.replace(/\/+/g, '/');
   const len = normalized.length;
   if (len > 0 && normalized.charCodeAt(len - 1) === 47 /* '/' */) {
     normalized = normalized.replace(/\/+$/, '');
@@ -21,6 +22,7 @@ export function canonicalizePath(p: string): string {
 export function normalizePath(pathStr: string, isDirectory?: boolean): string {
   if (!pathStr) return '';
   let clean = pathStr.includes('\\') ? pathStr.replace(/\\/g, '/') : pathStr;
+  clean = clean.replace(/\/+/g, '/');
   if (clean.charCodeAt(0) === 47 /* '/' */) {
     clean = clean.replace(/^\/+/, '');
   }

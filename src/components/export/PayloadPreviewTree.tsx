@@ -192,11 +192,15 @@ export function PayloadPreviewTree({ rootNodes }: { rootNodes: VirtualPayloadNod
                 </div>
 
                 <div className="col-span-2 text-right text-text-muted text-[11px]">
-                  ~{node.tokens.toLocaleString()}
+                  {node.isDirectory
+                    ? (node.tokens > 0 ? `~${node.tokens.toLocaleString()}` : '—')
+                    : (node.status === 'included' ? `~${node.tokens.toLocaleString()}` : '—')}
                 </div>
 
                 <div className="col-span-2 text-right text-text-muted text-[11px]">
-                  {(node.trueSize / 1024).toFixed(1)} KB
+                  {node.isDirectory
+                    ? (node.trueSize > 0 ? `${(node.trueSize / 1024).toFixed(1)} KB` : '—')
+                    : (node.status === 'included' ? `${(node.trueSize / 1024).toFixed(1)} KB` : '—')}
                 </div>
 
                 <div className="col-span-2 flex items-center justify-end gap-1 pr-2">

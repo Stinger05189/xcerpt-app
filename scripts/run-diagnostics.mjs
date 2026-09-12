@@ -9,6 +9,7 @@ function canonicalizePath(p) {
   if (code0 >= 97 && code0 <= 122 && normalized.charCodeAt(1) === 58) {
     normalized = String.fromCharCode(code0 - 32) + normalized.slice(1);
   }
+  normalized = normalized.replace(/\/+/g, '/');
   const len = normalized.length;
   if (len > 0 && normalized.charCodeAt(len - 1) === 47) {
     normalized = normalized.replace(/\/+$/, '');
@@ -19,6 +20,7 @@ function canonicalizePath(p) {
 function normalizePath(pathStr, isDirectory) {
   if (!pathStr) return '';
   let clean = pathStr.includes('\\') ? pathStr.replace(/\\/g, '/') : pathStr;
+  clean = clean.replace(/\/+/g, '/');
   if (clean.charCodeAt(0) === 47) {
     clean = clean.replace(/^\/+/, '');
   }
@@ -416,6 +418,151 @@ class ScopedRuleIndex {
   }
 }
 
+function calculateTrueSize(fileSizeBytes, totalLines, skippedLines) {
+  if (totalLines <= 0 || fileSizeBytes <= 0) return fileSizeBytes;
+  const remainingLines = Math.max(0, totalLines - skippedLines);
+  return Math.round(fileSizeBytes * (remainingLines / totalLines));
+}
+
+function runMockExportGraph(rootPath, tree, includes, excludes, treeOnly, compressions = {}) {
+  const ruleIndex = new ScopedRuleIndex(includes, excludes, treeOnly, false);
+  const virtualNodes = [];
+  const exportFiles = [];
+  let totalSize = 0;
+  let totalTrueSize = 0;
+
+  const buildNode = (node, relativePath) => {
+    const isDir = node.type === 'directory';
+    const cleanRelative = normalizePath(relativePath, isDir);
+    const scopedKey = toScopedPathKey(rootPath, cleanRelative, isDir);
+    const status = ruleIndex.getStatus(rootPath, cleanRelative, isDir);
+
+    const fileComps = compressions[scopedKey] || compressions[cleanRelative] || [];
+    const skippedLines = fileComps.reduce((sum, c) => sum + (c.lineCount || 0), 0);
+    const estimatedTotalLines = Math.max(1, Math.round(node.size / 40));
+    const trueSize = isDir ? 0 : calculateTrueSize(node.size, estimatedTotalLines, skippedLines);
+    const tokens = isDir ? 0 : Math.round(trueSize / 4);
+
+    if (isDir) {
+      const childNodes = [];
+      if (node.children) {
+        for (const child of node.children) {
+          const childRel = cleanRelative ? `${cleanRelative}${child.name}` : child.name;
+          const builtChild = buildNode(child, childRel);
+          if (builtChild) childNodes.push(builtChild);
+        }
+      }
+
+      return {
+        id: scopedKey,
+        relativePath: cleanRelative,
+        scopedKey,
+        isDirectory: true,
+        status,
+        children: childNodes
+      };
+    }
+
+    const isIncluded = status === 'included';
+    if (isIncluded) {
+      totalSize += node.size;
+      totalTrueSize += trueSize;
+      const cleanRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '');
+      exportFiles.push({
+        absolutePath: `${cleanRoot}/${cleanRelative}`,
+        relativePath: cleanRelative,
+        compressions: fileComps,
+        size: node.size,
+        trueSize,
+        tokens
+      });
+    }
+
+    return {
+      id: scopedKey,
+      relativePath: cleanRelative,
+      scopedKey,
+      isDirectory: false,
+      status,
+      skipCount: fileComps.length,
+      skippedLines
+    };
+  };
+
+  const rootVirtualNode = buildNode(tree, '');
+  if (rootVirtualNode) virtualNodes.push(rootVirtualNode);
+
+  const joinChild = (parentRel, childName) => {
+    if (!parentRel) return childName;
+    return parentRel.endsWith('/') ? `${parentRel}${childName}` : `${parentRel}/${childName}`;
+  };
+
+  const renderMarkdownTree = (node, prefix, isLast, relPath) => {
+    let currNode = node;
+    let currRel = relPath;
+    let isDir = currNode.type === 'directory';
+
+    let includedChildren = isDir && currNode.children ? currNode.children.filter(c => {
+      const childRel = joinChild(currRel, c.name);
+      return ruleIndex.getStatus(rootPath, childRel, c.type === 'directory') !== 'excluded';
+    }) : [];
+
+    let collapsedName = currNode.name;
+    while (isDir && includedChildren.length === 1 && currRel !== '') {
+      const singleChild = includedChildren[0];
+      const childRel = joinChild(currRel, singleChild.name);
+      collapsedName += `/${singleChild.name}`;
+      currNode = singleChild;
+      currRel = childRel;
+      isDir = currNode.type === 'directory';
+      includedChildren = isDir && currNode.children ? currNode.children.filter(c => {
+        const nextChildRel = joinChild(currRel, c.name);
+        return ruleIndex.getStatus(rootPath, nextChildRel, c.type === 'directory') !== 'excluded';
+      }) : [];
+    }
+
+    const status = ruleIndex.getStatus(rootPath, currRel, isDir);
+    if (status === 'excluded') return '';
+
+    let out = '';
+    const connector = isLast ? '└── ' : '├── ';
+    const nextPrefix = prefix + (isLast ? '    ' : '│   ');
+
+    if (relPath === '') {
+      out += `MyApp/\n`;
+    } else if (isDir) {
+      out += `${prefix}${connector}${collapsedName}/\n`;
+    } else {
+      if (status === 'tree-only') {
+        out += `${prefix}${connector}${collapsedName} [-]\n`;
+      } else {
+        const fileComps = compressions[toScopedPathKey(rootPath, currRel, false)] || compressions[currRel] || [];
+        const compStr = fileComps.length > 0 ? ` [${fileComps.length} skips]` : '';
+        out += `${prefix}${connector}${collapsedName}${compStr}\n`;
+      }
+    }
+
+    if (isDir && includedChildren.length > 0) {
+      includedChildren.forEach((child, index) => {
+        const childRel = joinChild(currRel, child.name);
+        out += renderMarkdownTree(child, relPath === '' ? '' : nextPrefix, index === includedChildren.length - 1, childRel);
+      });
+    }
+
+    return out;
+  };
+
+  const treeMarkdown = renderMarkdownTree(tree, '', true, '');
+  const savedBytes = Math.max(0, totalSize - totalTrueSize);
+
+  return {
+    nodes: virtualNodes,
+    exportFiles,
+    treeMarkdown,
+    savedBytes
+  };
+}
+
 console.log('\n' + '='.repeat(70));
 console.log('  XCEPT v1.6.1 DIAGNOSTICS & THROUGHPUT SLA BENCHMARK');
 console.log('='.repeat(70) + '\n');
@@ -622,23 +769,133 @@ console.log('\n\x1b[36m--- Suite 7: Create Preset from Selection Exclusion Synth
     ]
   };
 
-  // User selects only Button.tsx
   const selectedSet = new Set([toScopedPathKey(root, 'src/components/Button.tsx', false)]);
   const generatedExclusions = generateExclusionsForSelection([root], { [root]: mockTree }, selectedSet);
 
-  // Assertions:
   assert(generatedExclusions.includes(toScopedPathKey(root, 'docs/', true)), 'Entire unselected docs/ folder is excluded at folder level');
   assert(generatedExclusions.includes(toScopedPathKey(root, 'package.json', false)), 'Unselected package.json file is excluded');
   assert(generatedExclusions.includes(toScopedPathKey(root, 'src/utils/', true)), 'Entire unselected src/utils/ folder is excluded at folder level');
   assert(generatedExclusions.includes(toScopedPathKey(root, 'src/components/Header.tsx', false)), 'Unselected sibling Header.tsx is excluded');
   assert(!generatedExclusions.includes(toScopedPathKey(root, 'src/components/Button.tsx', false)), 'Selected Button.tsx is NOT excluded');
 
-  // Verify status evaluation with generated exclusions
   const presetIndex = new ScopedRuleIndex([], generatedExclusions, [], false);
   assert(presetIndex.getStatus(root, 'src/components/Button.tsx', false) === 'included', 'Selected Button.tsx evaluates to included');
   assert(presetIndex.getStatus(root, 'src/components/Header.tsx', false) === 'excluded', 'Unselected Header.tsx evaluates to excluded');
   assert(presetIndex.getStatus(root, 'docs/readme.md', false) === 'excluded', 'Descendant of unselected docs/ evaluates to excluded');
   assert(presetIndex.getStatus(root, 'package.json', false) === 'excluded', 'Unselected package.json evaluates to excluded');
+}
+
+// --- SUITE 8: EXPORT ENGINE TRAVERSAL & PATH NORMALIZATION ---
+console.log('\n\x1b[36m--- Suite 8: Export Engine Traversal & Path Normalization ---\x1b[0m');
+{
+  const root = 'C:/Projects/MyApp';
+  const mockTree = {
+    path: root,
+    name: 'MyApp',
+    type: 'directory',
+    size: 0,
+    children: [
+      {
+        path: `${root}/src`,
+        name: 'src',
+        type: 'directory',
+        size: 0,
+        children: [
+          {
+            path: `${root}/src/components`,
+            name: 'components',
+            type: 'directory',
+            size: 0,
+            children: [
+              {
+                path: `${root}/src/components/sub`,
+                name: 'sub',
+                type: 'directory',
+                size: 0,
+                children: [
+                  { path: `${root}/src/components/sub/DeepButton.tsx`, name: 'DeepButton.tsx', type: 'file', size: 1000, children: [] }
+                ]
+              },
+              { path: `${root}/src/components/Header.tsx`, name: 'Header.tsx', type: 'file', size: 500, children: [] }
+            ]
+          }
+        ]
+      },
+      {
+        path: `${root}/docs`,
+        name: 'docs',
+        type: 'directory',
+        size: 0,
+        children: [
+          {
+            path: `${root}/docs/specs`,
+            name: 'specs',
+            type: 'directory',
+            size: 0,
+            children: [
+              { path: `${root}/docs/specs/spec.md`, name: 'spec.md', type: 'file', size: 400, children: [] }
+            ]
+          }
+        ]
+      },
+      {
+        path: `${root}/build`,
+        name: 'build',
+        type: 'directory',
+        size: 0,
+        children: [
+          { path: `${root}/build/bundle.js`, name: 'bundle.js', type: 'file', size: 5000, children: [] }
+        ]
+      }
+    ]
+  };
+
+  const deepButtonScopedKey = toScopedPathKey(root, 'src/components/sub/DeepButton.tsx', false);
+  const specScopedKey = toScopedPathKey(root, 'docs/specs/spec.md', false);
+  const buildScopedKey = toScopedPathKey(root, 'build/', true);
+
+  const compressions = {
+    [deepButtonScopedKey]: [
+      { id: 'c1', startLine: 10, endLine: 20, lineCount: 11, signature: 'export const DeepButton = () => {' }
+    ]
+  };
+
+  const treeOnlyRules = [specScopedKey];
+  const excludeRules = [buildScopedKey];
+
+  const graph = runMockExportGraph(root, mockTree, [], excludeRules, treeOnlyRules, compressions);
+
+  // 1. Assert zero double slashes in any node's relativePath
+  const checkPaths = (nodes) => {
+    for (const n of nodes) {
+      assert(!n.relativePath.includes('//'), `Node relativePath contains no double slashes: "${n.relativePath}"`);
+      if (n.children) checkPaths(n.children);
+    }
+  };
+  checkPaths(graph.nodes);
+
+  // 2. Assert zero double slashes in exportFiles
+  for (const f of graph.exportFiles) {
+    assert(!f.relativePath.includes('//'), `Export file relativePath has no double slashes: "${f.relativePath}"`);
+    assert(!f.absolutePath.includes('//'), `Export file absolutePath has no double slashes: "${f.absolutePath}"`);
+  }
+
+  // 3. Assert compressions key matched accurately on deepButton
+  const exportedButton = graph.exportFiles.find(f => f.relativePath === 'src/components/sub/DeepButton.tsx');
+  assert(Boolean(exportedButton), 'DeepButton.tsx is present in exportFiles');
+  assert(exportedButton.compressions.length === 1, 'DeepButton.tsx matched compression rule via canonical scoped key');
+  assert(graph.savedBytes > 0, `Saved bytes successfully computed from skips: ${graph.savedBytes} B`);
+
+  // 4. Assert tree-only file is omitted from exportFiles but rendered in treeMarkdown with [-]
+  const exportedSpec = graph.exportFiles.find(f => f.relativePath === 'docs/specs/spec.md');
+  assert(!exportedSpec, 'docs/specs/spec.md is strictly omitted from exportFiles (tree-only)');
+  assert(graph.treeMarkdown.includes('spec.md [-]'), 'docs/specs/spec.md is rendered with [-] badge in markdown tree');
+
+  // 5. Assert excluded file and directory are omitted from both exportFiles and treeMarkdown
+  const exportedBundle = graph.exportFiles.find(f => f.relativePath.includes('bundle.js'));
+  assert(!exportedBundle, 'build/bundle.js is strictly omitted from exportFiles (excluded directory)');
+  assert(!graph.treeMarkdown.includes('bundle.js'), 'build/bundle.js is omitted from markdown file tree');
+  assert(!graph.treeMarkdown.includes('build/'), 'build/ folder is omitted from markdown file tree');
 }
 
 console.log('\n' + '='.repeat(70));

@@ -97,18 +97,19 @@ export function generateVirtualPayloadGraph(
       const cleanRelative = normalizePath(relativePath, isDir);
       const scopedKey: ScopedPathKey = toScopedPathKey(rootPath, cleanRelative, isDir);
       const status = ruleIndex.getStatus(rootPath, cleanRelative, isDir);
+      const isIncluded = status === 'included';
 
       const fileComps = compressions[scopedKey] || compressions[cleanRelative] || [];
       const skippedLines = fileComps.reduce((sum, c) => sum + (c.lineCount || 0), 0);
       const estimatedTotalLines = Math.max(1, Math.round(node.size / 40));
-      const trueSize = isDir ? 0 : calculateTrueSize(node.size, estimatedTotalLines, skippedLines);
-      const tokens = isDir ? 0 : Math.round(trueSize / 4);
+      const trueSize = (isDir || !isIncluded) ? 0 : calculateTrueSize(node.size, estimatedTotalLines, skippedLines);
+      const tokens = (isDir || !isIncluded) ? 0 : Math.round(trueSize / 4);
 
       if (isDir) {
         const childNodes: VirtualPayloadNode[] = [];
         if (node.children) {
           for (const child of node.children) {
-            const childRel = cleanRelative ? `${cleanRelative}/${child.name}` : child.name;
+            const childRel = cleanRelative ? `${cleanRelative}${child.name}` : child.name;
             const builtChild = buildNode(child, childRel);
             if (builtChild) childNodes.push(builtChild);
           }
@@ -139,8 +140,6 @@ export function generateVirtualPayloadGraph(
         };
       }
 
-      const isIncluded = status === 'included';
-
       if (isIncluded) {
         let flatFileName = `${rootName}_${cleanRelative.replace(/[/\\]/g, '_')}`;
         for (const [orig, override] of Object.entries(extensionOverrides)) {
@@ -154,8 +153,9 @@ export function generateVirtualPayloadGraph(
         totalSize += node.size;
         totalTrueSize += trueSize;
 
+        const cleanRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '');
         exportFiles.push({
-          absolutePath: `${rootPath}/${cleanRelative}`.replace(/\\/g, '/'),
+          absolutePath: `${cleanRoot}/${cleanRelative}`,
           relativePath: `${rootName}/${cleanRelative}`,
           flatFileName,
           compressions: fileComps,
@@ -173,12 +173,12 @@ export function generateVirtualPayloadGraph(
         scopedKey,
         name: node.name,
         isDirectory: false,
-        size: node.size,
+        size: isIncluded ? node.size : 0,
         trueSize,
         tokens,
         status,
-        skipCount: fileComps.length,
-        skippedLines,
+        skipCount: isIncluded ? fileComps.length : 0,
+        skippedLines: isIncluded ? skippedLines : 0,
         includedFilesCount: isIncluded ? 1 : 0,
         totalFilesCount: 1
       };
@@ -187,26 +187,31 @@ export function generateVirtualPayloadGraph(
     const rootVirtualNode = buildNode(tree, '');
     if (rootVirtualNode) virtualNodes.push(rootVirtualNode);
 
+    const joinChild = (parentRel: string, childName: string) => {
+      if (!parentRel) return childName;
+      return parentRel.endsWith('/') ? `${parentRel}${childName}` : `${parentRel}/${childName}`;
+    };
+
     const renderMarkdownTree = (node: FileNode, prefix: string, isLast: boolean, relPath: string): string => {
       let currNode = node;
       let currRel = relPath;
       let isDir = currNode.type === 'directory';
 
       let includedChildren = isDir && currNode.children ? currNode.children.filter(c => {
-        const childRel = currRel ? `${currRel}/${c.name}` : c.name;
+        const childRel = joinChild(currRel, c.name);
         return ruleIndex.getStatus(rootPath, childRel, c.type === 'directory') !== 'excluded';
       }) : [];
 
       let collapsedName = currNode.name;
       while (isDir && includedChildren.length === 1 && currRel !== '') {
         const singleChild = includedChildren[0];
-        const childRel = currRel ? `${currRel}/${singleChild.name}` : singleChild.name;
+        const childRel = joinChild(currRel, singleChild.name);
         collapsedName += `/${singleChild.name}`;
         currNode = singleChild;
         currRel = childRel;
         isDir = currNode.type === 'directory';
         includedChildren = isDir && currNode.children ? currNode.children.filter(c => {
-          const nextChildRel = currRel ? `${currRel}/${c.name}` : c.name;
+          const nextChildRel = joinChild(currRel, c.name);
           return ruleIndex.getStatus(rootPath, nextChildRel, c.type === 'directory') !== 'excluded';
         }) : [];
       }
@@ -244,7 +249,7 @@ export function generateVirtualPayloadGraph(
 
       if (isDir && includedChildren.length > 0) {
         includedChildren.forEach((child, index) => {
-          const childRel = currRel ? `${currRel}/${child.name}` : child.name;
+          const childRel = joinChild(currRel, child.name);
           out += renderMarkdownTree(child, relPath === '' ? '' : nextPrefix, index === includedChildren.length - 1, childRel);
         });
       }
@@ -300,6 +305,11 @@ export function generateEphemeralPayload(
 
   const rootsToProcess = multiRoots.length > 0 ? multiRoots : [{ rootPath, tree }];
 
+  const joinChild = (parentRel: string, childName: string) => {
+    if (!parentRel) return childName;
+    return parentRel.endsWith('/') ? `${parentRel}${childName}` : `${parentRel}/${childName}`;
+  };
+
   rootsToProcess.forEach(({ rootPath: currentRoot, tree: currentTree }) => {
     const rootName = currentRoot.split(/[/\\]/).pop() || 'root';
 
@@ -315,7 +325,7 @@ export function generateEphemeralPayload(
         if (selectedFiles.has(sKey) || selectedFiles.has(cRel)) return true;
         if (n.children) {
           for (const c of n.children) {
-            const nextRel = curRel ? `${curRel}/${c.name}` : c.name;
+            const nextRel = joinChild(curRel, c.name);
             if (hasDescendant(c, nextRel)) return true;
           }
         }
@@ -344,8 +354,9 @@ export function generateEphemeralPayload(
         }
 
         const fileComps = compressions[scopedKey] || compressions[cleanRelative] || [];
+        const cleanRoot = currentRoot.replace(/\\/g, '/').replace(/\/+$/, '');
         exportFiles.push({
-          absolutePath: `${currentRoot}/${cleanRelative}`.replace(/\\/g, '/'),
+          absolutePath: `${cleanRoot}/${cleanRelative}`,
           relativePath: `${rootName}/${cleanRelative}`,
           flatFileName,
           compressions: fileComps,
@@ -360,12 +371,12 @@ export function generateEphemeralPayload(
 
       if (isDir && node.children) {
         const matchingChildren = node.children.filter(c => {
-          const childRel = relativePath ? `${relativePath}/${c.name}` : c.name;
+          const childRel = joinChild(relativePath, c.name);
           return hasDescendant(c, childRel);
         });
 
         matchingChildren.forEach((child, idx) => {
-          const childRel = relativePath ? `${relativePath}/${child.name}` : child.name;
+          const childRel = joinChild(relativePath, child.name);
           result += traverse(child, relativePath === '' ? '' : nextPrefix, idx === matchingChildren.length - 1, childRel);
         });
       }

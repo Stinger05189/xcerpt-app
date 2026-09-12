@@ -16,41 +16,32 @@
 
 ---
 
-## Active Queue: Version 1.6.1 (Export Alignment, Double-Slash Eradication & Curation Finalization)
+## Active Queue: Version 2.0.0 (LLM Dev Session & Diff Merge Studio)
 
-- [ ] **WP-01: Export Traversal Path Normalization & Double-Slash Eradication**
-  - _Details:_ In `exportEngine.ts`, fix `${cleanRelative}/${child.name}` double-slash concatenation in both `buildNode` and `renderMarkdownTree`. Ensure `cleanRelative` (which has a trailing slash) concatenates cleanly via `${cleanRelative}${child.name}`. Verify that `scopedKey` exactly matches `compressions` maps and `treeOnlyExact` sets.
-- [ ] **WP-02: Tree-Only & Skip Block Physical Staging Verification**
-  - _Details:_ Verify that `status === 'tree-only'` files are strictly omitted from `exportFiles` in `generateVirtualPayloadGraph` and `generateExportPayload`. Verify that `main.cjs` applies all Monaco skip markers synchronously into physical output files and single `context.md` documents.
-- [ ] **WP-03: Diagnostic Regression Suite for Path Slashes & Export Integrity**
-  - _Details:_ In `scripts/run-diagnostics.mjs`, add tests verifying that `buildNode` emits single-slash POSIX paths at all tree depths, preserves compressions keys, and correctly omits tree-only files from the final export chunk file list.
-
----
-
-## Completed in Version 1.6.1 (Session 023)
-
-- [x] **WP-01: Legacy Workspace Migration & Exclude/Include Inversion Integrity**
-  - Decoupled inclusion punch-throughs from whitelist mode. Implemented `migrateLegacyRules` to promote un-scoped path rules to canonical keys across roots without ghost rules.
-- [x] **WP-02: Deterministic Path Key Architecture & Strict Invariant Enforcement**
-  - Enforced trailing slash invariant for directories and bottom-up (`lastIndexOf`) ancestor resolution in `ScopedRuleIndex`.
-- [x] **WP-03: Export Preview Tree Metric Re-Orientation & Directory Counts**
-  - Enriched `VirtualPayloadNode` with recursive `includedFilesCount` and `totalFilesCount`. Added density badges `(4 / 12 files)` in `PayloadPreviewTree.tsx`.
-- [x] **WP-04: Throughput SLA Fine-Tuning & Diagnostic Benchmark Suite**
-  - Optimized `getStatus` to run 10,000 nodes in under 20ms (< 25ms SLA).
-- [x] **WP-05: Preset Generation From Selection Overhaul**
-  - Implemented `generateExclusionsForSelection` to compute real, compacted directory exclusions for all unselected files.
+- [ ] **WP-01: Dev Session Domain Architecture & Store Foundation**
+  - _Details:_ Implement domain schemas in `src/types/session.ts` (`DevSession`, `ParsedFileAction`, `DiffHunk`, `MarkdownExplanationSection`). Implement `sessionStore.ts` and IPC persistence under `XcerptSessions/<workspaceId>/sessions/<sessionId>.json`.
+- [ ] **WP-02: Fault-Tolerant Protocol-Compliant Response Parser (Worker Engine)**
+  - _Details:_ Build an off-thread Web Worker parsing engine capable of depth-aware code fence matching, nested backtick handling, heuristic fence recovery for unclosed blocks, extension-preserving deduplication, and automated protocol header comment stripping (`stripProtocolScaffolding`).
+- [ ] **WP-03: Monaco Side-by-Side Diff Merge Studio & Hunk Engine**
+  - _Details:_ Implement the Dev Session Main Stage with Monaco side-by-side diffing comparing incoming LLM code against live disk files. Wire hunk-level merge actions, full file accept/reject workflows, and dedicated modes for `[NEW]` files and `[DELETED]` tombstones.
+- [ ] **WP-04: Co-Located Explanation & Reasoning Drawer**
+  - _Details:_ Build a collapsible, split-pane Architectural Intent & Reasoning Drawer above the diff editor that renders parsed markdown rationale and links sections dynamically to affected file actions.
+- [ ] **WP-05: Ephemeral Pre-Session Checkpoints & Non-Invasive Git Safety**
+  - _Details:_ Implement in-memory and disk-backed pre-merge file snapshots (`snapshotFiles`), non-destructive `[Revert Session]` rollback, Git status probing (`git status --porcelain`), and optional commit generator pre-populated with architectural intent.
 
 ---
 
-## Pending Queue: Version 2.0.0 (LLM Dev Session & Diff Merge Studio)
+## Completed in Version 1.6.1 (Session 023 & Session 024)
 
-- [ ] **WP-07: Dev Session Domain Architecture & State Machine**
-  - _Details:_ Implement `DevSession`, `ParsedFileAction`, and `DiffHunk` domain schemas. Build session switcher and disk persistence in `XcerptSessions/<id>/sessions/`.
-- [ ] **WP-08: Fault-Tolerant Protocol-Compliant Response Parser**
-  - _Details:_ Off-thread Web Worker parser for Code Generation Protocol. Depth-aware code fence parsing, heuristic recovery, and protocol header stripping.
-- [ ] **WP-09: Monaco Side-by-Side Diff Merge Studio & Skip Visibility**
-  - _Details:_ Mount Monaco Diff Editor comparing incoming LLM code against local workspace files. Hunk-level merging and transparent skip block indicators.
-- [ ] **WP-10: Co-Located Explanation & Reasoning Drawer**
-  - _Details:_ Co-locate architectural intent and pre-code explanations in an expandable drawer above the active diff editor.
-- [ ] **WP-11: Checkpoint Engine & Non-Invasive Git Safety**
-  - _Details:_ Pre-session file snapshot and rollback engine. Working tree probing (`git status`), commit tagging, and per-file commit history diffing.
+- [x] **WP-01: Export Traversal Path Normalization & Double-Slash Eradication**
+  - Replaced `${cleanRelative}/${child.name}` with `${cleanRelative}${child.name}` and added redundant slash collapsing (`/\/+/g, '/'`) across `normalizePath` and `canonicalizePath`.
+- [x] **WP-02: Tree-Only & Skip Block Physical Staging Verification**
+  - Verified omission of tree-only files from chunk file lists and normalized CRLF line endings to `\n` in `main.cjs` to eliminate Windows line drift.
+- [x] **WP-03: Diagnostic Regression Suite for Path Slashes & Export Integrity**
+  - Added Suite 8 to `scripts/run-diagnostics.mjs`, verifying zero double slashes, exact compressions key matching, and strict exclusion of tree-only/excluded files from export files.
+- [x] **WP-04: Workspace Persistence for `embedProtocol` Setting**
+  - Added `embedProtocol` to `getWorkspacePayload` and `generateFreshWorkspace` in `Bootstrapper.tsx` to ensure preferences persist to disk.
+- [x] **WP-05: Tree-Only Metric Zeroing & Preview Tree Polish**
+  - Zeroed out `trueSize`, `tokens`, and `size` on tree-only/excluded nodes in `exportEngine.ts` and rendered em-dashes (`—`) in `PayloadPreviewTree.tsx`.
+- [x] **WP-06: Bottom-Up Hierarchical Specificity & Compaction**
+  - Optimized rule resolution order (`lastIndexOf`) and implemented `generateExclusionsForSelection` for automated preset curation.
