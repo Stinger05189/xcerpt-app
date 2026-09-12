@@ -18,6 +18,25 @@
 
 ## Active Epoch: 04 - Rendering Optimization & Deployment
 
+### Session 023
+
+- **Focus Area:** Version 1.6.1 Curation Integrity, Path Invariant Hardening, and Preset Exclusion Synthesis.
+- **Key Decisions:**
+  - **Inclusion-Trap Decoupling:** Resolved the critical bug where adding an explicit inclusion to an item inadvertently converted the entire workspace into an exclusion whitelist. Established that in default mode, inclusions act as specific punch-throughs against ancestor exclusions without penalizing sibling files.
+  - **Bottom-Up Hierarchical Specificity (`lastIndexOf`):** Refactored `ScopedRuleIndex.getStatus` so that exact target rules (`includeExact`, `treeOnlyExact`, `excludeExact`) are checked first, and directory ancestors are checked bottom-up (closest ancestor first via `cleanRel.lastIndexOf('/')`). Deeper subfolder and child rules now override parent folder inclusions deterministically.
+  - **Exclusion Synthesis for Selection Presets:** Re-architected `createPresetFromSelection`. Rather than relying on implicit runtime flags, the engine now traverses workspace trees via `generateExclusionsForSelection` and synthesizes real, compacted exclusion rules for all non-selected directories and files. The resulting preset is 100% transparent, editable, and visible in the Sidebar.
+  - **Directory Trailing Slash Invariant:** Enforced strict slash invariants (`/` for directories, no slash for files) across `toScopedPathKey`, `compactRules`, `TreeNode`, and `FileTree`.
+  - **Throughput SLA Verification:** Streamlined `getStatus` with cons-string concatenation and early returns, running 10,000 nodes in under 20ms and comfortably beating the < 25ms SLA.
+- **Roadblocks Identified for Next Session:**
+  - **Double-Slash Path Formatting Defect:** Identified that `${cleanRelative}/${child.name}` in `exportEngine.ts` caused double-slash paths (`src/components//Button.tsx`) when `cleanRelative` already had a trailing slash. This caused `compressions` lookups and `tree-only` status checks to miss during export generation.
+- **Core Files Modified:**
+  - `src/types/ipc.d.ts`, `src/utils/filterEngine.ts`, `src/utils/exportEngine.ts`
+  - `src/store/workspaceStore.ts`, `src/components/tree/FileTree.tsx`, `src/components/tree/TreeNode.tsx`, `src/components/tree/ContextMenu.tsx`, `src/components/tree/useFlattenedTree.ts`
+  - `src/components/export/PayloadPreviewTree.tsx`, `src/components/export/ExportStage.tsx`
+  - `scripts/run-diagnostics.mjs`
+
+---
+
 ### Session 022
 
 - **Focus Area:** Version 1.6.0 Zero-Hitch Architecture, Performance Optimization, and Inheritance Bug Resolutions.

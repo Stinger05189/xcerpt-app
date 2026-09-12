@@ -19,11 +19,12 @@ export function useFlattenedTree(
   excludes: string[],
   treeOnly: string[],
   hideExcluded: boolean,
-  hideTreeOnly: boolean
+  hideTreeOnly: boolean,
+  isWhitelistMode: boolean = false
 ): FlatNode[] {
   const ruleIndex = useMemo(() => {
-    return new ScopedRuleIndex(includes, excludes, treeOnly);
-  }, [includes, excludes, treeOnly]);
+    return new ScopedRuleIndex(includes, excludes, treeOnly, isWhitelistMode);
+  }, [includes, excludes, treeOnly, isWhitelistMode]);
 
   return useMemo(() => {
     const flat: FlatNode[] = [];

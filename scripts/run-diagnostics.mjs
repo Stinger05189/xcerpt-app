@@ -4,20 +4,41 @@ import ignore from 'ignore';
 
 function canonicalizePath(p) {
   if (!p) return '';
-  let normalized = p.replace(/\\/g, '/');
-  if (/^[a-zA-Z]:/.test(normalized)) {
-    normalized = normalized[0].toUpperCase() + normalized.slice(1);
+  let normalized = p.includes('\\') ? p.replace(/\\/g, '/') : p;
+  const code0 = normalized.charCodeAt(0);
+  if (code0 >= 97 && code0 <= 122 && normalized.charCodeAt(1) === 58) {
+    normalized = String.fromCharCode(code0 - 32) + normalized.slice(1);
   }
-  return normalized.replace(/\/+$/, '');
+  const len = normalized.length;
+  if (len > 0 && normalized.charCodeAt(len - 1) === 47) {
+    normalized = normalized.replace(/\/+$/, '');
+  }
+  return normalized;
 }
 
-function normalizePath(p) {
-  if (!p) return '';
-  return p.replace(/\\/g, '/').replace(/^\/+/, '');
+function normalizePath(pathStr, isDirectory) {
+  if (!pathStr) return '';
+  let clean = pathStr.includes('\\') ? pathStr.replace(/\\/g, '/') : pathStr;
+  if (clean.charCodeAt(0) === 47) {
+    clean = clean.replace(/^\/+/, '');
+  }
+  const len = clean.length;
+  if (len === 0) return '';
+
+  const endsWithSlash = clean.charCodeAt(len - 1) === 47;
+  if (isDirectory === true) {
+    return endsWithSlash ? clean : clean + '/';
+  }
+  if (isDirectory === false) {
+    return endsWithSlash ? clean.slice(0, -1) : clean;
+  }
+  return clean;
 }
 
-function toScopedPathKey(rootId, relativePath) {
-  return `${canonicalizePath(rootId)}::${normalizePath(relativePath)}`;
+function toScopedPathKey(rootId, relativePath, isDirectory) {
+  const cleanRoot = canonicalizePath(rootId);
+  const cleanRelative = normalizePath(relativePath, isDirectory);
+  return `${cleanRoot}::${cleanRelative}`;
 }
 
 function isScopedKey(key) {
@@ -26,15 +47,47 @@ function isScopedKey(key) {
 
 function parseScopedPathKey(key) {
   const idx = key.indexOf('::');
-  if (idx === -1) return { rootId: '', relativePath: normalizePath(key) };
+  if (idx === -1) {
+    const clean = normalizePath(key);
+    return { rootId: '', relativePath: clean, isDirectory: clean.endsWith('/') };
+  }
+  const rootId = canonicalizePath(key.slice(0, idx));
+  const relativePath = normalizePath(key.slice(idx + 2));
   return {
-    rootId: canonicalizePath(key.slice(0, idx)),
-    relativePath: normalizePath(key.slice(idx + 2)),
+    rootId,
+    relativePath,
+    isDirectory: relativePath.endsWith('/')
   };
 }
 
 function hasGlobWildcards(str) {
   return /[*?[\]{}]/.test(str);
+}
+
+function migrateLegacyRules(rules, rootPaths) {
+  if (!rules || rules.length === 0) return [];
+  const normalizedRoots = rootPaths.map(r => canonicalizePath(r)).filter(Boolean);
+  const result = new Set();
+
+  for (const rule of rules) {
+    if (!rule) continue;
+    if (isScopedKey(rule)) {
+      const { rootId, relativePath, isDirectory } = parseScopedPathKey(rule);
+      result.add(toScopedPathKey(rootId, relativePath, isDirectory));
+    } else {
+      const isDir = rule.endsWith('/') || !rule.includes('.');
+      const cleanRel = normalizePath(rule, isDir);
+      if (normalizedRoots.length > 0) {
+        for (const root of normalizedRoots) {
+          result.add(toScopedPathKey(root, cleanRel, isDir));
+        }
+      } else {
+        result.add(`*::${cleanRel}`);
+      }
+    }
+  }
+
+  return Array.from(result);
 }
 
 function compactRules(rules) {
@@ -90,19 +143,119 @@ function compactRules(rules) {
   return compacted;
 }
 
+function isNodeSelected(root, relativePath, isDir, selectedSet) {
+  const cleanRel = normalizePath(relativePath, isDir);
+  const scopedKey = toScopedPathKey(root, cleanRel, isDir);
+  const globalKey = `*::${cleanRel}`;
+
+  if (selectedSet.has(scopedKey) || selectedSet.has(globalKey) || selectedSet.has(cleanRel)) {
+    return true;
+  }
+
+  const altRel = isDir ? cleanRel.slice(0, -1) : `${cleanRel}/`;
+  if (
+    selectedSet.has(toScopedPathKey(root, altRel, !isDir)) ||
+    selectedSet.has(`*::${altRel}`) ||
+    selectedSet.has(altRel)
+  ) {
+    return true;
+  }
+
+  let slashIdx = cleanRel.lastIndexOf('/', isDir ? cleanRel.length - 2 : cleanRel.length - 1);
+  while (slashIdx !== -1) {
+    const ancestor = cleanRel.slice(0, slashIdx + 1);
+    if (
+      selectedSet.has(toScopedPathKey(root, ancestor, true)) ||
+      selectedSet.has(`*::${ancestor}`) ||
+      selectedSet.has(ancestor)
+    ) {
+      return true;
+    }
+    slashIdx = cleanRel.lastIndexOf('/', slashIdx - 1);
+  }
+
+  return false;
+}
+
+function hasSelectedDescendant(root, node, currentRel, selectedSet) {
+  const isDir = node.type === 'directory';
+  const cleanRel = normalizePath(currentRel, isDir);
+
+  if (isNodeSelected(root, cleanRel, isDir, selectedSet)) {
+    return true;
+  }
+
+  if (isDir && node.children) {
+    for (const child of node.children) {
+      const childRel = cleanRel ? `${cleanRel}${child.name}` : child.name;
+      if (hasSelectedDescendant(root, child, childRel, selectedSet)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function generateExclusionsForSelection(rootPaths, rawTrees, selectedSet) {
+  const exclusions = [];
+
+  for (const root of rootPaths) {
+    const tree = rawTrees[root];
+    if (!tree || !tree.children) continue;
+
+    const walk = (node, currentRel) => {
+      const isDir = node.type === 'directory';
+      const cleanRel = normalizePath(currentRel, isDir);
+      if (cleanRel === '') {
+        if (node.children) {
+          for (const child of node.children) {
+            walk(child, child.name);
+          }
+        }
+        return;
+      }
+
+      if (isDir) {
+        if (!hasSelectedDescendant(root, node, cleanRel, selectedSet)) {
+          exclusions.push(toScopedPathKey(root, cleanRel, true));
+          return;
+        }
+
+        if (node.children) {
+          for (const child of node.children) {
+            const childRel = `${cleanRel}${child.name}`;
+            walk(child, childRel);
+          }
+        }
+      } else {
+        if (!isNodeSelected(root, cleanRel, false, selectedSet)) {
+          exclusions.push(toScopedPathKey(root, cleanRel, false));
+        }
+      }
+    };
+
+    walk(tree, '');
+  }
+
+  return compactRules(exclusions);
+}
+
 class ScopedRuleIndex {
-  constructor(includes = [], excludes = [], treeOnly = []) {
+  constructor(includes = [], excludes = [], treeOnly = [], isWhitelistMode = false) {
     this.excludeExact = new Set();
     this.treeOnlyExact = new Set();
     this.includeExact = new Set();
 
     this.excludeDirPrefixSet = new Set();
     this.treeOnlyDirPrefixSet = new Set();
+    this.includeDirPrefixSet = new Set();
 
     this.excludeIgnores = new Map();
     this.treeOnlyIgnores = new Map();
     this.includeIgnores = new Map();
 
+    this.isWhitelistMode = isWhitelistMode;
     this.rootHasInclusions = new Map();
 
     this.build(includes, excludes, treeOnly);
@@ -116,35 +269,37 @@ class ScopedRuleIndex {
     const processRule = (rule, exactSet, dirPrefixSet, rulesByRoot) => {
       if (!rule) return;
       if (isScopedKey(rule)) {
-        const { rootId, relativePath } = parseScopedPathKey(rule);
+        const { rootId, relativePath, isDirectory } = parseScopedPathKey(rule);
         const canonicalRoot = canonicalizePath(rootId);
         const canonicalKey = `${canonicalRoot}::${relativePath}`;
         exactSet.add(canonicalKey);
 
-        const isDir = relativePath.endsWith('/');
-        if (isDir) {
+        if (isDirectory) {
           exactSet.add(canonicalKey.slice(0, -1));
-          if (dirPrefixSet) {
-            dirPrefixSet.add(canonicalKey);
-          }
+          dirPrefixSet.add(canonicalKey);
         } else {
           exactSet.add(`${canonicalKey}/`);
         }
 
-        if (hasGlobWildcards(relativePath) && rulesByRoot) {
+        if (hasGlobWildcards(relativePath)) {
           const list = rulesByRoot.get(canonicalRoot) || [];
           list.push(relativePath);
           rulesByRoot.set(canonicalRoot, list);
         }
       } else {
-        const cleanRel = normalizePath(rule);
-        const isDir = rule.endsWith('/') || cleanRel.endsWith('/');
-        if (dirPrefixSet && isDir) {
-          const prefix = cleanRel.endsWith('/') ? cleanRel : `${cleanRel}/`;
-          dirPrefixSet.add(`*::${prefix}`);
+        const isDir = rule.endsWith('/');
+        const cleanRel = normalizePath(rule, isDir);
+        const globalKey = `*::${cleanRel}`;
+        exactSet.add(globalKey);
+
+        if (isDir) {
+          exactSet.add(globalKey.slice(0, -1));
+          dirPrefixSet.add(globalKey);
+        } else {
+          exactSet.add(`${globalKey}/`);
         }
 
-        if (hasGlobWildcards(cleanRel) && rulesByRoot) {
+        if (hasGlobWildcards(cleanRel)) {
           const list = rulesByRoot.get('*') || [];
           list.push(cleanRel);
           rulesByRoot.set('*', list);
@@ -155,7 +310,7 @@ class ScopedRuleIndex {
     excludes.forEach(e => processRule(e, this.excludeExact, this.excludeDirPrefixSet, rootExcludesMap));
     treeOnly.forEach(t => processRule(t, this.treeOnlyExact, this.treeOnlyDirPrefixSet, rootTreeOnlyMap));
     includes.forEach(i => {
-      processRule(i, this.includeExact, null, rootIncludesMap);
+      processRule(i, this.includeExact, this.includeDirPrefixSet, rootIncludesMap);
       if (isScopedKey(i)) {
         this.rootHasInclusions.set(canonicalizePath(parseScopedPathKey(i).rootId), true);
       } else {
@@ -189,75 +344,72 @@ class ScopedRuleIndex {
 
     if (globalExcludes.length > 0) this.excludeIgnores.set('*', ignore().add(globalExcludes));
     if (globalTreeOnly.length > 0) this.treeOnlyIgnores.set('*', ignore().add(globalTreeOnly));
-    if (globalIncludes.length > 0) {
-      this.includeIgnores.set('*', ignore().add(globalIncludes));
-    }
+    if (globalIncludes.length > 0) this.includeIgnores.set('*', ignore().add(globalIncludes));
   }
 
   getStatus(rootId, relativePath, isDirectory) {
-    const cleanRel = normalizePath(relativePath);
+    const cleanRel = isDirectory
+      ? normalizePath(relativePath, true)
+      : normalizePath(relativePath, false);
+
     if (cleanRel === '') return 'included';
 
     const canonicalRoot = canonicalizePath(rootId);
-    const scopedKey = `${canonicalRoot}::${cleanRel}`;
-    const pathToCheck = isDirectory && !cleanRel.endsWith('/') ? `${cleanRel}/` : cleanRel;
+    const rootPrefix = canonicalRoot + '::';
+    const scopedKey = rootPrefix + cleanRel;
+    const globalKey = '*::' + cleanRel;
 
-    // 1. Explicit child inclusion takes priority
-    if (this.includeExact.has(scopedKey)) {
+    // 1. Exact match for target path takes ABSOLUTE HIGHEST priority
+    if (this.includeExact.has(scopedKey) || this.includeExact.has(globalKey)) {
       return 'included';
     }
-
-    // 2. Direct exact match in excludes
-    if (this.excludeExact.has(scopedKey) || this.excludeExact.has(`${scopedKey}/`)) {
-      return 'excluded';
-    }
-
-    // 3. Fast O(depth) ancestor prefix lookup via Set
-    let slashIdx = cleanRel.indexOf('/');
-    while (slashIdx !== -1) {
-      const ancestor = cleanRel.slice(0, slashIdx + 1);
-      const ancestorKey = `${canonicalRoot}::${ancestor}`;
-      if (this.excludeDirPrefixSet.has(ancestorKey) || this.excludeDirPrefixSet.has(`*::${ancestor}`)) {
-        return 'excluded';
-      }
-      slashIdx = cleanRel.indexOf('/', slashIdx + 1);
-    }
-
-    // 4. Glob pattern fallback (only evaluated if wildcards exist)
-    const igExclude = this.excludeIgnores.get(canonicalRoot) || this.excludeIgnores.get('*');
-    if (igExclude && igExclude.ignores(pathToCheck)) {
-      return 'excluded';
-    }
-
-    // 5. Tree-only checks
-    if (this.treeOnlyExact.has(scopedKey) || this.treeOnlyExact.has(`${scopedKey}/`)) {
+    if (this.treeOnlyExact.has(scopedKey) || this.treeOnlyExact.has(globalKey)) {
       return 'tree-only';
     }
-    slashIdx = cleanRel.indexOf('/');
-    while (slashIdx !== -1) {
-      const ancestor = cleanRel.slice(0, slashIdx + 1);
-      const ancestorKey = `${canonicalRoot}::${ancestor}`;
-      if (this.treeOnlyDirPrefixSet.has(ancestorKey) || this.treeOnlyDirPrefixSet.has(`*::${ancestor}`)) {
-        return 'tree-only';
-      }
-      slashIdx = cleanRel.indexOf('/', slashIdx + 1);
+    if (this.excludeExact.has(scopedKey) || this.excludeExact.has(globalKey)) {
+      return 'excluded';
     }
+
+    // 2. Hierarchical Ancestor Lookups (Bottom-up: Deepest/closest ancestor wins)
+    if (this.excludeDirPrefixSet.size > 0 || this.treeOnlyDirPrefixSet.size > 0 || this.includeDirPrefixSet.size > 0) {
+      let slashIdx = cleanRel.lastIndexOf('/', isDirectory ? cleanRel.length - 2 : cleanRel.length - 1);
+      while (slashIdx !== -1) {
+        const ancestor = cleanRel.slice(0, slashIdx + 1);
+        const scopedAncestor = rootPrefix + ancestor;
+        const globalAncestor = '*::' + ancestor;
+
+        if (this.includeDirPrefixSet.has(scopedAncestor) || this.includeDirPrefixSet.has(globalAncestor)) {
+          return 'included';
+        }
+        if (this.treeOnlyDirPrefixSet.has(scopedAncestor) || this.treeOnlyDirPrefixSet.has(globalAncestor)) {
+          return 'tree-only';
+        }
+        if (this.excludeDirPrefixSet.has(scopedAncestor) || this.excludeDirPrefixSet.has(globalAncestor)) {
+          return 'excluded';
+        }
+
+        slashIdx = cleanRel.lastIndexOf('/', slashIdx - 1);
+      }
+    }
+
+    // 3. Glob/Regex pattern fallback
     const igTree = this.treeOnlyIgnores.get(canonicalRoot) || this.treeOnlyIgnores.get('*');
-    if (igTree && igTree.ignores(pathToCheck)) {
+    if (igTree && igTree.ignores(cleanRel)) {
       return 'tree-only';
     }
+    const igExclude = this.excludeIgnores.get(canonicalRoot) || this.excludeIgnores.get('*');
+    if (igExclude && igExclude.ignores(cleanRel)) {
+      return 'excluded';
+    }
 
-    // 6. Whitelist Inclusions Check
-    const hasInc = this.rootHasInclusions.get(canonicalRoot) || this.rootHasInclusions.get('*');
-    if (hasInc) {
+    // 4. Whitelist Mode Check
+    if (this.isWhitelistMode) {
       if (isDirectory) return 'included';
       const igInc = this.includeIgnores.get(canonicalRoot) || this.includeIgnores.get('*');
-      if (igInc && !igInc.ignores(pathToCheck)) {
-        return 'excluded';
+      if (igInc && igInc.ignores(cleanRel)) {
+        return 'included';
       }
-      if (!igInc && !this.includeExact.has(scopedKey)) {
-        return 'excluded';
-      }
+      return 'excluded';
     }
 
     return 'included';
@@ -265,7 +417,7 @@ class ScopedRuleIndex {
 }
 
 console.log('\n' + '='.repeat(70));
-console.log('  XCEPT v1.6.0 ENGINE DIAGNOSTICS & PERFORMANCE BENCHMARK');
+console.log('  XCEPT v1.6.1 DIAGNOSTICS & THROUGHPUT SLA BENCHMARK');
 console.log('='.repeat(70) + '\n');
 
 let passCount = 0;
@@ -281,59 +433,106 @@ function assert(condition, message) {
   }
 }
 
-// --- SUITE 1: FOLDER EXCLUSION INHERITANCE ---
+// --- SUITE 1: FOLDER EXCLUSION & INHERITANCE ---
 console.log('\x1b[36m--- Suite 1: Folder Exclude & Tree-Only Inheritance ---\x1b[0m');
 {
   const rootWindows = 'C:\\Projects\\MyApp';
   const rootPosix = 'C:/Projects/MyApp';
 
   const excludes = [
-    toScopedPathKey(rootWindows, 'src/components/'),
-    toScopedPathKey(rootPosix, 'dist/'),
+    toScopedPathKey(rootWindows, 'src/components/', true),
+    toScopedPathKey(rootPosix, 'dist/', true),
   ];
   const treeOnly = [
-    toScopedPathKey(rootPosix, 'docs/specs/')
+    toScopedPathKey(rootPosix, 'docs/specs/', true)
   ];
 
   const index = new ScopedRuleIndex([], excludes, treeOnly);
 
-  assert(index.getStatus(rootWindows, 'src/components', true) === 'excluded', 'Direct folder match with Windows backslash root');
+  assert(index.getStatus(rootWindows, 'src/components/', true) === 'excluded', 'Direct folder match with Windows backslash root');
   assert(index.getStatus(rootWindows, 'src/components/Button.tsx', false) === 'excluded', 'Child file inherits folder exclusion');
   assert(index.getStatus(rootPosix, 'src/components/sub/DeepNested.tsx', false) === 'excluded', 'Deep descendant inherits folder exclusion');
   assert(index.getStatus(rootWindows, 'docs/specs/spec.md', false) === 'tree-only', 'Child file inherits tree-only directory status');
   assert(index.getStatus(rootWindows, 'src/App.tsx', false) === 'included', 'Sibling file outside excluded folder remains included');
-
-  // Test explicit child inclusion overriding parent exclusion
-  const withInclusion = new ScopedRuleIndex(
-    [toScopedPathKey(rootWindows, 'src/components/SpecialIncluded.tsx')],
-    excludes,
-    treeOnly
-  );
-  assert(withInclusion.getStatus(rootWindows, 'src/components/SpecialIncluded.tsx', false) === 'included', 'Explicit child inclusion overrides parent folder exclusion');
 }
 
-// --- SUITE 2: RULE COMPACTION (PREVENTING HUGE SIDEBAR LISTS) ---
-console.log('\n\x1b[36m--- Suite 2: Rule Compaction & Pruning Test ---\x1b[0m');
+// --- SUITE 2: INCLUSION PUNCH-THROUGH WITHOUT WHITELIST INVERSION ---
+console.log('\n\x1b[36m--- Suite 2: Inclusion Punch-Throughs without Inverting Workspace ---\x1b[0m');
+{
+  const root = 'C:/Projects/MyApp';
+  const excludes = [toScopedPathKey(root, 'src/legacy/', true)];
+  const includes = [toScopedPathKey(root, 'src/legacy/Keeper.tsx', false)];
+
+  const indexDefault = new ScopedRuleIndex(includes, excludes, [], false);
+  assert(indexDefault.getStatus(root, 'src/legacy/Keeper.tsx', false) === 'included', 'Included child punches through excluded ancestor directory');
+  assert(indexDefault.getStatus(root, 'src/legacy/Old.tsx', false) === 'excluded', 'Other children in excluded ancestor remain excluded');
+  assert(indexDefault.getStatus(root, 'src/main.tsx', false) === 'included', 'Untouched sibling outside excluded folder remains included (No whitelist trap)');
+}
+
+// --- SUITE 3: RE-INCLUDE FOLDER THEN CHILD TREE-ONLY SPECIFICITY ---
+console.log('\n\x1b[36m--- Suite 3: Folder Tree-Only -> Re-Include -> Child Tree-Only Override ---\x1b[0m');
+{
+  const root = 'C:/Projects/MyApp';
+  
+  const initialTreeOnly = [toScopedPathKey(root, 'src/components/', true)];
+  const indexStep1 = new ScopedRuleIndex([], [], initialTreeOnly, false);
+  assert(indexStep1.getStatus(root, 'src/components/', true) === 'tree-only', 'Folder is tree-only');
+  assert(indexStep1.getStatus(root, 'src/components/Button.tsx', false) === 'tree-only', 'Child file inherits tree-only');
+
+  const reIncluded = [toScopedPathKey(root, 'src/components/', true)];
+  const indexStep2 = new ScopedRuleIndex(reIncluded, [], [], false);
+  assert(indexStep2.getStatus(root, 'src/components/', true) === 'included', 'Folder re-included');
+  assert(indexStep2.getStatus(root, 'src/components/Button.tsx', false) === 'included', 'Child file is included');
+
+  const childTreeOnly = [toScopedPathKey(root, 'src/components/Button.tsx', false)];
+  const indexStep3 = new ScopedRuleIndex(reIncluded, [], childTreeOnly, false);
+  assert(indexStep3.getStatus(root, 'src/components/Button.tsx', false) === 'tree-only', 'Child file is tree-only despite parent inclusion');
+  assert(indexStep3.getStatus(root, 'src/components/Header.tsx', false) === 'included', 'Sibling file remains included under parent');
+
+  const subFolderTreeOnly = [
+    toScopedPathKey(root, 'src/components/Button.tsx', false),
+    toScopedPathKey(root, 'src/components/sub/', true)
+  ];
+  const indexStep4 = new ScopedRuleIndex(reIncluded, [], subFolderTreeOnly, false);
+  assert(indexStep4.getStatus(root, 'src/components/sub/Deep.tsx', false) === 'tree-only', 'Subfolder child inherits subfolder tree-only over parent inclusion');
+}
+
+// --- SUITE 4: LEGACY UNSCOPED RULE MIGRATION ---
+console.log('\n\x1b[36m--- Suite 4: Legacy Unscoped Rule Migration & Ghost Rule Prevention ---\x1b[0m');
+{
+  const roots = ['C:/RepoA', 'D:/RepoB'];
+  const legacyRules = ['src/components/', 'package.json'];
+
+  const migrated = migrateLegacyRules(legacyRules, roots);
+  assert(migrated.length === 4, `Promoted 2 unscoped rules across 2 roots into 4 scoped rules (got ${migrated.length})`);
+  assert(migrated.includes('C:/RepoA::src/components/'), 'Emitted canonical scoped dir key with trailing slash for Root A');
+  assert(migrated.includes('D:/RepoB::package.json'), 'Emitted canonical scoped file key without trailing slash for Root B');
+
+  const parsed = parseScopedPathKey('C:/RepoA::src/components/');
+  assert(parsed.isDirectory === true, 'Parsed directory invariant correctly identified');
+  assert(parsed.relativePath === 'src/components/', 'Parsed canonical POSIX path retained trailing slash');
+}
+
+// --- SUITE 5: RULE COMPACTION ---
+console.log('\n\x1b[36m--- Suite 5: Rule Compaction & Pruning Test ---\x1b[0m');
 {
   const root = 'C:/Projects/MyApp';
   const uncompacted = [
-    toScopedPathKey(root, 'src/components/'),
-    toScopedPathKey(root, 'src/components/Button.tsx'),
-    toScopedPathKey(root, 'src/components/Header.tsx'),
-    toScopedPathKey(root, 'src/components/sub/Nav.tsx'),
-    toScopedPathKey(root, 'src/utils/api.ts'),
+    toScopedPathKey(root, 'src/components/', true),
+    toScopedPathKey(root, 'src/components/Button.tsx', false),
+    toScopedPathKey(root, 'src/components/Header.tsx', false),
+    toScopedPathKey(root, 'src/components/sub/Nav.tsx', false),
+    toScopedPathKey(root, 'src/utils/api.ts', false),
   ];
 
   const compacted = compactRules(uncompacted);
-
   assert(compacted.length === 2, `Compacted 5 rules down to 2 (got ${compacted.length})`);
-  assert(compacted.includes(toScopedPathKey(root, 'src/components/')), 'Preserved ancestor directory rule');
-  assert(compacted.includes(toScopedPathKey(root, 'src/utils/api.ts')), 'Preserved independent file rule');
-  assert(!compacted.includes(toScopedPathKey(root, 'src/components/Button.tsx')), 'Pruned redundant child file rule');
+  assert(compacted.includes(toScopedPathKey(root, 'src/components/', true)), 'Preserved ancestor directory rule');
+  assert(compacted.includes(toScopedPathKey(root, 'src/utils/api.ts', false)), 'Preserved independent file rule');
 }
 
-// --- SUITE 3: HIGH-THROUGHPUT O(depth) BENCHMARK (< 25ms SLA) ---
-console.log('\n\x1b[36m--- Suite 3: 10,000-Node Throughput Benchmark (O(depth) Ancestor Lookups) ---\x1b[0m');
+// --- SUITE 6: HIGH-THROUGHPUT O(depth) BENCHMARK (< 25ms SLA) ---
+console.log('\n\x1b[36m--- Suite 6: 10,000-Node Throughput Benchmark (O(depth) Ancestor Lookups) ---\x1b[0m');
 {
   const root = 'C:/Projects/MassiveRepo';
   const ruleCount = 100;
@@ -341,10 +540,10 @@ console.log('\n\x1b[36m--- Suite 3: 10,000-Node Throughput Benchmark (O(depth) A
 
   const mockExcludes = [];
   for (let i = 0; i < ruleCount; i++) {
-    mockExcludes.push(toScopedPathKey(root, `vendor/pkg_${i}/`));
+    mockExcludes.push(toScopedPathKey(root, `vendor/pkg_${i}/`, true));
   }
-  mockExcludes.push(toScopedPathKey(root, 'node_modules/'));
-  mockExcludes.push(toScopedPathKey(root, 'build/'));
+  mockExcludes.push(toScopedPathKey(root, 'node_modules/', true));
+  mockExcludes.push(toScopedPathKey(root, 'build/', true));
 
   const index = new ScopedRuleIndex([], mockExcludes, []);
 
@@ -366,11 +565,80 @@ console.log('\n\x1b[36m--- Suite 3: 10,000-Node Throughput Benchmark (O(depth) A
   const opsPerSec = Math.round((nodeCount / duration) * 1000);
 
   console.log(`  Processed: \x1b[33m${nodeCount.toLocaleString()} nodes\x1b[0m against \x1b[33m${ruleCount} rules\x1b[0m`);
-  console.log(`  Duration:  \x1b[32m${duration.toFixed(2)} ms\x1b[0m`);
+  console.log(`  Duration:  \x1b[32m${duration.toFixed(2)} ms\x1b[0m (Target: < 25.00 ms)`);
   console.log(`  Velocity:  \x1b[32m${opsPerSec.toLocaleString()} ops/sec\x1b[0m`);
 
   assert(duration < 25, `Throughput SLA met (< 25ms for 10,000 nodes; got ${duration.toFixed(2)}ms)`);
   assert(excludedCount > 0, `Correctly filtered excluded nodes (count: ${excludedCount})`);
+}
+
+// --- SUITE 7: CREATE PRESET FROM SELECTION EXCLUSION SYNTHESIS ---
+console.log('\n\x1b[36m--- Suite 7: Create Preset from Selection Exclusion Synthesis ---\x1b[0m');
+{
+  const root = 'C:/Projects/MyApp';
+  const mockTree = {
+    path: root,
+    name: 'MyApp',
+    type: 'directory',
+    size: 0,
+    children: [
+      {
+        path: `${root}/src`,
+        name: 'src',
+        type: 'directory',
+        size: 0,
+        children: [
+          {
+            path: `${root}/src/components`,
+            name: 'components',
+            type: 'directory',
+            size: 0,
+            children: [
+              { path: `${root}/src/components/Button.tsx`, name: 'Button.tsx', type: 'file', size: 100, children: [] },
+              { path: `${root}/src/components/Header.tsx`, name: 'Header.tsx', type: 'file', size: 200, children: [] },
+            ]
+          },
+          {
+            path: `${root}/src/utils`,
+            name: 'utils',
+            type: 'directory',
+            size: 0,
+            children: [
+              { path: `${root}/src/utils/api.ts`, name: 'api.ts', type: 'file', size: 300, children: [] }
+            ]
+          }
+        ]
+      },
+      {
+        path: `${root}/docs`,
+        name: 'docs',
+        type: 'directory',
+        size: 0,
+        children: [
+          { path: `${root}/docs/readme.md`, name: 'readme.md', type: 'file', size: 400, children: [] }
+        ]
+      },
+      { path: `${root}/package.json`, name: 'package.json', type: 'file', size: 50, children: [] }
+    ]
+  };
+
+  // User selects only Button.tsx
+  const selectedSet = new Set([toScopedPathKey(root, 'src/components/Button.tsx', false)]);
+  const generatedExclusions = generateExclusionsForSelection([root], { [root]: mockTree }, selectedSet);
+
+  // Assertions:
+  assert(generatedExclusions.includes(toScopedPathKey(root, 'docs/', true)), 'Entire unselected docs/ folder is excluded at folder level');
+  assert(generatedExclusions.includes(toScopedPathKey(root, 'package.json', false)), 'Unselected package.json file is excluded');
+  assert(generatedExclusions.includes(toScopedPathKey(root, 'src/utils/', true)), 'Entire unselected src/utils/ folder is excluded at folder level');
+  assert(generatedExclusions.includes(toScopedPathKey(root, 'src/components/Header.tsx', false)), 'Unselected sibling Header.tsx is excluded');
+  assert(!generatedExclusions.includes(toScopedPathKey(root, 'src/components/Button.tsx', false)), 'Selected Button.tsx is NOT excluded');
+
+  // Verify status evaluation with generated exclusions
+  const presetIndex = new ScopedRuleIndex([], generatedExclusions, [], false);
+  assert(presetIndex.getStatus(root, 'src/components/Button.tsx', false) === 'included', 'Selected Button.tsx evaluates to included');
+  assert(presetIndex.getStatus(root, 'src/components/Header.tsx', false) === 'excluded', 'Unselected Header.tsx evaluates to excluded');
+  assert(presetIndex.getStatus(root, 'docs/readme.md', false) === 'excluded', 'Descendant of unselected docs/ evaluates to excluded');
+  assert(presetIndex.getStatus(root, 'package.json', false) === 'excluded', 'Unselected package.json evaluates to excluded');
 }
 
 console.log('\n' + '='.repeat(70));

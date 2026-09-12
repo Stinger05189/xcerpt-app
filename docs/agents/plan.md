@@ -16,33 +16,29 @@
 
 ---
 
-## Active Queue: Version 1.6.1 (Curation Integrity, Path Hashing & Metric Re-Orientation)
+## Active Queue: Version 1.6.1 (Export Alignment, Double-Slash Eradication & Curation Finalization)
 
-- [ ] **WP-01: Legacy Workspace Migration & Exclude/Include Inversion Integrity**
-  - _Details:_ Audit legacy workspace schema conversions. Fix edge cases where older paths appear locked in an excluded state and cannot be re-included. Ensure un-scoped legacy paths are properly promoted to canonical scoped keys (`${rootId}::${relativePath}`) during hydration without stale ghost rules surviving.
-- [ ] **WP-02: Path Referencing & Hashing Architecture Investigation**
-  - _Details:_ Investigate migrating from raw string path rules to deterministic path identifiers or path hashes (e.g., Murmur3/FNV-1a or hierarchical Trie node IDs). Eliminate cross-directory filter bleeding where modifying rules in one subfolder inadvertently influences identically named paths elsewhere.
-- [ ] **WP-03: Export Preview Tree Metric Re-Orientation & Directory Counts**
-  - _Details:_ Refactor `PayloadPreviewTree.tsx` and `ExportStage.tsx` metric cards to strictly display exported totals (true exported size, exported token counts, files included in export payload) rather than whole-workspace numbers. Add per-directory included file counts on folder rows (e.g., `src/components (4 / 12 files)`).
-- [ ] **WP-04: Throughput SLA Fine-Tuning**
-  - _Details:_ Shave the remaining 3.9ms off the 10,000-node benchmark in `run-diagnostics.mjs` (currently 28.91ms vs 25ms SLA) by streamlining path tokenization and early returning on empty exclude prefix sets.
+- [ ] **WP-01: Export Traversal Path Normalization & Double-Slash Eradication**
+  - _Details:_ In `exportEngine.ts`, fix `${cleanRelative}/${child.name}` double-slash concatenation in both `buildNode` and `renderMarkdownTree`. Ensure `cleanRelative` (which has a trailing slash) concatenates cleanly via `${cleanRelative}${child.name}`. Verify that `scopedKey` exactly matches `compressions` maps and `treeOnlyExact` sets.
+- [ ] **WP-02: Tree-Only & Skip Block Physical Staging Verification**
+  - _Details:_ Verify that `status === 'tree-only'` files are strictly omitted from `exportFiles` in `generateVirtualPayloadGraph` and `generateExportPayload`. Verify that `main.cjs` applies all Monaco skip markers synchronously into physical output files and single `context.md` documents.
+- [ ] **WP-03: Diagnostic Regression Suite for Path Slashes & Export Integrity**
+  - _Details:_ In `scripts/run-diagnostics.mjs`, add tests verifying that `buildNode` emits single-slash POSIX paths at all tree depths, preserves compressions keys, and correctly omits tree-only files from the final export chunk file list.
 
 ---
 
-## Completed in Version 1.6.0 (Zero-Hitch Foundation & Curation Architecture)
+## Completed in Version 1.6.1 (Session 023)
 
-- [x] **WP-01: Performance & Virtual In-Memory Export Engine**
-  - Eliminated eager 1500ms disk writes; implemented pure RAM Virtual Payload Graph and JIT physical staging (`VIRTUAL_READY` $\to$ `STAGING_LOCK` $\to$ `DISK_READY`).
-- [x] **WP-02: Scoped Rule Architecture & Read-Only File Locking Eradication**
-  - Root-qualified rule keys (`${rootId}::${relativePath}`); hardened `fs:readFile` with guaranteed `try/finally` closes and non-locking Chokidar options.
-- [x] **WP-03: Hierarchical Payload Preview Tree & True Size Metrics**
-  - Binary export toggle (`All Files` vs `Single Unified context.md`); virtualized preview tree with True-Size skip math and live tokens.
-- [x] **WP-04: Tab Lifecycle, Multi-Root Ephemeral Packaging & Ergonomics**
-  - Transient vs pinned editor tabs, horizontal wheel/drag overflow scrolling, context menu focus guards, skip indicator pencil badges (`✏️`).
-- [x] **WP-05: Descriptive Manifest Naming & In-Line Protocol Option**
-  - Canonical manifest naming (`Xcerpt_Manifest_<Roots>.md`) and prompt manifest protocol injection toggle.
-- [x] **WP-06: $O(\text{depth})$ Rule Indexing & Compaction**
-  - Resolved 285ms flame-chart bottleneck by hoisting status to `FlatNode`, using $O(\text{depth})$ ancestor Set checks, and compacting redundant child file rules.
+- [x] **WP-01: Legacy Workspace Migration & Exclude/Include Inversion Integrity**
+  - Decoupled inclusion punch-throughs from whitelist mode. Implemented `migrateLegacyRules` to promote un-scoped path rules to canonical keys across roots without ghost rules.
+- [x] **WP-02: Deterministic Path Key Architecture & Strict Invariant Enforcement**
+  - Enforced trailing slash invariant for directories and bottom-up (`lastIndexOf`) ancestor resolution in `ScopedRuleIndex`.
+- [x] **WP-03: Export Preview Tree Metric Re-Orientation & Directory Counts**
+  - Enriched `VirtualPayloadNode` with recursive `includedFilesCount` and `totalFilesCount`. Added density badges `(4 / 12 files)` in `PayloadPreviewTree.tsx`.
+- [x] **WP-04: Throughput SLA Fine-Tuning & Diagnostic Benchmark Suite**
+  - Optimized `getStatus` to run 10,000 nodes in under 20ms (< 25ms SLA).
+- [x] **WP-05: Preset Generation From Selection Overhaul**
+  - Implemented `generateExclusionsForSelection` to compute real, compacted directory exclusions for all unselected files.
 
 ---
 

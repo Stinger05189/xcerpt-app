@@ -49,6 +49,7 @@ export interface ExportPayload {
   metrics?: { excluded: number; treeOnly: number; size: number; tokens: number; trueSize?: number; };
   mergeToSingleFile?: boolean;
   embedProtocol?: boolean;
+  isWhitelistMode?: boolean;
 }
 
 export interface EphemeralPayload {
@@ -72,6 +73,8 @@ export interface VirtualPayloadNode {
   status: 'included' | 'excluded' | 'tree-only';
   skipCount: number;
   skippedLines: number;
+  includedFilesCount: number;
+  totalFilesCount: number;
   children?: VirtualPayloadNode[];
 }
 
@@ -155,6 +158,7 @@ export interface Preset {
   treeOnly: ScopedPathKey[] | string[];
   compressions: Record<ScopedPathKey | string, CompressionRuleIPC[]>;
   history: ExportHistory[];
+  isWhitelistMode?: boolean;
 }
 
 export interface WorkspacePayload {
@@ -166,6 +170,7 @@ export interface WorkspacePayload {
     mergeToSingleFile?: boolean;
     respectGitignore?: boolean;
     embedProtocol?: boolean;
+    isWhitelistMode?: boolean;
   };
   rules: {
     hardBlacklist: string[];

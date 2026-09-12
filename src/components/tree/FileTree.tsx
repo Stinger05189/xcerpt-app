@@ -27,6 +27,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const ephemeralDragPaths = useWorkspaceStore(s => s.ephemeralDragPaths);
   const rootPaths = useWorkspaceStore(s => s.rootPaths);
   const rawTrees = useWorkspaceStore(s => s.rawTrees);
+  const isWhitelistMode = useWorkspaceStore(s => s.isWhitelistMode);
 
   const [stats, setStats] = useState({ fileCount: 0, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 });
   const [hasSelection, setHasSelection] = useState(false);
@@ -243,7 +244,8 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     excludes,
     treeOnly,
     hideExcluded,
-    hideTreeOnly
+    hideTreeOnly,
+    isWhitelistMode
   );
 
   const flatNodesRef = useRef(flatNodes);
@@ -279,8 +281,9 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     for (let i = minIdx; i <= maxIdx; i++) {
       const flatNode = flatNodesRef.current[i];
       if (!flatNode) continue;
-      const pattern = flatNode.node.type === 'directory' ? `${flatNode.relativePath}/` : flatNode.relativePath;
-      const scoped = toScopedPathKey(rootPath, pattern);
+      const isDir = flatNode.node.type === 'directory';
+      const pattern = isDir ? `${flatNode.relativePath}/` : flatNode.relativePath;
+      const scoped = toScopedPathKey(rootPath, pattern, isDir);
 
       if (mode === 'add') newSelection.add(scoped);
       else newSelection.delete(scoped);
@@ -320,7 +323,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     e.preventDefault();
 
     const store = useWorkspaceStore.getState();
-    const scoped = toScopedPathKey(rootPath, pattern);
+    const scoped = toScopedPathKey(rootPath, pattern, isDirectory);
     const hasPattern = store.selectedFiles.has(scoped) || store.selectedFiles.has(pattern);
 
     hasDraggedRef.current = false;
@@ -367,8 +370,9 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         const allVisibleScoped = flatNodesRef.current.map(fn => {
-          const pat = fn.node.type === 'directory' ? `${fn.relativePath}/` : fn.relativePath;
-          return toScopedPathKey(rootPath, pat);
+          const isDir = fn.node.type === 'directory';
+          const pat = isDir ? `${fn.relativePath}/` : fn.relativePath;
+          return toScopedPathKey(rootPath, pat, isDir);
         });
         state.setSelectedFiles(new Set(allVisibleScoped));
         return;

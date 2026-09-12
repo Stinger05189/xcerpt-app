@@ -22,9 +22,9 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, st
 
   const isDirectory = node.type === 'directory';
   const pattern = isDirectory ? `${relativePath}/` : relativePath;
-  const scopedPattern = toScopedPathKey(rootPath, pattern);
+  const scopedPattern = toScopedPathKey(rootPath, pattern, isDirectory);
 
-  // Granular selectors: strictly boolean returns so unselected rows never re-render during drag painting
+  // Granular selectors: boolean returns so unselected rows never re-render during drag painting
   const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath));
   const isActiveFile = useWorkspaceStore(s => s.activeTab === rootPath && s.activeFile === relativePath && !isDirectory);
   const isSelected = useWorkspaceStore(s => s.selectedFiles.has(scopedPattern) || s.selectedFiles.has(pattern));

@@ -9,7 +9,15 @@ import type {
   EditorTab 
 } from '../types/ipc';
 import { useAppStore } from './appStore';
-import { toScopedPathKey, isScopedKey, compactRules, ScopedRuleIndex } from '../utils/filterEngine';
+import { 
+  toScopedPathKey, 
+  parseScopedPathKey, 
+  isScopedKey, 
+  compactRules, 
+  migrateLegacyRules,
+  generateExclusionsForSelection,
+  ScopedRuleIndex 
+} from '../utils/filterEngine';
 import { generateVirtualPayloadGraph, generateExportPayload } from '../utils/exportEngine';
 
 export interface CompressionRule {
@@ -60,6 +68,7 @@ interface WorkspaceState {
   includes: string[];
   excludes: string[];
   treeOnly: string[]; 
+  isWhitelistMode: boolean;
 
   activePresetId: string | null;
   presets: Preset[];
@@ -112,6 +121,7 @@ interface WorkspaceState {
   setMergeToSingleFile: (val: boolean) => void;
   setRespectGitignore: (val: boolean) => Promise<void>;
   setEmbedProtocol: (val: boolean) => void;
+  setIsWhitelistMode: (val: boolean) => void;
   setPaneWidth: (pane: 'sidebar' | 'tree', width: number) => void;
   incrementStat: (type: 'totalExports' | 'ephemeralExports', files?: string[]) => void;
   fetchGitStatus: () => Promise<void>;
@@ -197,6 +207,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   includes: [],
   excludes: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
   treeOnly: [],
+  isWhitelistMode: false,
 
   activePresetId: null,
   presets: [],
@@ -240,6 +251,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setWorkspaceName: (name: string) => set({ workspaceName: name.trim() || null, isStale: true }),
 
+  setIsWhitelistMode: (val: boolean) => {
+    set({ isWhitelistMode: val, stagingStatus: 'VIRTUAL_READY', isStale: true });
+    get().refreshVirtualGraph();
+  },
+
   refreshVirtualGraph: () => {
     const s = get();
     if (s.rootPaths.length === 0) {
@@ -256,7 +272,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       s.compressions,
       extOverrides,
       s.mergeToSingleFile,
-      s.embedProtocol
+      s.embedProtocol,
+      s.isWhitelistMode
     );
     set({ virtualGraph: graph, stagingStatus: 'VIRTUAL_READY' });
   },
@@ -264,7 +281,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   profileActiveWorkspace: () => {
     const s = get();
     const t0 = performance.now();
-    const index = new ScopedRuleIndex(s.includes, s.excludes, s.treeOnly);
+    const index = new ScopedRuleIndex(s.includes, s.excludes, s.treeOnly, s.isWhitelistMode);
     const tIndex = performance.now() - t0;
 
     let totalFiles = 0;
@@ -296,7 +313,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       s.compressions,
       extOverrides,
       s.mergeToSingleFile,
-      s.embedProtocol
+      s.embedProtocol,
+      s.isWhitelistMode
     );
     const tGraph = performance.now() - t2;
 
@@ -335,7 +353,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         s.maxFilesPerChunk,
         extOverrides,
         s.mergeToSingleFile,
-        s.embedProtocol
+        s.embedProtocol,
+        s.isWhitelistMode
       );
 
       const stagedPaths = await window.api.stageExport(payload);
@@ -356,6 +375,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   hydrateWorkspace: (payload) => set(() => {
     let activePresetId = payload.activePresetId;
     let presets = payload.presets || [];
+    const roots = payload.metadata?.rootPaths || [];
 
     if (!presets.length) {
       const defaultPreset: Preset = {
@@ -365,7 +385,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
         treeOnly: [],
         compressions: {},
-        history: []
+        history: [],
+        isWhitelistMode: false
       };
       presets = [defaultPreset];
       activePresetId = defaultPreset.id;
@@ -373,15 +394,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
 
+    const migratedPresets = presets.map(p => ({
+      ...p,
+      inclusions: compactRules(migrateLegacyRules(p.inclusions || [], roots)),
+      exclusions: compactRules(migrateLegacyRules(p.exclusions || [], roots)),
+      treeOnly: compactRules(migrateLegacyRules(p.treeOnly || [], roots)),
+      isWhitelistMode: p.isWhitelistMode ?? false
+    }));
+
     let snapshots = useAppStore.getState().workspaceSnapshots[payload.id];
     if (!snapshots) {
-      snapshots = presets.reduce((acc, p) => ({ ...acc, [p.id]: JSON.parse(JSON.stringify(p)) }), {});
+      snapshots = migratedPresets.reduce((acc, p) => ({ ...acc, [p.id]: JSON.parse(JSON.stringify(p)) }), {});
       useAppStore.getState().setWorkspaceSnapshots(payload.id, snapshots);
     }
 
     const editorTabs: EditorTab[] = payload.uiState.openEditorTabs || [];
     const activeEditorTabId = payload.uiState.activeEditorTabId || (editorTabs[0]?.id ?? null);
     const activeFile = editorTabs.find(t => t.id === activeEditorTabId)?.relativePath || null;
+
+    const activeMigrated = migratedPresets.find(p => p.id === activePreset.id) || migratedPresets[0];
 
     return {
       workspaceId: payload.id,
@@ -390,20 +421,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       stats: payload.metadata.stats || { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} },
       paneWidths: payload.uiState.paneWidths || { sidebar: 320, tree: 400 },
       gitStatus: {},
-      rootPaths: [],
+      rootPaths: roots,
       missingRoots: new Set<string>(),
       rawTrees: {},
       hardBlacklist: payload.rules.hardBlacklist,
       pendingBlacklist: [],
 
-      activePresetId: activePreset.id,
-      presets,
+      activePresetId: activeMigrated.id,
+      presets: migratedPresets,
       presetSnapshots: snapshots,
 
-      includes: compactRules(activePreset.inclusions),
-      excludes: compactRules(activePreset.exclusions),
-      treeOnly: compactRules(activePreset.treeOnly),
-      compressions: activePreset.compressions as Record<string, CompressionRule[]>,
+      includes: activeMigrated.inclusions,
+      excludes: activeMigrated.exclusions,
+      treeOnly: activeMigrated.treeOnly,
+      compressions: activeMigrated.compressions as Record<string, CompressionRule[]>,
+      isWhitelistMode: activeMigrated.isWhitelistMode ?? false,
 
       maxFilesPerChunk: payload.settings.maxFilesPerChunk,
       mergeToSingleFile: payload.settings.mergeToSingleFile ?? false,
@@ -480,7 +512,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setHideTreeOnly: (val: boolean) => set({ hideTreeOnly: val }),
 
   openEditorTab: (rootPath, relativePath, pin = false) => set(state => {
-    const tabId = toScopedPathKey(rootPath, relativePath);
+    const tabId = toScopedPathKey(rootPath, relativePath, false);
     const existing = state.editorTabs.find(t => t.id === tabId);
 
     if (existing) {
@@ -577,7 +609,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           inclusions: state.includes,
           exclusions: state.excludes,
           treeOnly: state.treeOnly,
-          compressions: state.compressions
+          compressions: state.compressions,
+          isWhitelistMode: state.isWhitelistMode
         };
       }
       return p;
@@ -593,7 +626,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
         treeOnly: [],
         compressions: {},
-        history: []
+        history: [],
+        isWhitelistMode: false
       };
 
       const packed = state.getPackedPresets();
@@ -609,6 +643,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         excludes: newPreset.exclusions,
         treeOnly: newPreset.treeOnly,
         compressions: newPreset.compressions,
+        isWhitelistMode: false,
         stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
@@ -627,7 +662,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       inclusions: [...s.includes],
       exclusions: [...s.excludes],
       treeOnly: [...s.treeOnly],
-      compressions: JSON.parse(JSON.stringify(s.compressions))
+      compressions: JSON.parse(JSON.stringify(s.compressions)),
+      isWhitelistMode: s.isWhitelistMode
     } : source;
 
     const name = newName || `${sourceCurrent.name} (Copy)`;
@@ -636,7 +672,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       ...JSON.parse(JSON.stringify(sourceCurrent)),
       id: newId,
       name,
-      history: []
+      history: [],
+      isWhitelistMode: sourceCurrent.isWhitelistMode ?? false
     };
 
     const packed = s.getPackedPresets();
@@ -652,6 +689,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       excludes: duplicated.exclusions,
       treeOnly: duplicated.treeOnly,
       compressions: duplicated.compressions,
+      isWhitelistMode: duplicated.isWhitelistMode ?? false,
       stagingStatus: 'VIRTUAL_READY',
       isStale: true
     });
@@ -664,15 +702,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (s.selectedFiles.size === 0) return;
 
     const newId = 'preset-' + Date.now() + Math.random().toString(36).substring(2, 7);
-    const newInclusions = compactRules(Array.from(s.selectedFiles));
+    const baselineBlacklist = ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'];
+    const computedExclusions = generateExclusionsForSelection(s.rootPaths, s.rawTrees, s.selectedFiles);
+    const allExclusions = compactRules([...baselineBlacklist, ...computedExclusions]);
+
     const newPreset: Preset = {
       id: newId,
       name,
-      inclusions: newInclusions,
-      exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+      inclusions: [],
+      exclusions: allExclusions,
       treeOnly: [],
       compressions: JSON.parse(JSON.stringify(s.compressions)),
-      history: []
+      history: [],
+      isWhitelistMode: false
     };
 
     const packed = s.getPackedPresets();
@@ -688,6 +730,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       excludes: newPreset.exclusions,
       treeOnly: newPreset.treeOnly,
       compressions: newPreset.compressions,
+      isWhitelistMode: false,
+      selectedFiles: new Set(),
       stagingStatus: 'VIRTUAL_READY',
       isStale: true
     });
@@ -709,6 +753,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         excludes: compactRules(target.exclusions),
         treeOnly: compactRules(target.treeOnly),
         compressions: target.compressions as Record<string, CompressionRule[]>,
+        isWhitelistMode: target.isWhitelistMode ?? false,
         stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
@@ -744,6 +789,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           excludes: fallback.exclusions,
           treeOnly: fallback.treeOnly,
           compressions: fallback.compressions as Record<string, CompressionRule[]>,
+          isWhitelistMode: fallback.isWhitelistMode ?? false,
           stagingStatus: 'VIRTUAL_READY',
           isStale: true
         };
@@ -770,6 +816,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         excludes: compactRules(snap.exclusions),
         treeOnly: compactRules(snap.treeOnly),
         compressions: snap.compressions as Record<string, CompressionRule[]>,
+        isWhitelistMode: snap.isWhitelistMode ?? false,
         stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
@@ -795,21 +842,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().respectGitignore
     );
 
-    const scopedRules = (rules || []).map(r => toScopedPathKey(rootPath, r));
-    const scopedTreeOnly = (treeOnly || []).map(t => toScopedPathKey(rootPath, t));
+    const scopedRules = (rules || []).map(r => toScopedPathKey(rootPath, r, r.endsWith('/')));
+    const scopedTreeOnly = (treeOnly || []).map(t => toScopedPathKey(rootPath, t, t.endsWith('/')));
 
     set((state) => {
       const newMissing = new Set(state.missingRoots);
       if (isMissing) newMissing.add(rootPath);
       else newMissing.delete(rootPath);
 
+      const allRoots = Array.from(new Set([...state.rootPaths, rootPath]));
+      const migratedIncludes = migrateLegacyRules(state.includes, allRoots);
+      const migratedExcludes = migrateLegacyRules(state.excludes, allRoots);
+      const migratedTreeOnly = migrateLegacyRules(state.treeOnly, allRoots);
+
       return {
-        rootPaths: Array.from(new Set([...state.rootPaths, rootPath])),
+        rootPaths: allRoots,
         rawTrees: { ...state.rawTrees, [rootPath]: node },
         missingRoots: newMissing,
         activeTab: state.activeTab || rootPath,
-        excludes: isMissing ? state.excludes : compactRules(Array.from(new Set([...state.excludes, ...scopedRules]))),
-        treeOnly: isMissing ? state.treeOnly : compactRules(Array.from(new Set([...state.treeOnly, ...scopedTreeOnly]))),
+        includes: compactRules(migratedIncludes),
+        excludes: isMissing ? compactRules(migratedExcludes) : compactRules(Array.from(new Set([...migratedExcludes, ...scopedRules]))),
+        treeOnly: isMissing ? compactRules(migratedTreeOnly) : compactRules(Array.from(new Set([...migratedTreeOnly, ...scopedTreeOnly]))),
         stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
@@ -847,8 +900,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().respectGitignore
     );
 
-    const scopedRules = (rules || []).map(r => toScopedPathKey(newPath, r));
-    const scopedTreeOnly = (treeOnly || []).map(t => toScopedPathKey(newPath, t));
+    const scopedRules = (rules || []).map(r => toScopedPathKey(newPath, r, r.endsWith('/')));
+    const scopedTreeOnly = (treeOnly || []).map(t => toScopedPathKey(newPath, t, t.endsWith('/')));
 
     set((state) => {
       const newRoots = state.rootPaths.map(p => p === oldPath ? newPath : p);
@@ -966,7 +1019,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     get().refreshVirtualGraph();
   },
   removeExcludeRule: (pattern: string) => {
-    set((state) => ({ excludes: state.excludes.filter((p) => p !== pattern), stagingStatus: 'VIRTUAL_READY', isStale: true }));
+    set((state) => {
+      const parsed = isScopedKey(pattern) ? parseScopedPathKey(pattern) : null;
+      const filtered = state.excludes.filter((p) => {
+        if (p === pattern) return false;
+        if (parsed) {
+          if (p === parsed.relativePath || p === `*::${parsed.relativePath}`) return false;
+          if (parsed.isDirectory && (p === parsed.relativePath.slice(0, -1) || p === `*::${parsed.relativePath.slice(0, -1)}`)) return false;
+        }
+        return true;
+      });
+      return { excludes: filtered, stagingStatus: 'VIRTUAL_READY', isStale: true };
+    });
     get().refreshVirtualGraph();
   },
   addTreeOnlyRule: (pattern: string) => {
@@ -974,7 +1038,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     get().refreshVirtualGraph();
   },
   removeTreeOnlyRule: (pattern: string) => {
-    set((state) => ({ treeOnly: state.treeOnly.filter((p) => p !== pattern), stagingStatus: 'VIRTUAL_READY', isStale: true }));
+    set((state) => {
+      const parsed = isScopedKey(pattern) ? parseScopedPathKey(pattern) : null;
+      const filtered = state.treeOnly.filter((p) => {
+        if (p === pattern) return false;
+        if (parsed) {
+          if (p === parsed.relativePath || p === `*::${parsed.relativePath}`) return false;
+          if (parsed.isDirectory && (p === parsed.relativePath.slice(0, -1) || p === `*::${parsed.relativePath.slice(0, -1)}`)) return false;
+        }
+        return true;
+      });
+      return { treeOnly: filtered, stagingStatus: 'VIRTUAL_READY', isStale: true };
+    });
     get().refreshVirtualGraph();
   },
 
@@ -988,19 +1063,51 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const newIncludes = new Set(state.includes);
 
       state.selectedFiles.forEach(rawPath => {
-        const scopedKey = isScopedKey(rawPath) ? rawPath : toScopedPathKey(rootId, rawPath);
+        const isDir = rawPath.endsWith('/') || (isScopedKey(rawPath) && parseScopedPathKey(rawPath).isDirectory);
+        const scopedKey = isScopedKey(rawPath) 
+          ? toScopedPathKey(parseScopedPathKey(rawPath).rootId, parseScopedPathKey(rawPath).relativePath, isDir)
+          : toScopedPathKey(rootId, rawPath, isDir);
+
+        const { rootId: itemRootId, relativePath } = parseScopedPathKey(scopedKey);
+        const bareRel = relativePath;
+        const globalKey = `*::${bareRel}`;
+        const altKey = isDir ? bareRel.slice(0, -1) : `${bareRel}/`;
+        const altScopedKey = isDir
+          ? toScopedPathKey(itemRootId, bareRel.slice(0, -1), false)
+          : toScopedPathKey(itemRootId, `${bareRel}/`, true);
+
+        const purgeWithChildren = (s: Set<string>) => {
+          s.delete(scopedKey);
+          s.delete(altScopedKey);
+          s.delete(bareRel);
+          s.delete(globalKey);
+          s.delete(altKey);
+          s.delete(`*::${altKey}`);
+
+          // If target is a directory, clean all existing descendant overrides beneath it
+          if (isDir) {
+            const dirPrefix = scopedKey;
+            const globalDirPrefix = `*::${bareRel}`;
+            for (const item of Array.from(s)) {
+              if (item.startsWith(dirPrefix) || item.startsWith(globalDirPrefix)) {
+                s.delete(item);
+              }
+            }
+          }
+        };
+
         if (ruleType === 'include') {
-          newExcludes.delete(scopedKey);
-          newTreeOnly.delete(scopedKey);
+          purgeWithChildren(newExcludes);
+          purgeWithChildren(newTreeOnly);
           newIncludes.add(scopedKey);
         } else if (ruleType === 'tree-only') {
-          newExcludes.delete(scopedKey);
+          purgeWithChildren(newExcludes);
+          purgeWithChildren(newIncludes);
           newTreeOnly.add(scopedKey);
-          newIncludes.delete(scopedKey);
         } else if (ruleType === 'exclude') {
-          newTreeOnly.delete(scopedKey);
+          purgeWithChildren(newTreeOnly);
+          purgeWithChildren(newIncludes);
           newExcludes.add(scopedKey);
-          newIncludes.delete(scopedKey);
         }
       });
 

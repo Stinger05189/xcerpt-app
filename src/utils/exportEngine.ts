@@ -49,9 +49,10 @@ export function generateVirtualPayloadGraph(
   compressions: Record<string, CompressionRule[]>,
   extensionOverrides: Record<string, string>,
   _mergeToSingleFile: boolean,
-  embedProtocol: boolean
+  embedProtocol: boolean,
+  isWhitelistMode: boolean = false
 ): VirtualPayloadGraph {
-  const ruleIndex = new ScopedRuleIndex(includes, excludes, treeOnly);
+  const ruleIndex = new ScopedRuleIndex(includes, excludes, treeOnly, isWhitelistMode);
   const manifestFileName = resolveManifestFileName(rootPaths);
   const virtualNodes: VirtualPayloadNode[] = [];
   const exportFiles: ExportFile[] = [];
@@ -93,8 +94,8 @@ export function generateVirtualPayloadGraph(
 
     const buildNode = (node: FileNode, relativePath: string): VirtualPayloadNode | null => {
       const isDir = node.type === 'directory';
-      const cleanRelative = normalizePath(relativePath);
-      const scopedKey: ScopedPathKey = toScopedPathKey(rootPath, cleanRelative);
+      const cleanRelative = normalizePath(relativePath, isDir);
+      const scopedKey: ScopedPathKey = toScopedPathKey(rootPath, cleanRelative, isDir);
       const status = ruleIndex.getStatus(rootPath, cleanRelative, isDir);
 
       const fileComps = compressions[scopedKey] || compressions[cleanRelative] || [];
@@ -116,6 +117,8 @@ export function generateVirtualPayloadGraph(
         const aggSize = childNodes.reduce((acc, c) => acc + c.size, 0);
         const aggTrueSize = childNodes.reduce((acc, c) => acc + c.trueSize, 0);
         const aggTokens = childNodes.reduce((acc, c) => acc + c.tokens, 0);
+        const aggIncludedFiles = childNodes.reduce((acc, c) => acc + c.includedFilesCount, 0);
+        const aggTotalFiles = childNodes.reduce((acc, c) => acc + c.totalFilesCount, 0);
 
         return {
           id: scopedKey,
@@ -130,11 +133,15 @@ export function generateVirtualPayloadGraph(
           status,
           skipCount: 0,
           skippedLines: 0,
+          includedFilesCount: aggIncludedFiles,
+          totalFilesCount: aggTotalFiles,
           children: childNodes
         };
       }
 
-      if (status === 'included') {
+      const isIncluded = status === 'included';
+
+      if (isIncluded) {
         let flatFileName = `${rootName}_${cleanRelative.replace(/[/\\]/g, '_')}`;
         for (const [orig, override] of Object.entries(extensionOverrides)) {
           if (flatFileName.endsWith(orig)) {
@@ -172,6 +179,8 @@ export function generateVirtualPayloadGraph(
         status,
         skipCount: fileComps.length,
         skippedLines,
+        includedFilesCount: isIncluded ? 1 : 0,
+        totalFilesCount: 1
       };
     };
 
@@ -227,7 +236,7 @@ export function generateVirtualPayloadGraph(
             }
           }
 
-          const fileComps = compressions[toScopedPathKey(rootPath, currRel)] || compressions[currRel] || [];
+          const fileComps = compressions[toScopedPathKey(rootPath, currRel, false)] || compressions[currRel] || [];
           const compStr = fileComps.length > 0 ? ` [${fileComps.length} skips]` : '';
           out += `${prefix}${connector}${collapsedName}${compStr}${exportNote}\n`;
         }
@@ -296,18 +305,19 @@ export function generateEphemeralPayload(
 
     const traverse = (node: FileNode, prefix: string, isLast: boolean, relativePath: string): string => {
       const isDir = node.type === 'directory';
-      const cleanRelative = normalizePath(relativePath);
-      const scopedKey = toScopedPathKey(currentRoot, cleanRelative);
-      const pattern = isDir ? (cleanRelative ? `${cleanRelative}/` : '') : cleanRelative;
-      const isSelected = selectedFiles.has(scopedKey) || selectedFiles.has(pattern) || selectedFiles.has(`${scopedKey}/`);
+      const cleanRelative = normalizePath(relativePath, isDir);
+      const scopedKey = toScopedPathKey(currentRoot, cleanRelative, isDir);
+      const isSelected = selectedFiles.has(scopedKey) || selectedFiles.has(cleanRelative);
 
       const hasDescendant = (n: FileNode, curRel: string): boolean => {
-        const cRel = normalizePath(curRel);
-        const sKey = toScopedPathKey(currentRoot, cRel);
-        const p = n.type === 'directory' ? (cRel ? `${cRel}/` : '') : cRel;
-        if (selectedFiles.has(sKey) || selectedFiles.has(p) || selectedFiles.has(`${sKey}/`)) return true;
+        const cRel = normalizePath(curRel, n.type === 'directory');
+        const sKey = toScopedPathKey(currentRoot, cRel, n.type === 'directory');
+        if (selectedFiles.has(sKey) || selectedFiles.has(cRel)) return true;
         if (n.children) {
-          return n.children.some(c => hasDescendant(c, cRel ? `${cRel}/${c.name}` : c.name));
+          for (const c of n.children) {
+            const nextRel = curRel ? `${curRel}/${c.name}` : c.name;
+            if (hasDescendant(c, nextRel)) return true;
+          }
         }
         return false;
       };
@@ -387,7 +397,8 @@ export function generateExportPayload(
   maxFilesPerChunk: number,
   extensionOverrides: Record<string, string>,
   mergeToSingleFile: boolean,
-  embedProtocol: boolean = false
+  embedProtocol: boolean = false,
+  isWhitelistMode: boolean = false
 ): ExportPayload {
   const graph = generateVirtualPayloadGraph(
     rootPaths,
@@ -398,7 +409,8 @@ export function generateExportPayload(
     compressions,
     extensionOverrides,
     mergeToSingleFile,
-    embedProtocol
+    embedProtocol,
+    isWhitelistMode
   );
 
   const allFiles = graph.chunks.flatMap(c => c.files);
@@ -424,6 +436,7 @@ export function generateExportPayload(
       tokens: graph.totalTokens
     },
     mergeToSingleFile,
-    embedProtocol
+    embedProtocol,
+    isWhitelistMode
   };
 }

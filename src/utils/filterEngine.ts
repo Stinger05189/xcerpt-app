@@ -1,26 +1,45 @@
 // src/utils/filterEngine.ts
 import ignore from 'ignore';
-import type { ScopedPathKey } from '../types/ipc';
+import type { ScopedPathKey, FileNode } from '../types/ipc';
 
 export type FileStatus = 'included' | 'excluded' | 'tree-only';
 
 export function canonicalizePath(p: string): string {
   if (!p) return '';
-  let normalized = p.replace(/\\/g, '/');
-  if (/^[a-zA-Z]:/.test(normalized)) {
-    normalized = normalized[0].toUpperCase() + normalized.slice(1);
+  let normalized = p.includes('\\') ? p.replace(/\\/g, '/') : p;
+  const code0 = normalized.charCodeAt(0);
+  if (code0 >= 97 && code0 <= 122 && normalized.charCodeAt(1) === 58 /* ':' */) {
+    normalized = String.fromCharCode(code0 - 32) + normalized.slice(1);
   }
-  return normalized.replace(/\/+$/, '');
+  const len = normalized.length;
+  if (len > 0 && normalized.charCodeAt(len - 1) === 47 /* '/' */) {
+    normalized = normalized.replace(/\/+$/, '');
+  }
+  return normalized;
 }
 
-export function normalizePath(pathStr: string): string {
+export function normalizePath(pathStr: string, isDirectory?: boolean): string {
   if (!pathStr) return '';
-  return pathStr.replace(/\\/g, '/').replace(/^\/+/, '');
+  let clean = pathStr.includes('\\') ? pathStr.replace(/\\/g, '/') : pathStr;
+  if (clean.charCodeAt(0) === 47 /* '/' */) {
+    clean = clean.replace(/^\/+/, '');
+  }
+  const len = clean.length;
+  if (len === 0) return '';
+
+  const endsWithSlash = clean.charCodeAt(len - 1) === 47;
+  if (isDirectory === true) {
+    return endsWithSlash ? clean : clean + '/';
+  }
+  if (isDirectory === false) {
+    return endsWithSlash ? clean.slice(0, -1) : clean;
+  }
+  return clean;
 }
 
-export function toScopedPathKey(rootId: string, relativePath: string): ScopedPathKey {
+export function toScopedPathKey(rootId: string, relativePath: string, isDirectory?: boolean): ScopedPathKey {
   const cleanRoot = canonicalizePath(rootId);
-  const cleanRelative = normalizePath(relativePath);
+  const cleanRelative = normalizePath(relativePath, isDirectory);
   return `${cleanRoot}::${cleanRelative}`;
 }
 
@@ -28,17 +47,49 @@ export function isScopedKey(key: string): key is ScopedPathKey {
   return typeof key === 'string' && key.includes('::');
 }
 
-export function parseScopedPathKey(key: string): { rootId: string; relativePath: string } {
+export function parseScopedPathKey(key: string): { rootId: string; relativePath: string; isDirectory: boolean } {
   const idx = key.indexOf('::');
-  if (idx === -1) return { rootId: '', relativePath: normalizePath(key) };
+  if (idx === -1) {
+    const clean = normalizePath(key);
+    return { rootId: '', relativePath: clean, isDirectory: clean.endsWith('/') };
+  }
+  const rootId = canonicalizePath(key.slice(0, idx));
+  const relativePath = normalizePath(key.slice(idx + 2));
   return {
-    rootId: canonicalizePath(key.slice(0, idx)),
-    relativePath: normalizePath(key.slice(idx + 2)),
+    rootId,
+    relativePath,
+    isDirectory: relativePath.endsWith('/')
   };
 }
 
 export function hasGlobWildcards(str: string): boolean {
   return /[*?[\]{}]/.test(str);
+}
+
+export function migrateLegacyRules(rules: string[], rootPaths: string[]): string[] {
+  if (!rules || rules.length === 0) return [];
+  const normalizedRoots = rootPaths.map(r => canonicalizePath(r)).filter(Boolean);
+  const result = new Set<string>();
+
+  for (const rule of rules) {
+    if (!rule) continue;
+    if (isScopedKey(rule)) {
+      const { rootId, relativePath, isDirectory } = parseScopedPathKey(rule);
+      result.add(toScopedPathKey(rootId, relativePath, isDirectory));
+    } else {
+      const isDir = rule.endsWith('/') || !rule.includes('.');
+      const cleanRel = normalizePath(rule, isDir);
+      if (normalizedRoots.length > 0) {
+        for (const root of normalizedRoots) {
+          result.add(toScopedPathKey(root, cleanRel, isDir));
+        }
+      } else {
+        result.add(`*::${cleanRel}`);
+      }
+    }
+  }
+
+  return Array.from(result);
 }
 
 export function compactRules(rules: string[]): string[] {
@@ -94,6 +145,121 @@ export function compactRules(rules: string[]): string[] {
   return compacted;
 }
 
+export function isNodeSelected(
+  root: string,
+  relativePath: string,
+  isDir: boolean,
+  selectedSet: Set<string>
+): boolean {
+  const cleanRel = normalizePath(relativePath, isDir);
+  const scopedKey = toScopedPathKey(root, cleanRel, isDir);
+  const globalKey = `*::${cleanRel}`;
+
+  if (selectedSet.has(scopedKey) || selectedSet.has(globalKey) || selectedSet.has(cleanRel)) {
+    return true;
+  }
+
+  const altRel = isDir ? cleanRel.slice(0, -1) : `${cleanRel}/`;
+  if (
+    selectedSet.has(toScopedPathKey(root, altRel, !isDir)) ||
+    selectedSet.has(`*::${altRel}`) ||
+    selectedSet.has(altRel)
+  ) {
+    return true;
+  }
+
+  // Check if an ancestor folder was selected
+  let slashIdx = cleanRel.lastIndexOf('/', isDir ? cleanRel.length - 2 : cleanRel.length - 1);
+  while (slashIdx !== -1) {
+    const ancestor = cleanRel.slice(0, slashIdx + 1);
+    if (
+      selectedSet.has(toScopedPathKey(root, ancestor, true)) ||
+      selectedSet.has(`*::${ancestor}`) ||
+      selectedSet.has(ancestor)
+    ) {
+      return true;
+    }
+    slashIdx = cleanRel.lastIndexOf('/', slashIdx - 1);
+  }
+
+  return false;
+}
+
+export function hasSelectedDescendant(
+  root: string,
+  node: FileNode,
+  currentRel: string,
+  selectedSet: Set<string>
+): boolean {
+  const isDir = node.type === 'directory';
+  const cleanRel = normalizePath(currentRel, isDir);
+
+  if (isNodeSelected(root, cleanRel, isDir, selectedSet)) {
+    return true;
+  }
+
+  if (isDir && node.children) {
+    for (const child of node.children) {
+      const childRel = cleanRel ? `${cleanRel}${child.name}` : child.name;
+      if (hasSelectedDescendant(root, child, childRel, selectedSet)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+export function generateExclusionsForSelection(
+  rootPaths: string[],
+  rawTrees: Record<string, FileNode>,
+  selectedSet: Set<string>
+): string[] {
+  const exclusions: string[] = [];
+
+  for (const root of rootPaths) {
+    const tree = rawTrees[root];
+    if (!tree || !tree.children) continue;
+
+    const walk = (node: FileNode, currentRel: string) => {
+      const isDir = node.type === 'directory';
+      const cleanRel = normalizePath(currentRel, isDir);
+      if (cleanRel === '') {
+        if (node.children) {
+          for (const child of node.children) {
+            walk(child, child.name);
+          }
+        }
+        return;
+      }
+
+      if (isDir) {
+        if (!hasSelectedDescendant(root, node, cleanRel, selectedSet)) {
+          // Entire folder contains zero selections: exclude as a single directory rule
+          exclusions.push(toScopedPathKey(root, cleanRel, true));
+          return;
+        }
+
+        if (node.children) {
+          for (const child of node.children) {
+            const childRel = `${cleanRel}${child.name}`;
+            walk(child, childRel);
+          }
+        }
+      } else {
+        if (!isNodeSelected(root, cleanRel, false, selectedSet)) {
+          // File is not selected: exclude it
+          exclusions.push(toScopedPathKey(root, cleanRel, false));
+        }
+      }
+    };
+
+    walk(tree, '');
+  }
+
+  return compactRules(exclusions);
+}
+
 export class ScopedRuleIndex {
   private excludeExact = new Set<string>();
   private treeOnlyExact = new Set<string>();
@@ -101,18 +267,22 @@ export class ScopedRuleIndex {
 
   private excludeDirPrefixSet = new Set<string>();
   private treeOnlyDirPrefixSet = new Set<string>();
+  private includeDirPrefixSet = new Set<string>();
 
   private excludeIgnores = new Map<string, ReturnType<typeof ignore>>();
   private treeOnlyIgnores = new Map<string, ReturnType<typeof ignore>>();
   private includeIgnores = new Map<string, ReturnType<typeof ignore>>();
 
+  private isWhitelistMode: boolean;
   private rootHasInclusions = new Map<string, boolean>();
 
   constructor(
     includes: string[] = [],
     excludes: string[] = [],
-    treeOnly: string[] = []
+    treeOnly: string[] = [],
+    isWhitelistMode: boolean = false
   ) {
+    this.isWhitelistMode = isWhitelistMode;
     this.build(includes, excludes, treeOnly);
   }
 
@@ -124,40 +294,42 @@ export class ScopedRuleIndex {
     const processRule = (
       rule: string,
       exactSet: Set<string>,
-      dirPrefixSet: Set<string> | null,
-      rulesByRoot: Map<string, string[]> | null
+      dirPrefixSet: Set<string>,
+      rulesByRoot: Map<string, string[]>
     ) => {
       if (!rule) return;
       if (isScopedKey(rule)) {
-        const { rootId, relativePath } = parseScopedPathKey(rule);
+        const { rootId, relativePath, isDirectory } = parseScopedPathKey(rule);
         const canonicalRoot = canonicalizePath(rootId);
         const canonicalKey = `${canonicalRoot}::${relativePath}`;
         exactSet.add(canonicalKey);
 
-        const isDir = relativePath.endsWith('/');
-        if (isDir) {
+        if (isDirectory) {
           exactSet.add(canonicalKey.slice(0, -1));
-          if (dirPrefixSet) {
-            dirPrefixSet.add(canonicalKey);
-          }
+          dirPrefixSet.add(canonicalKey);
         } else {
           exactSet.add(`${canonicalKey}/`);
         }
 
-        if (hasGlobWildcards(relativePath) && rulesByRoot) {
+        if (hasGlobWildcards(relativePath)) {
           const list = rulesByRoot.get(canonicalRoot) || [];
           list.push(relativePath);
           rulesByRoot.set(canonicalRoot, list);
         }
       } else {
-        const cleanRel = normalizePath(rule);
-        const isDir = rule.endsWith('/') || cleanRel.endsWith('/');
-        if (dirPrefixSet && isDir) {
-          const prefix = cleanRel.endsWith('/') ? cleanRel : `${cleanRel}/`;
-          dirPrefixSet.add(`*::${prefix}`);
+        const isDir = rule.endsWith('/');
+        const cleanRel = normalizePath(rule, isDir);
+        const globalKey = `*::${cleanRel}`;
+        exactSet.add(globalKey);
+
+        if (isDir) {
+          exactSet.add(globalKey.slice(0, -1));
+          dirPrefixSet.add(globalKey);
+        } else {
+          exactSet.add(`${globalKey}/`);
         }
 
-        if (hasGlobWildcards(cleanRel) && rulesByRoot) {
+        if (hasGlobWildcards(cleanRel)) {
           const list = rulesByRoot.get('*') || [];
           list.push(cleanRel);
           rulesByRoot.set('*', list);
@@ -168,7 +340,7 @@ export class ScopedRuleIndex {
     excludes.forEach(e => processRule(e, this.excludeExact, this.excludeDirPrefixSet, rootExcludesMap));
     treeOnly.forEach(t => processRule(t, this.treeOnlyExact, this.treeOnlyDirPrefixSet, rootTreeOnlyMap));
     includes.forEach(i => {
-      processRule(i, this.includeExact, null, rootIncludesMap);
+      processRule(i, this.includeExact, this.includeDirPrefixSet, rootIncludesMap);
       if (isScopedKey(i)) {
         this.rootHasInclusions.set(canonicalizePath(parseScopedPathKey(i).rootId), true);
       } else {
@@ -202,9 +374,7 @@ export class ScopedRuleIndex {
 
     if (globalExcludes.length > 0) this.excludeIgnores.set('*', ignore().add(globalExcludes));
     if (globalTreeOnly.length > 0) this.treeOnlyIgnores.set('*', ignore().add(globalTreeOnly));
-    if (globalIncludes.length > 0) {
-      this.includeIgnores.set('*', ignore().add(globalIncludes));
-    }
+    if (globalIncludes.length > 0) this.includeIgnores.set('*', ignore().add(globalIncludes));
   }
 
   public getStatus(
@@ -212,69 +382,68 @@ export class ScopedRuleIndex {
     relativePath: string,
     isDirectory: boolean
   ): FileStatus {
-    const cleanRel = normalizePath(relativePath);
+    const cleanRel = isDirectory
+      ? normalizePath(relativePath, true)
+      : normalizePath(relativePath, false);
+
     if (cleanRel === '') return 'included';
 
     const canonicalRoot = canonicalizePath(rootId);
-    const scopedKey = `${canonicalRoot}::${cleanRel}`;
-    const pathToCheck = isDirectory && !cleanRel.endsWith('/') ? `${cleanRel}/` : cleanRel;
+    const rootPrefix = canonicalRoot + '::';
+    const scopedKey = rootPrefix + cleanRel;
+    const globalKey = '*::' + cleanRel;
 
-    // 1. Explicit child inclusion takes priority
-    if (this.includeExact.has(scopedKey)) {
+    // 1. Exact match on target path takes ABSOLUTE HIGHEST priority (Overrides all ancestors)
+    if (this.includeExact.has(scopedKey) || this.includeExact.has(globalKey)) {
       return 'included';
     }
-
-    // 2. Direct exact match in excludes
-    if (this.excludeExact.has(scopedKey) || this.excludeExact.has(`${scopedKey}/`)) {
-      return 'excluded';
-    }
-
-    // 3. Fast O(depth) ancestor prefix lookup via Set
-    let slashIdx = cleanRel.indexOf('/');
-    while (slashIdx !== -1) {
-      const ancestor = cleanRel.slice(0, slashIdx + 1);
-      const ancestorKey = `${canonicalRoot}::${ancestor}`;
-      if (this.excludeDirPrefixSet.has(ancestorKey) || this.excludeDirPrefixSet.has(`*::${ancestor}`)) {
-        return 'excluded';
-      }
-      slashIdx = cleanRel.indexOf('/', slashIdx + 1);
-    }
-
-    // 4. Glob/Regex pattern fallback (only evaluated if wildcards exist)
-    const igExclude = this.excludeIgnores.get(canonicalRoot) || this.excludeIgnores.get('*');
-    if (igExclude && igExclude.ignores(pathToCheck)) {
-      return 'excluded';
-    }
-
-    // 5. Tree-only checks
-    if (this.treeOnlyExact.has(scopedKey) || this.treeOnlyExact.has(`${scopedKey}/`)) {
+    if (this.treeOnlyExact.has(scopedKey) || this.treeOnlyExact.has(globalKey)) {
       return 'tree-only';
     }
-    slashIdx = cleanRel.indexOf('/');
-    while (slashIdx !== -1) {
-      const ancestor = cleanRel.slice(0, slashIdx + 1);
-      const ancestorKey = `${canonicalRoot}::${ancestor}`;
-      if (this.treeOnlyDirPrefixSet.has(ancestorKey) || this.treeOnlyDirPrefixSet.has(`*::${ancestor}`)) {
-        return 'tree-only';
-      }
-      slashIdx = cleanRel.indexOf('/', slashIdx + 1);
+    if (this.excludeExact.has(scopedKey) || this.excludeExact.has(globalKey)) {
+      return 'excluded';
     }
+
+    // 2. Hierarchical Ancestor Lookups (Bottom-up: Deepest/closest ancestor wins)
+    if (this.excludeDirPrefixSet.size > 0 || this.treeOnlyDirPrefixSet.size > 0 || this.includeDirPrefixSet.size > 0) {
+      let slashIdx = cleanRel.lastIndexOf('/', isDirectory ? cleanRel.length - 2 : cleanRel.length - 1);
+      while (slashIdx !== -1) {
+        const ancestor = cleanRel.slice(0, slashIdx + 1);
+        const scopedAncestor = rootPrefix + ancestor;
+        const globalAncestor = '*::' + ancestor;
+
+        if (this.includeDirPrefixSet.has(scopedAncestor) || this.includeDirPrefixSet.has(globalAncestor)) {
+          return 'included';
+        }
+        if (this.treeOnlyDirPrefixSet.has(scopedAncestor) || this.treeOnlyDirPrefixSet.has(globalAncestor)) {
+          return 'tree-only';
+        }
+        if (this.excludeDirPrefixSet.has(scopedAncestor) || this.excludeDirPrefixSet.has(globalAncestor)) {
+          return 'excluded';
+        }
+
+        slashIdx = cleanRel.lastIndexOf('/', slashIdx - 1);
+      }
+    }
+
+    // 3. Glob/Regex pattern fallback
     const igTree = this.treeOnlyIgnores.get(canonicalRoot) || this.treeOnlyIgnores.get('*');
-    if (igTree && igTree.ignores(pathToCheck)) {
+    if (igTree && igTree.ignores(cleanRel)) {
       return 'tree-only';
     }
+    const igExclude = this.excludeIgnores.get(canonicalRoot) || this.excludeIgnores.get('*');
+    if (igExclude && igExclude.ignores(cleanRel)) {
+      return 'excluded';
+    }
 
-    // 6. Whitelist Inclusions Check
-    const hasInc = this.rootHasInclusions.get(canonicalRoot) || this.rootHasInclusions.get('*');
-    if (hasInc) {
+    // 4. Whitelist Mode Check (Strict Curation Presets only)
+    if (this.isWhitelistMode) {
       if (isDirectory) return 'included';
       const igInc = this.includeIgnores.get(canonicalRoot) || this.includeIgnores.get('*');
-      if (igInc && !igInc.ignores(pathToCheck)) {
-        return 'excluded';
+      if (igInc && igInc.ignores(cleanRel)) {
+        return 'included';
       }
-      if (!igInc && !this.includeExact.has(scopedKey)) {
-        return 'excluded';
-      }
+      return 'excluded';
     }
 
     return 'included';
@@ -287,9 +456,10 @@ export function getScopedFileStatus(
   isDirectory: boolean,
   includes: string[],
   excludes: string[],
-  treeOnly: string[]
+  treeOnly: string[],
+  isWhitelistMode: boolean = false
 ): FileStatus {
-  const index = new ScopedRuleIndex(includes, excludes, treeOnly);
+  const index = new ScopedRuleIndex(includes, excludes, treeOnly, isWhitelistMode);
   return index.getStatus(rootId, relativePath, isDirectory);
 }
 
@@ -298,7 +468,8 @@ export function getFileStatus(
   isDirectory: boolean,
   includes: string[],
   excludes: string[],
-  treeOnly: string[]
+  treeOnly: string[],
+  isWhitelistMode: boolean = false
 ): FileStatus {
-  return getScopedFileStatus('*', relativePath, isDirectory, includes, excludes, treeOnly);
+  return getScopedFileStatus('*', relativePath, isDirectory, includes, excludes, treeOnly, isWhitelistMode);
 }

@@ -177,6 +177,12 @@ export function PayloadPreviewTree({ rootNodes }: { rootNodes: VirtualPayloadNod
                     {node.name}
                   </span>
 
+                  {node.isDirectory && node.totalFilesCount > 0 && (
+                    <span className="text-[10px] text-text-muted font-normal ml-1 opacity-75 shrink-0 whitespace-nowrap">
+                      ({node.includedFilesCount} / {node.totalFilesCount} files)
+                    </span>
+                  )}
+
                   {node.skipCount > 0 && (
                     <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.2 rounded shrink-0">
                       <Edit3 size={10} />
