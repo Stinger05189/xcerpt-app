@@ -38,6 +38,14 @@ contextBridge.exposeInMainWorld('api', {
   renameWorkspace: (id, newName) => ipcRenderer.invoke('workspace:rename', id, newName),
   deleteWorkspace: (id) => ipcRenderer.invoke('workspace:delete', id),
 
+  // Dev Session Studio
+  saveDevSession: (workspaceId, session) => ipcRenderer.invoke('session:save', workspaceId, session),
+  loadDevSession: (workspaceId, sessionId) => ipcRenderer.invoke('session:load', workspaceId, sessionId),
+  listDevSessions: (workspaceId) => ipcRenderer.invoke('session:list', workspaceId),
+  deleteDevSession: (workspaceId, sessionId) => ipcRenderer.invoke('session:delete', workspaceId, sessionId),
+  applyFileAction: (absolutePath, content, actionType) => ipcRenderer.invoke('session:applyAction', absolutePath, content, actionType),
+  revertCheckpointFiles: (snapshotFiles) => ipcRenderer.invoke('session:revertCheckpoint', snapshotFiles),
+
   // Auto-Updater
   onUpdateStatus: (callback) => {
     const handler = (_, status) => callback(status);

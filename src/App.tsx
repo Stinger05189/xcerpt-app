@@ -7,12 +7,16 @@ import { Bootstrapper } from './components/layout/Bootstrapper';
 import { WorkspaceBrowser } from './components/layout/WorkspaceBrowser';
 import { SettingsModal } from './components/layout/SettingsModal';
 import { ToastContainer } from './components/layout/ToastContainer';
+import { DevStudioModal } from './features/session/components/DevStudioModal';
 import { useAppStore } from './store/appStore';
+import { useSessionStore } from './features/session/store/sessionStore';
 import { useHistoryStore } from './store/historyStore';
 
 function App() {
   const isBrowserOpen = useAppStore(s => s.isBrowserOpen);
   const isSettingsOpen = useAppStore(s => s.isSettingsOpen);
+  const isStudioOpen = useSessionStore(s => s.isStudioOpen);
+  const isIngestionModalOpen = useSessionStore(s => s.isIngestionModalOpen);
   const config = useAppStore(s => s.config);
 
   // Dynamic Theme Engine: Inject CSS Variables to :root
@@ -57,9 +61,8 @@ function App() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
-return (
+  return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-base relative border border-border-subtle text-text-primary">
-      
       {/* Global Dynamic Ambient Background */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] rounded-full bg-accent/20 blur-[120px] animate-pulse" />
@@ -85,13 +88,13 @@ return (
       <div className="relative z-10 flex flex-col h-full w-full">
         <TitleBar />
         <Bootstrapper>
-          {/* Dim the main UI when modals are open to preserve TitleBar drag integrity */}
-          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
+          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen || isStudioOpen || isIngestionModalOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
             <Sidebar />
             <MainStage />
           </div>
           {isBrowserOpen && <WorkspaceBrowser />}
           {isSettingsOpen && <SettingsModal />}
+          <DevStudioModal />
           <ToastContainer />
         </Bootstrapper>
       </div>

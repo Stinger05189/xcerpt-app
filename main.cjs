@@ -18,6 +18,7 @@ const elMonitor = monitorEventLoopDelay({ resolution: 10 });
 elMonitor.enable();
 
 const SESSIONS_DIR = path.join(app.getPath('userData'), 'XcerptSessions');
+const DEV_SESSIONS_DIR = path.join(SESSIONS_DIR, 'dev_sessions');
 let fileWatcher = null;
 let watchedPaths = new Set();
 let currentBlacklist = [];
@@ -280,6 +281,93 @@ async function processEphemeralExport(payload) {
 
   return createdPaths;
 }
+
+// --- Dev Session Persistence Handlers ---
+ipcMain.handle('session:save', async (_, workspaceId, session) => {
+  try {
+    const wsDir = path.join(DEV_SESSIONS_DIR, workspaceId);
+    await fs.mkdir(wsDir, { recursive: true });
+    const filePath = path.join(wsDir, `${session.id}.json`);
+    await fs.writeFile(filePath, JSON.stringify(session, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Failed to save dev session:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('session:load', async (_, workspaceId, sessionId) => {
+  try {
+    const filePath = path.join(DEV_SESSIONS_DIR, workspaceId, `${sessionId}.json`);
+    const data = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    return null;
+  }
+});
+
+ipcMain.handle('session:list', async (_, workspaceId) => {
+  try {
+    const wsDir = path.join(DEV_SESSIONS_DIR, workspaceId);
+    await fs.mkdir(wsDir, { recursive: true });
+    const files = await fs.readdir(wsDir);
+    const results = [];
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const data = JSON.parse(await fs.readFile(path.join(wsDir, file), 'utf-8'));
+        results.push({
+          id: data.id,
+          name: data.name,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+          summary: data.summary
+        });
+      } catch (e) {}
+    }
+    return results.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  } catch (error) {
+    return [];
+  }
+});
+
+ipcMain.handle('session:delete', async (_, workspaceId, sessionId) => {
+  try {
+    const filePath = path.join(DEV_SESSIONS_DIR, workspaceId, `${sessionId}.json`);
+    await fs.unlink(filePath);
+  } catch (error) {
+    console.error('Failed to delete dev session:', error);
+  }
+});
+
+ipcMain.handle('session:applyAction', async (_, absolutePath, content, actionType) => {
+  try {
+    if (actionType === 'DELETED') {
+      await fs.unlink(absolutePath).catch(() => {});
+      return;
+    }
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, content || '', 'utf-8');
+  } catch (error) {
+    console.error(`Failed to apply action (${actionType}) on ${absolutePath}:`, error);
+    throw error;
+  }
+});
+
+ipcMain.handle('session:revertCheckpoint', async (_, snapshotFiles) => {
+  try {
+    for (const [filePath, content] of Object.entries(snapshotFiles)) {
+      if (content === null || content === undefined) {
+        await fs.unlink(filePath).catch(() => {});
+      } else {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, content, 'utf-8');
+      }
+    }
+  } catch (error) {
+    console.error('Failed to revert checkpoint files:', error);
+    throw error;
+  }
+});
 
 // --- Watcher Lifecycle Management ---
 async function setupWatcher() {

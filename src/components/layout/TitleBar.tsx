@@ -1,14 +1,16 @@
 // src/components/layout/TitleBar.tsx
 import { useEffect, useState } from 'react';
-import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee, Undo2, Redo2 } from 'lucide-react';
+import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee, Undo2, Redo2, GitPullRequest } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useHistoryStore } from '../../store/historyStore';
+import { useSessionStore } from '../../features/session/store/sessionStore';
 
 export function TitleBar() {
   const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen, updateProgress, appVersion, reorderWorkspaceTabs } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
   const { undoStack, redoStack, undo, redo } = useHistoryStore();
+  const setIngestionModalOpen = useSessionStore(s => s.setIngestionModalOpen);
 
   const [updateStatus, setUpdateStatus] = useState<'none' | 'update-available' | 'update-downloaded'>('none');
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
@@ -19,8 +21,6 @@ export function TitleBar() {
       setUpdateStatus(status);
     });
     
-    // We bind the progress listener in the Store initialization (loadConfig/Bootstrapper)
-    // but the actual progress bar UI renders here.
     const cleanupProg = window.api.onUpdateProgress((percent) => {
       useAppStore.getState().setUpdateProgress(percent);
     });
@@ -110,6 +110,16 @@ export function TitleBar() {
         
         <div className="w-px h-6 bg-border-subtle mx-1 mb-1.5 pointer-events-none" />
         
+        {/* Dev Session Studio Ingestion Button */}
+        <div 
+          className="flex items-center justify-center h-full px-2.5 mb-1 rounded-md cursor-pointer transition-colors text-text-muted hover:text-accent hover:bg-bg-hover"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onClick={() => setIngestionModalOpen(true)}
+          title="Dev Session Studio (Import LLM Response)"
+        >
+          <GitPullRequest size={16} />
+        </div>
+
         {/* Global Settings Toggle */}
         <div 
           className={`flex items-center justify-center h-full px-2.5 mb-1 rounded-md cursor-pointer transition-colors ${isSettingsOpen ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
@@ -180,8 +190,6 @@ export function TitleBar() {
     
       {/* OS Window Controls & Updater */}
       <div className="flex h-full pb-1 items-center relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        
-        {/* Update Progress Indicator */}
         {updateProgress !== null && updateProgress < 100 && updateStatus !== 'update-downloaded' && (
           <div className="absolute -bottom-px left-0 right-0 h-0.5 bg-bg-hover overflow-hidden">
             <div 

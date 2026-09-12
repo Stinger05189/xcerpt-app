@@ -220,6 +220,14 @@ export interface ElectronAPI {
   renameWorkspace: (id: string, newName: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
 
+  // Dev Session Studio
+  saveDevSession: (workspaceId: string, session: import('../features/session/types/session').DevSession) => Promise<void>;
+  loadDevSession: (workspaceId: string, sessionId: string) => Promise<import('../features/session/types/session').DevSession | null>;
+  listDevSessions: (workspaceId: string) => Promise<Array<{ id: string; name: string; createdAt: string; updatedAt: string; summary: import('../features/session/types/session').DevSessionSummary }>>;
+  deleteDevSession: (workspaceId: string, sessionId: string) => Promise<void>;
+  applyFileAction: (absolutePath: string, content: string | null, actionType: 'NEW' | 'MODIFIED' | 'DELETED' | 'PARTIAL_DIFF') => Promise<void>;
+  revertCheckpointFiles: (snapshotFiles: Record<string, string | null>) => Promise<void>;
+
   onUpdateStatus: (callback: (status: 'update-available' | 'update-downloaded') => void) => () => void;
   onUpdateProgress: (callback: (percent: number) => void) => () => void;
   checkForUpdates: () => Promise<void>;
