@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { X, EyeOff, LayoutTemplate, Plus, FolderSearch, ShieldBan, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
+import { parseScopedPathKey } from '../../utils/filterEngine';
 
 interface ContextMenuProps {
   x: number;
@@ -12,7 +13,6 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
-// Custom Hold-to-Confirm Button Component
 function HoldToConfirmButton({ onConfirm, children, className }: { onConfirm: () => void, children: React.ReactNode, className?: string }) {
   const [progress, setProgress] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -23,7 +23,7 @@ function HoldToConfirmButton({ onConfirm, children, className }: { onConfirm: ()
     timerRef.current = setTimeout(() => {
       onConfirm();
       setProgress(0);
-    }, 500); // 500ms required hold
+    }, 500);
   };
 
   const cancel = () => {
@@ -57,13 +57,11 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
         onClose();
       }
     };
-    
     document.addEventListener('mousedown', handleClickOutside, true);
     return () => document.removeEventListener('mousedown', handleClickOutside, true);
   }, [onClose]);
 
   const handleRevealInExplorer = () => {
-    // Reveal in OS binding from ElectronAPI
     const cleanPath = targetRelativePath.replace(/\/$/, '');
     const absPath = `${rootPath}/${cleanPath}`.replace(/\\/g, '/');
     window.api.showItemInFolder(absPath);
@@ -72,6 +70,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
 
   const handleExpandCollapseSelected = (expand: boolean) => {
     const dirs = Array.from(selectedFiles)
+      .map(k => parseScopedPathKey(k).relativePath)
       .filter(p => p.endsWith('/'))
       .map(p => p.slice(0, -1)); 
     setFoldersExpanded(dirs, expand);
@@ -80,15 +79,19 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
 
   const handleBlacklistDirectory = () => {
     Array.from(selectedFiles).forEach(p => {
-      if (p.endsWith('/')) {
-        const folderName = p.slice(0, -1).split('/').pop();
+      const rel = parseScopedPathKey(p).relativePath;
+      if (rel.endsWith('/')) {
+        const folderName = rel.slice(0, -1).split('/').pop();
         if (folderName) addPendingBlacklistRule(folderName);
       }
     });
     onClose();
   };
 
-  const hasDirectories = Array.from(selectedFiles).some(p => p.endsWith('/'));
+  const hasDirectories = Array.from(selectedFiles).some(p => {
+    const rel = parseScopedPathKey(p).relativePath;
+    return rel.endsWith('/');
+  });
 
   if (selectedFiles.size === 0) return null;
 
@@ -104,7 +107,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
       </div>
       
       <button 
-        onClick={() => { applyRuleToSelection('include'); onClose(); }}
+        onClick={() => { applyRuleToSelection('include', rootPath); onClose(); }}
         className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-hover text-left transition-colors"
       >
         <span className="flex items-center gap-2"><Plus size={14} className="text-green-400" /> Include</span>
@@ -112,7 +115,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
       </button>
 
       <button 
-        onClick={() => { applyRuleToSelection('tree-only'); onClose(); }}
+        onClick={() => { applyRuleToSelection('tree-only', rootPath); onClose(); }}
         className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-hover text-left transition-colors"
       >
         <span className="flex items-center gap-2"><LayoutTemplate size={14} className="text-accent" /> Set as Tree-Only</span>
@@ -120,7 +123,7 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
       </button>
       
       <button 
-        onClick={() => { applyRuleToSelection('exclude'); onClose(); }}
+        onClick={() => { applyRuleToSelection('exclude', rootPath); onClose(); }}
         className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-hover text-left transition-colors"
       >
         <span className="flex items-center gap-2"><EyeOff size={14} className="text-text-muted" /> Exclude Entirely</span>
@@ -154,7 +157,6 @@ export function ContextMenu({ x, y, targetRelativePath, rootPath, onClose }: Con
 
           <div className="h-px bg-border-subtle my-1" />
 
-          {/* Pending Blacklist Engine Integration */}
           <HoldToConfirmButton onConfirm={handleBlacklistDirectory}>
             <span className="flex items-center gap-2 text-orange-400"><ShieldBan size={14} /> Blacklist Folder Name</span>
             <span className="text-[10px] text-orange-400/50 uppercase tracking-widest">Hold</span>

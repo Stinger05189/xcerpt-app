@@ -1,3 +1,5 @@
+<!-- docs/agents/devlog.md -->
+
 # devlog.md
 
 # Project Dev Log & Core Memory
@@ -16,93 +18,41 @@
 
 ## Active Epoch: 04 - Rendering Optimization & Deployment
 
-### Session 015
+### Session 022
 
-- **Focus Area:** UI Rendering Optimization, DOM Virtualization, and 1D Marquee Drag Engine (Phase 13).
+- **Focus Area:** Version 1.6.0 Zero-Hitch Architecture, Performance Optimization, and Inheritance Bug Resolutions.
 - **Key Decisions:**
-  - **Tree Virtualization:** Replaced deeply nested, recursive DOM rendering with a headless virtualization engine (`@tanstack/react-virtual`). Created `useFlattenedTree.ts` to mathematically flatten the 1D structure, dropping hidden/collapsed nodes before render.
-  - **1D Math Marquee Engine:** Completely ripped out DOM-based `onMouseEnter` tick-dependent painting. Implemented a purely mathematical drag engine that calculates the active row index via `Math.floor(offsetY / ROW_HEIGHT)` during `pointermove`.
-  - **Auto-Scroll Loop:** Bound a `requestAnimationFrame` loop to the drag state, allowing smooth, infinite scrolling when the cursor hits the top/bottom 40px of the tree container.
+  - **In-Memory Virtual Payload Graph & JIT Staging:** Completely eliminated eager background disk writes during curation. State mutations recalculate a pure in-memory Virtual Payload Graph; physical staging to temporary disk directories occurs Just-In-Time (`VIRTUAL_READY` $\to$ `STAGING_LOCK` $\to$ `DISK_READY`) strictly when an export is triggered or on drag initiation.
+  - **Scoped Composite Key Architecture:** Refactored preset rule schemas to use `${rootId}::${relativePath}` composite keys, guaranteeing multi-root rule isolation without cross-root rule pollution while preserving global directory blacklists.
+  - **$O(\text{depth})$ Ancestor Prefix Tree Lookups:** Replaced the $O(N \times R)$ linear prefix loop with slash-delimited ancestor `Set<string>` lookups. Node evaluation latency dropped from >118ms to ~24ms, and benchmark velocity surged from 84,000 ops/sec to 345,000+ ops/sec.
+  - **Wildcard Segregation for Rule Indexing:** Isolated literal paths and directory prefixes from regex evaluation. Only rules containing actual glob wildcards (`*`, `?`, `[`) are dispatched to `ignore()`; literal paths resolve in $O(1)$ and $O(\text{depth})$ Set checks.
+  - **Granular Zustand Selectors:** Swapped whole-store and whole-set subscriptions (`s => s.selectedFiles`) in `TreeNodeComponent` and `Sidebar` for granular boolean selectors (`s => s.selectedFiles.has(...)`). Unselected nodes and the sidebar no longer re-render during marquee drag painting, eliminating a 696ms INP bottleneck.
+  - **Hierarchical Rule Compaction (`compactRules`):** Added automated pruning of redundant child file rules when an ancestor directory rule is active, preventing unbounded sidebar list bloat.
+  - **Tab Lifecycle & Context Menu Focus:** Introduced VS Code-style transient (italic) vs pinned editor tabs, horizontal mouse-wheel/right-drag overflow scrolling, and capture-phase click-outside dismissal for context menus.
+  - **Diagnostic & Live Profiling Suite:** Introduced `scripts/run-diagnostics.mjs` and an in-app "Profile Active Workspace" tool in the Sidebar Stats tab with instant clipboard export.
 - **Roadblocks Resolved:**
-  - **Stale Closure Misalignment:** Fixed an issue where the math marquee mapped indices to a "ghost" array of closed folders. Fixed by pointing the selection engine to a `useRef` tracking the latest `flatNodes` array, bypassing React's `memo` closures.
-  - **Fixed Positioning clipping:** Fixed the Context Menu flying off-screen or clipping under panes. Virtualization's `transform: translateY()` creates a new CSS containing block, breaking `position: fixed`. Fixed by ejecting the menu via `createPortal(..., document.body)`.
+  - **Windows Backslash Mismatch in Folder Exclude Inheritance:** Fixed an issue where `C:\...` roots failed `startsWith` checks against canonical `C:/...` keys, causing child files inside excluded directories to remain included.
+  - **Component-Level Rule Indexing Storm:** Resolved a severe 285ms flame-chart bottleneck where `TreeNodeComponent` was compiling a fresh `ScopedRuleIndex` on every render. Hoisted status calculation to `useFlattenedTree` and passed `status` as a pure prop.
 - **Core Files Modified:**
-  - `package.json`, `src/components/tree/useFlattenedTree.ts`
-  - `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`, `src/components/tree/ContextMenu.tsx`, `src/store/workspaceStore.ts`
+  - `main.cjs`, `package.json`, `scripts/run-diagnostics.mjs`
+  - `src/utils/filterEngine.ts`, `src/utils/exportEngine.ts`
+  - `src/store/workspaceStore.ts`, `src/types/ipc.d.ts`
+  - `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`, `src/components/tree/useFlattenedTree.ts`, `src/components/tree/ContextMenu.tsx`
+  - `src/components/layout/MainStage.tsx`, `src/components/layout/Sidebar.tsx`
+  - `src/components/editor/ContextEditor.tsx`, `src/components/export/ExportStage.tsx`, `src/components/export/PayloadPreviewTree.tsx`
 
 ---
 
-### Session 016
+### Session 021
 
-- **Focus Area:** Branding, Build Pipeline, Auto-Updater Integration, and Open-Source Launch (Phase 14).
+- **Focus Area:** Gitignore Rule Overriding, Missing Path Relocation, Multi-Root Export Disambiguation, and Workspace Name Persistence.
 - **Key Decisions:**
-  - **Branding:** Designed and integrated a pure SVG geometric logo representing context compression.
-  - **Build System:** Integrated `electron-builder` to compile NSIS (Windows), DMG (Mac), and AppImage (Linux) targets directly from the Vite `dist/` output.
-  - **Distribution Strategy:** Transitioned the project to a public repository with an MIT License. Leveraged `electron-updater` linked to GitHub Releases for seamless, zero-cost differential updates.
-  - **Production Security:** Locked `webPreferences.devTools` behind `!app.isPackaged` to ensure the Chromium inspector is stripped from public binaries.
+  - **Gitignore Rule Bypass:** Added a `respectGitignore` workspace setting. Updated `main.cjs` to conditionally bypass `.gitignore` parsing when set to false, allowing users to explicitly export git-ignored files via custom tree rules.
+  - **Missing Path Relocation:** Modified `scanDirectory` IPC to catch root `ENOENT` errors and return an explicit `isMissing: true` flag. Built `relocateRootPath` in `WorkspaceStore` and created a "Directory Not Found" fallback view in `MainStage` with a "Locate Directory" dialog picker.
+  - **Multi-Root Name Disambiguation:** Enhanced `generateExportPayload` in `exportEngine.ts` to detect identical root leaf folder names (e.g. two roots named `src`) and dynamically append occurrence suffixes (`src_1`, `src_2`) to prevent file collisions.
+  - **Workspace Name Persistence & Inspector Rename:** Added `setWorkspaceName` to Zustand. Fixed a race condition where auto-saving overwrote newly renamed workspaces back to `null`. Added inline workspace renaming directly to the Workspace Inspector header in `Sidebar.tsx`.
 - **Roadblocks Resolved:**
-  - **Packaged Asset Resolution:** Fixed a bug where the `TitleBar` logo disappeared in the compiled executable. Changed absolute asset paths (`/icon.svg`) to relative paths (`./icon.svg`) to prevent Electron from incorrectly querying the OS root drive when running via the `file://` protocol.
-  - **CLI Argument Swallowing:** Fixed NPM swallowing the publish flag by enforcing the `--` separator (`npm run dist -- -p always`).
-  - **Token Handling:** Clarified the auto-updater security architecture: GitHub PATs are strictly for local developer uploads via `electron-builder` and are never required by the client-side `electron-updater`.
-
----
-
-### Session 017
-
-- **Focus Area:** Workspace Statistics, Git Integration, Export UI Overhaul, and Updater UX (Phase 15).
-- **Key Decisions:**
-  - **Hard Blacklisting (`.gitignore`):** Shifted `.gitignore` parsing directly into the `main.cjs` recursive scanner using the `ignore` package. Ignored folders are now instantly dropped before IPC transmission or watcher attachment, drastically improving performance.
-  - **Git Status Integration:** Integrated a non-blocking `git status --porcelain` execution in the Node backend. Polled dynamically on tab switches and external edits, mapping states (M, A, ??) to distinct text colors in `TreeNode` without overriding explicit Excluded/Tree-Only UI states.
-  - **Export Table & Resizability:** Completely overhauled the `ExportStage` payload chunk view from a flat list to a rich, sortable HTML `<table>`. Implemented `<colgroup>` with `table-layout: fixed` and custom pointer drag-handlers for smooth column resizing.
-  - **Workspace Statistics:** Expanded the `WorkspacePayload` schema to track `totalExports`, `ephemeralExports`, and `fileFrequencies`. Rendered these as persistent global metrics in the `Sidebar` and wired them to the new Export Table.
-  - **Updater UX:** Displayed `appVersion` in the TitleBar alongside a manual "Check for Updates" button and a subtle progress bar mapped to `autoUpdater` download events.
-- **Roadblocks Resolved:**
-  - **Production Drag-and-Drop Image:** Fixed native dragging in packaged binaries by conditionally routing `nativeImage.createFromPath` to `dist/drag-package.png` when `app.isPackaged` is true.
-  - **Z-Index Clipping:** Lowered the resizable tree handle to `z-10` to prevent it from intercepting pointer events when the `Workspace Inspector` flyout overlaps it.
-  - **Stale Closures:** Added `fetchGitStatus` to the `MainStage` watcher `useEffect` dependencies to satisfy React hook purity rules.
-- **Core Files Modified:**
-  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
-  - `src/store/appStore.ts`, `src/store/workspaceStore.ts`
-  - `src/components/export/ExportStage.tsx`, `src/components/layout/Sidebar.tsx`, `src/components/layout/MainStage.tsx`, `src/components/layout/TitleBar.tsx`
-  - `src/components/tree/TreeNode.tsx`, `src/components/tree/ContextMenu.tsx`, `src/utils/exportEngine.ts`
-
----
-
-### Session 018
-
-- **Focus Area:** High-Fidelity Tokenization, UI Reactivity, Native Drag-and-Drop Tabs, and Workspace Browser Overhaul (Phase 16).
-- **Key Decisions:**
-  - **BPE Tokenization (`js-tiktoken`):** Replaced the generic byte-division heuristic with an exact `cl100k_base` BPE tokenizer. To protect the 60fps React marquee engine, file reading and tokenization were offloaded to a non-blocking Node.js IPC handler (`fs:calculateTokens`), triggered only after active UI painting concludes.
-  - **Native Tab Reordering:** Implemented standard HTML5 Drag-and-Drop (`draggable={true}`, `onDragStart`, `onDrop`) for both Workspace Tabs (TitleBar) and Root Path Tabs (MainStage), avoiding the bloat of third-party DND libraries.
-  - **Export Stage UX:** Refactored the payload chunk data tables from fixed absolute widths to responsive `w-full min-w-max` structures while retaining `<colgroup>` resizability. Added an absolute-positioned Markdown Preview Modal for `ExportedFileTree.md`.
-  - **Browser Brand Overhaul:** Redesigned the Workspace Browser with an embedded SVG geometric background, sort/filter controls (Recent, Name, Exports), and explicit data badges for historical payload metrics (`totalExports`, `ephemeralExports`).
-- **Roadblocks Resolved:**
-  - **Cross-Store Reactivity:** Fixed an issue where changing global `extensionOverrides` didn't rebuild the workspace payload. Bridged the stores by forcing `WorkspaceStore.getState().setExportState({ isStale: true })` whenever the AppStore configuration is updated.
-- **Core Files Modified:**
-  - `package.json`, `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
-  - `src/components/tree/FileTree.tsx`, `src/components/export/ExportStage.tsx`
-  - `src/components/layout/TitleBar.tsx`, `src/components/layout/MainStage.tsx`, `src/components/layout/WorkspaceBrowser.tsx`
-  - `src/store/appStore.ts`, `src/store/workspaceStore.ts`
-
----
-
-### Session 019
-
-- **Focus Area:** Tree Visibility Toggles, Expand/Collapse All, and Global Undo/Redo Architecture.
-- **Key Decisions:**
-  - **Global History Engine:** Implemented a cross-boundary `HistoryStore` using the Command Pattern. Instead of saving massive state snapshots, the system saves the inverse mutation closures (deltas) of user actions.
-  - **Async Context Resolution:** Built an autonomous environment switcher (`resolveContext`). When an undo is triggered, the engine automatically navigates to the correct Workspace Tab, switches to the correct Preset, and awaits the async disk-hydration sequence before executing the mutation.
-  - **LZ-String Compression:** Integrated `lz-string` to Base64-compress bulk array closures (like `Expand All` or large selections) before pushing to the history stack. This allows a massive 1000-step history limit with virtually zero memory footprint.
-  - **Scroll Anchoring:** Bound the `FileTree` scroll offset to a Zustand getter. History commands capture the exact Y-coordinate of the tree and instantly snap the virtualization engine back to that pixel upon Undo/Redo.
-  - **Tree Filtering Optimization:** Added "Hide Excluded" and "Hide Tree-Only" toggles. Moved the `ignore` evaluation into `useFlattenedTree` using a high-performance, single-pass pre-compiled regex engine to prevent garbage-collection thrashing.
-- **Roadblocks Resolved:**
-  - **Cascading Render Warnings:** Fixed React Strict Mode errors caused by synchronous `setState` updates inside the `ToastContainer` effect by deferring the visibility mutation to the macro-task queue (`setTimeout(() => setVisible(true), 0)`).
-- **Core Files Modified:**
-  - `package.json`
-  - `src/store/historyStore.ts`, `src/store/workspaceStore.ts`, `src/store/appStore.ts`
-  - `src/components/layout/ToastContainer.tsx`, `src/components/layout/TitleBar.tsx`, `src/components/layout/Bootstrapper.tsx`
-  - `src/components/tree/FileTree.tsx`, `src/components/tree/useFlattenedTree.ts`
-  - `src/App.tsx`
+  - Resolved workspace name reversion by syncing React store state in `WorkspaceBrowser` and `Sidebar` prior to background disk flushes.
 
 ---
 
@@ -120,19 +70,6 @@
   - `src/store/workspaceStore.ts`, `src/types/ipc.d.ts`
   - `main.cjs`, `src/utils/exportEngine.ts`
   - `src/components/editor/ContextEditor.tsx`, `src/components/export/ExportStage.tsx`, `src/components/layout/MainStage.tsx`
-
----
-
-### Session 021
-
-- **Focus Area:** Gitignore Rule Overriding, Missing Path Relocation, Multi-Root Export Disambiguation, and Workspace Name Persistence.
-- **Key Decisions:**
-  - **Gitignore Rule Bypass:** Added a `respectGitignore` workspace setting. Updated `main.cjs` to conditionally bypass `.gitignore` parsing when set to false, allowing users to explicitly export git-ignored files via custom tree rules.
-  - **Missing Path Relocation:** Modified `scanDirectory` IPC to catch root `ENOENT` errors and return an explicit `isMissing: true` flag. Built `relocateRootPath` in `WorkspaceStore` and created a "Directory Not Found" fallback view in `MainStage` with a "Locate Directory" dialog picker.
-  - **Multi-Root Name Disambiguation:** Enhanced `generateExportPayload` in `exportEngine.ts` to detect identical root leaf folder names (e.g. two roots named `src`) and dynamically append occurrence suffixes (`src_1`, `src_2`) to prevent file collisions.
-  - **Workspace Name Persistence & Inspector Rename:** Added `setWorkspaceName` to Zustand. Fixed a race condition where auto-saving overwrote newly renamed workspaces back to `null`. Added inline workspace renaming directly to the Workspace Inspector header in `Sidebar.tsx`.
-- **Roadblocks Resolved:**
-  - Resolved workspace name reversion by syncing React store state in `WorkspaceBrowser` and `Sidebar` prior to background disk flushes.
 
 ## Archived Epochs
 

@@ -1,4 +1,7 @@
 // src/types/ipc.d.ts
+export type ScopedPathKey = `${string}::${string}`;
+export type StagingStatus = 'VIRTUAL_READY' | 'STAGING_LOCK' | 'DISK_READY';
+
 export interface FileNode {
   path: string;
   name: string;
@@ -29,6 +32,9 @@ export interface ExportFile {
   flatFileName: string;
   compressions: CompressionRuleIPC[];
   size: number;
+  trueSize?: number;
+  tokens?: number;
+  rootPath?: string;
 }
 
 export interface ExportChunk {
@@ -39,14 +45,54 @@ export interface ExportChunk {
 export interface ExportPayload {
   chunks: ExportChunk[];
   treeMarkdown: string;
-  metrics?: { excluded: number; treeOnly: number; size: number; tokens: number; };
+  manifestFileName?: string;
+  metrics?: { excluded: number; treeOnly: number; size: number; tokens: number; trueSize?: number; };
   mergeToSingleFile?: boolean;
+  embedProtocol?: boolean;
 }
 
 export interface EphemeralPayload {
   files: ExportFile[];
   treeMarkdown: string;
+  manifestFileName?: string;
   mergeToSingleFile?: boolean;
+  embedProtocol?: boolean;
+}
+
+export interface VirtualPayloadNode {
+  id: string;
+  rootPath: string;
+  relativePath: string;
+  scopedKey: ScopedPathKey;
+  name: string;
+  isDirectory: boolean;
+  size: number;
+  trueSize: number;
+  tokens: number;
+  status: 'included' | 'excluded' | 'tree-only';
+  skipCount: number;
+  skippedLines: number;
+  children?: VirtualPayloadNode[];
+}
+
+export interface VirtualPayloadGraph {
+  nodes: VirtualPayloadNode[];
+  manifestFileName: string;
+  treeMarkdown: string;
+  totalFiles: number;
+  totalSize: number;
+  totalTrueSize: number;
+  totalTokens: number;
+  savedBytes: number;
+  savedTokens: number;
+  chunks: ExportChunk[];
+}
+
+export interface EditorTab {
+  id: string;
+  rootPath: string;
+  relativePath: string;
+  isPinned: boolean;
 }
 
 // --- App Config Schema ---
@@ -75,7 +121,7 @@ export interface AppConfig {
 export interface AppStatePayload {
   activeWorkspaceId: string | null;
   openTabs: { id: string; title: string }[];
-  openWorkspaceIds?: string[]; // Legacy fallback
+  openWorkspaceIds?: string[];
 }
 
 export interface WorkspaceMetadata {
@@ -104,10 +150,10 @@ export interface ExportHistory {
 export interface Preset {
   id: string;
   name: string;
-  inclusions: string[];
-  exclusions: string[];
-  treeOnly: string[];
-  compressions: Record<string, CompressionRuleIPC[]>;
+  inclusions: ScopedPathKey[] | string[];
+  exclusions: ScopedPathKey[] | string[];
+  treeOnly: ScopedPathKey[] | string[];
+  compressions: Record<ScopedPathKey | string, CompressionRuleIPC[]>;
   history: ExportHistory[];
 }
 
@@ -119,6 +165,7 @@ export interface WorkspacePayload {
     maxFilesPerChunk: number;
     mergeToSingleFile?: boolean;
     respectGitignore?: boolean;
+    embedProtocol?: boolean;
   };
   rules: {
     hardBlacklist: string[];
@@ -131,6 +178,8 @@ export interface WorkspacePayload {
     paneWidths?: { sidebar: number; tree: number };
     hideExcluded?: boolean;
     hideTreeOnly?: boolean;
+    openEditorTabs?: EditorTab[];
+    activeEditorTabId?: string | null;
   };
 }
 
@@ -146,11 +195,9 @@ export interface ElectronAPI {
   closeWindow: () => Promise<void>;
   setZoomFactor: (factor: number) => void;
 
-  // Git & App Version Info
   getVersion: () => Promise<string>;
   getGitStatus: (targetPath: string) => Promise<Record<string, string>>;
 
-  // Export & OS API
   stageExport: (payload: ExportPayload) => Promise<string[]>;
   stageEphemeralExport: (payload: EphemeralPayload) => Promise<string[]>;
   startDrag: (filePaths: string[]) => void;
@@ -158,7 +205,6 @@ export interface ElectronAPI {
   openExternal: (url: string) => Promise<void>;
   showItemInFolder: (path: string) => void;
 
-  // Persistence API
   loadAppConfig: () => Promise<AppConfig | null>;
   saveAppConfig: (config: AppConfig) => Promise<void>;
   loadAppState: () => Promise<AppStatePayload | null>;
@@ -169,14 +215,13 @@ export interface ElectronAPI {
   renameWorkspace: (id: string, newName: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
 
-  // Auto-Updater
   onUpdateStatus: (callback: (status: 'update-available' | 'update-downloaded') => void) => () => void;
   onUpdateProgress: (callback: (percent: number) => void) => () => void;
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
 
-  // Event Listeners
   onFileChange: (callback: (event: 'add' | 'change' | 'unlink', path: string) => void) => () => void;
+  saveWorkspace: (data: unknown) => void;
 }
 
 declare global {

@@ -1,7 +1,7 @@
 {
   "name": "xcerpt-app",
   "private": false,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "A premium, desktop-based Context Staging Environment for AI models.",
   "author": "Stinger05189",
   "license": "MIT",
@@ -34,7 +34,8 @@
     "dist": "npm run build && electron-builder",
     "pack": "npm run build && electron-builder --dir",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:diagnostics": "node scripts/run-diagnostics.mjs"
   },
   "build": {
     "appId": "com.xcerpt.app",

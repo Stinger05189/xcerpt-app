@@ -1,10 +1,8 @@
-// src/utils/filterEngine.ts
+// scripts/run-diagnostics.mjs
+import { performance } from 'node:perf_hooks';
 import ignore from 'ignore';
-import type { ScopedPathKey } from '../types/ipc';
 
-export type FileStatus = 'included' | 'excluded' | 'tree-only';
-
-export function canonicalizePath(p: string): string {
+function canonicalizePath(p) {
   if (!p) return '';
   let normalized = p.replace(/\\/g, '/');
   if (/^[a-zA-Z]:/.test(normalized)) {
@@ -13,22 +11,20 @@ export function canonicalizePath(p: string): string {
   return normalized.replace(/\/+$/, '');
 }
 
-export function normalizePath(pathStr: string): string {
-  if (!pathStr) return '';
-  return pathStr.replace(/\\/g, '/').replace(/^\/+/, '');
+function normalizePath(p) {
+  if (!p) return '';
+  return p.replace(/\\/g, '/').replace(/^\/+/, '');
 }
 
-export function toScopedPathKey(rootId: string, relativePath: string): ScopedPathKey {
-  const cleanRoot = canonicalizePath(rootId);
-  const cleanRelative = normalizePath(relativePath);
-  return `${cleanRoot}::${cleanRelative}`;
+function toScopedPathKey(rootId, relativePath) {
+  return `${canonicalizePath(rootId)}::${normalizePath(relativePath)}`;
 }
 
-export function isScopedKey(key: string): key is ScopedPathKey {
+function isScopedKey(key) {
   return typeof key === 'string' && key.includes('::');
 }
 
-export function parseScopedPathKey(key: string): { rootId: string; relativePath: string } {
+function parseScopedPathKey(key) {
   const idx = key.indexOf('::');
   if (idx === -1) return { rootId: '', relativePath: normalizePath(key) };
   return {
@@ -37,15 +33,15 @@ export function parseScopedPathKey(key: string): { rootId: string; relativePath:
   };
 }
 
-export function hasGlobWildcards(str: string): boolean {
+function hasGlobWildcards(str) {
   return /[*?[\]{}]/.test(str);
 }
 
-export function compactRules(rules: string[]): string[] {
+function compactRules(rules) {
   if (!rules || rules.length <= 1) return rules || [];
 
-  const scopedByRoot = new Map<string, string[]>();
-  const globalRules: string[] = [];
+  const scopedByRoot = new Map();
+  const globalRules = [];
 
   for (const rule of rules) {
     if (!rule) continue;
@@ -59,8 +55,8 @@ export function compactRules(rules: string[]): string[] {
     }
   }
 
-  const pruneList = (pathList: string[]): string[] => {
-    const dirPrefixes = new Set<string>();
+  const pruneList = (pathList) => {
+    const dirPrefixes = new Set();
     for (const p of pathList) {
       if (p.endsWith('/')) {
         dirPrefixes.add(p);
@@ -80,7 +76,7 @@ export function compactRules(rules: string[]): string[] {
     });
   };
 
-  const compacted: string[] = [];
+  const compacted = [];
   for (const [rootId, pathList] of scopedByRoot.entries()) {
     const pruned = pruneList(pathList);
     for (const p of pruned) {
@@ -94,39 +90,30 @@ export function compactRules(rules: string[]): string[] {
   return compacted;
 }
 
-export class ScopedRuleIndex {
-  private excludeExact = new Set<string>();
-  private treeOnlyExact = new Set<string>();
-  private includeExact = new Set<string>();
+class ScopedRuleIndex {
+  constructor(includes = [], excludes = [], treeOnly = []) {
+    this.excludeExact = new Set();
+    this.treeOnlyExact = new Set();
+    this.includeExact = new Set();
 
-  private excludeDirPrefixSet = new Set<string>();
-  private treeOnlyDirPrefixSet = new Set<string>();
+    this.excludeDirPrefixSet = new Set();
+    this.treeOnlyDirPrefixSet = new Set();
 
-  private excludeIgnores = new Map<string, ReturnType<typeof ignore>>();
-  private treeOnlyIgnores = new Map<string, ReturnType<typeof ignore>>();
-  private includeIgnores = new Map<string, ReturnType<typeof ignore>>();
+    this.excludeIgnores = new Map();
+    this.treeOnlyIgnores = new Map();
+    this.includeIgnores = new Map();
 
-  private rootHasInclusions = new Map<string, boolean>();
+    this.rootHasInclusions = new Map();
 
-  constructor(
-    includes: string[] = [],
-    excludes: string[] = [],
-    treeOnly: string[] = []
-  ) {
     this.build(includes, excludes, treeOnly);
   }
 
-  private build(includes: string[], excludes: string[], treeOnly: string[]) {
-    const rootExcludesMap = new Map<string, string[]>();
-    const rootTreeOnlyMap = new Map<string, string[]>();
-    const rootIncludesMap = new Map<string, string[]>();
+  build(includes, excludes, treeOnly) {
+    const rootExcludesMap = new Map();
+    const rootTreeOnlyMap = new Map();
+    const rootIncludesMap = new Map();
 
-    const processRule = (
-      rule: string,
-      exactSet: Set<string>,
-      dirPrefixSet: Set<string> | null,
-      rulesByRoot: Map<string, string[]> | null
-    ) => {
+    const processRule = (rule, exactSet, dirPrefixSet, rulesByRoot) => {
       if (!rule) return;
       if (isScopedKey(rule)) {
         const { rootId, relativePath } = parseScopedPathKey(rule);
@@ -207,11 +194,7 @@ export class ScopedRuleIndex {
     }
   }
 
-  public getStatus(
-    rootId: string,
-    relativePath: string,
-    isDirectory: boolean
-  ): FileStatus {
+  getStatus(rootId, relativePath, isDirectory) {
     const cleanRel = normalizePath(relativePath);
     if (cleanRel === '') return 'included';
 
@@ -240,7 +223,7 @@ export class ScopedRuleIndex {
       slashIdx = cleanRel.indexOf('/', slashIdx + 1);
     }
 
-    // 4. Glob/Regex pattern fallback (only evaluated if wildcards exist)
+    // 4. Glob pattern fallback (only evaluated if wildcards exist)
     const igExclude = this.excludeIgnores.get(canonicalRoot) || this.excludeIgnores.get('*');
     if (igExclude && igExclude.ignores(pathToCheck)) {
       return 'excluded';
@@ -281,24 +264,117 @@ export class ScopedRuleIndex {
   }
 }
 
-export function getScopedFileStatus(
-  rootId: string,
-  relativePath: string,
-  isDirectory: boolean,
-  includes: string[],
-  excludes: string[],
-  treeOnly: string[]
-): FileStatus {
-  const index = new ScopedRuleIndex(includes, excludes, treeOnly);
-  return index.getStatus(rootId, relativePath, isDirectory);
+console.log('\n' + '='.repeat(70));
+console.log('  XCEPT v1.6.0 ENGINE DIAGNOSTICS & PERFORMANCE BENCHMARK');
+console.log('='.repeat(70) + '\n');
+
+let passCount = 0;
+let failCount = 0;
+
+function assert(condition, message) {
+  if (condition) {
+    console.log(`  [\x1b[32mPASS\x1b[0m] ${message}`);
+    passCount++;
+  } else {
+    console.error(`  [\x1b[31mFAIL\x1b[0m] ${message}`);
+    failCount++;
+  }
 }
 
-export function getFileStatus(
-  relativePath: string,
-  isDirectory: boolean,
-  includes: string[],
-  excludes: string[],
-  treeOnly: string[]
-): FileStatus {
-  return getScopedFileStatus('*', relativePath, isDirectory, includes, excludes, treeOnly);
+// --- SUITE 1: FOLDER EXCLUSION INHERITANCE ---
+console.log('\x1b[36m--- Suite 1: Folder Exclude & Tree-Only Inheritance ---\x1b[0m');
+{
+  const rootWindows = 'C:\\Projects\\MyApp';
+  const rootPosix = 'C:/Projects/MyApp';
+
+  const excludes = [
+    toScopedPathKey(rootWindows, 'src/components/'),
+    toScopedPathKey(rootPosix, 'dist/'),
+  ];
+  const treeOnly = [
+    toScopedPathKey(rootPosix, 'docs/specs/')
+  ];
+
+  const index = new ScopedRuleIndex([], excludes, treeOnly);
+
+  assert(index.getStatus(rootWindows, 'src/components', true) === 'excluded', 'Direct folder match with Windows backslash root');
+  assert(index.getStatus(rootWindows, 'src/components/Button.tsx', false) === 'excluded', 'Child file inherits folder exclusion');
+  assert(index.getStatus(rootPosix, 'src/components/sub/DeepNested.tsx', false) === 'excluded', 'Deep descendant inherits folder exclusion');
+  assert(index.getStatus(rootWindows, 'docs/specs/spec.md', false) === 'tree-only', 'Child file inherits tree-only directory status');
+  assert(index.getStatus(rootWindows, 'src/App.tsx', false) === 'included', 'Sibling file outside excluded folder remains included');
+
+  // Test explicit child inclusion overriding parent exclusion
+  const withInclusion = new ScopedRuleIndex(
+    [toScopedPathKey(rootWindows, 'src/components/SpecialIncluded.tsx')],
+    excludes,
+    treeOnly
+  );
+  assert(withInclusion.getStatus(rootWindows, 'src/components/SpecialIncluded.tsx', false) === 'included', 'Explicit child inclusion overrides parent folder exclusion');
 }
+
+// --- SUITE 2: RULE COMPACTION (PREVENTING HUGE SIDEBAR LISTS) ---
+console.log('\n\x1b[36m--- Suite 2: Rule Compaction & Pruning Test ---\x1b[0m');
+{
+  const root = 'C:/Projects/MyApp';
+  const uncompacted = [
+    toScopedPathKey(root, 'src/components/'),
+    toScopedPathKey(root, 'src/components/Button.tsx'),
+    toScopedPathKey(root, 'src/components/Header.tsx'),
+    toScopedPathKey(root, 'src/components/sub/Nav.tsx'),
+    toScopedPathKey(root, 'src/utils/api.ts'),
+  ];
+
+  const compacted = compactRules(uncompacted);
+
+  assert(compacted.length === 2, `Compacted 5 rules down to 2 (got ${compacted.length})`);
+  assert(compacted.includes(toScopedPathKey(root, 'src/components/')), 'Preserved ancestor directory rule');
+  assert(compacted.includes(toScopedPathKey(root, 'src/utils/api.ts')), 'Preserved independent file rule');
+  assert(!compacted.includes(toScopedPathKey(root, 'src/components/Button.tsx')), 'Pruned redundant child file rule');
+}
+
+// --- SUITE 3: HIGH-THROUGHPUT O(depth) BENCHMARK (< 25ms SLA) ---
+console.log('\n\x1b[36m--- Suite 3: 10,000-Node Throughput Benchmark (O(depth) Ancestor Lookups) ---\x1b[0m');
+{
+  const root = 'C:/Projects/MassiveRepo';
+  const ruleCount = 100;
+  const nodeCount = 10000;
+
+  const mockExcludes = [];
+  for (let i = 0; i < ruleCount; i++) {
+    mockExcludes.push(toScopedPathKey(root, `vendor/pkg_${i}/`));
+  }
+  mockExcludes.push(toScopedPathKey(root, 'node_modules/'));
+  mockExcludes.push(toScopedPathKey(root, 'build/'));
+
+  const index = new ScopedRuleIndex([], mockExcludes, []);
+
+  const testPaths = [];
+  for (let i = 0; i < nodeCount; i++) {
+    if (i % 3 === 0) testPaths.push({ path: `vendor/pkg_${i % ruleCount}/lib/file_${i}.ts`, isDir: false });
+    else if (i % 5 === 0) testPaths.push({ path: `node_modules/dep_${i}/index.js`, isDir: false });
+    else testPaths.push({ path: `src/feature_${i % 20}/component_${i}.tsx`, isDir: false });
+  }
+
+  const start = performance.now();
+  let excludedCount = 0;
+  for (let i = 0; i < nodeCount; i++) {
+    const item = testPaths[i];
+    const status = index.getStatus(root, item.path, item.isDir);
+    if (status === 'excluded') excludedCount++;
+  }
+  const duration = performance.now() - start;
+  const opsPerSec = Math.round((nodeCount / duration) * 1000);
+
+  console.log(`  Processed: \x1b[33m${nodeCount.toLocaleString()} nodes\x1b[0m against \x1b[33m${ruleCount} rules\x1b[0m`);
+  console.log(`  Duration:  \x1b[32m${duration.toFixed(2)} ms\x1b[0m`);
+  console.log(`  Velocity:  \x1b[32m${opsPerSec.toLocaleString()} ops/sec\x1b[0m`);
+
+  assert(duration < 25, `Throughput SLA met (< 25ms for 10,000 nodes; got ${duration.toFixed(2)}ms)`);
+  assert(excludedCount > 0, `Correctly filtered excluded nodes (count: ${excludedCount})`);
+}
+
+console.log('\n' + '='.repeat(70));
+console.log(`  DIAGNOSTIC SUMMARY: \x1b[32m${passCount} PASSED\x1b[0m, \x1b[${failCount > 0 ? '31' : '32'}m${failCount} FAILED\x1b[0m`);
+console.log('='.repeat(70) + '\n');
+
+if (failCount > 0) process.exit(1);

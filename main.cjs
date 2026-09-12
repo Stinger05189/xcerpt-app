@@ -9,7 +9,6 @@ const { app, BrowserWindow, ipcMain, dialog, nativeImage, shell } = require('ele
 const chokidar = require('chokidar');
 const { performance, monitorEventLoopDelay } = require('perf_hooks');
 const fsSync = require('fs');
-// Added for Synchronous testing
 const { autoUpdater } = require('electron-updater');
 const { exec } = require('child_process');
 const ignore = require('ignore');
@@ -30,7 +29,6 @@ const TREE_ONLY_REGEX = /\.(lock|png|jpe?g|gif|svg|ico|webp|pdf|mp4|webm|wav|mp3
 const TREE_ONLY_EXACT = ['.DS_Store', '.env', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
 
 // --- Background Garbage Collection ---
-// Silently cleans up old temporary export folders so they don't pile up
 async function cleanupOldExports() {
   try {
     const tmpDir = os.tmpdir();
@@ -41,7 +39,6 @@ async function cleanupOldExports() {
         const fullPath = path.join(tmpDir, file);
         try {
           const stats = await fs.stat(fullPath);
-          // Delete folders older than 1 hour
           if (now - stats.mtimeMs > 3600000) {
             await fs.rm(fullPath, { recursive: true, force: true });
           }
@@ -62,7 +59,6 @@ async function scanDirectory(rootPath, blacklist, respectGitignore = true, curre
     children: []
   };
 
-  // Check if root directory exists
   if (currentPath === rootPath) {
     try {
       await fs.stat(rootPath);
@@ -145,11 +141,11 @@ async function scanDirectory(rootPath, blacklist, respectGitignore = true, curre
 
 // --- Export Engine Logic ---
 async function processExport(payload) {
-  // Use unique timestamped folder to bypass Windows Defender locking
   const exportDir = path.join(os.tmpdir(), `xcerpt_export_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`);
   fsSync.mkdirSync(exportDir, { recursive: true });
 
   const chunkPaths = [];
+  const manifestFileName = payload.manifestFileName || 'ExportedFileTree.md';
 
   if (payload.mergeToSingleFile) {
     const chunkDir = path.join(exportDir, `chunk_1`);
@@ -157,29 +153,28 @@ async function processExport(payload) {
     chunkPaths.push(chunkDir);
 
     let combinedContent = `# Exported Workspace Context\n\n`;
-    combinedContent += `## File Tree\n\`\`\`text\n${payload.treeMarkdown}\n\`\`\`\n\n`;
+    combinedContent += `## Manifest & File Tree\n\`\`\`text\n${payload.treeMarkdown}\n\`\`\`\n\n`;
     combinedContent += `## Files\n\n`;
 
-    if (payload.chunks.length > 0) {
-      payload.chunks[0].files.forEach((file) => {
-        try {
-          const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
-          let lines = content.split('\n');
-          const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
-          for (const comp of sortedComps) {
-            const skipCount = comp.endLine - comp.startLine + 1;
-            const marker = `// ... [Skipped ${skipCount} lines] ...`;
-            lines.splice(comp.startLine - 1, skipCount, marker);
-          }
-          
-          const ext = path.extname(file.flatFileName).slice(1) || 'text';
-          combinedContent += `### ${file.relativePath}\n\n`;
-          combinedContent += `\`\`\`${ext}\n${lines.join('\n')}\n\`\`\`\n\n`;
-        } catch (err) {
-          console.error(`Error processing file ${file.absolutePath}:`, err);
+    const allFiles = payload.chunks.flatMap(c => c.files);
+    allFiles.forEach((file) => {
+      try {
+        const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
+        let lines = content.split('\n');
+        const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
+        for (const comp of sortedComps) {
+          const skipCount = comp.endLine - comp.startLine + 1;
+          const marker = `// ... [Skipped ${skipCount} lines] ...`;
+          lines.splice(comp.startLine - 1, skipCount, marker);
         }
-      });
-    }
+        
+        const ext = path.extname(file.flatFileName).slice(1) || 'text';
+        combinedContent += `### ${file.relativePath}\n\n`;
+        combinedContent += `\`\`\`${ext}\n${lines.join('\n')}\n\`\`\`\n\n`;
+      } catch (err) {
+        console.error(`Error processing file ${file.absolutePath}:`, err);
+      }
+    });
 
     fsSync.writeFileSync(path.join(chunkDir, 'context.md'), combinedContent, 'utf-8');
     return chunkPaths;
@@ -192,18 +187,16 @@ async function processExport(payload) {
     chunkPaths.push(chunkDir);
 
     if (chunk.id === 1) {
-      fsSync.writeFileSync(path.join(chunkDir, 'ExportedFileTree.md'), payload.treeMarkdown, 'utf-8');
+      fsSync.writeFileSync(path.join(chunkDir, manifestFileName), payload.treeMarkdown, 'utf-8');
     }
     
-    // Process files synchronously to bypass event-loop starvation from background watchers
     chunk.files.forEach((file) => {
       try {
         const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
         let lines = content.split('\n');
         
-        const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
+        const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
-         
           const skipCount = comp.endLine - comp.startLine + 1;
           const marker = `// ... [Skipped ${skipCount} lines] ...`;
           lines.splice(comp.startLine - 1, skipCount, marker);
@@ -213,7 +206,6 @@ async function processExport(payload) {
         fsSync.writeFileSync(outPath, lines.join('\n'), 'utf-8');
       } catch (err) {
         console.error(`Error processing file ${file.absolutePath}:`, err);
- 
       }
     });
   }
@@ -226,17 +218,18 @@ async function processEphemeralExport(payload) {
   fsSync.mkdirSync(ephemeralDir, { recursive: true });
 
   const createdPaths = [];
+  const manifestFileName = payload.manifestFileName || 'ExportedFileTree.md';
 
   if (payload.mergeToSingleFile) {
     let combinedContent = `# Ephemeral Quick Export\n\n`;
-    combinedContent += `## File Tree\n\`\`\`text\n${payload.treeMarkdown}\n\`\`\`\n\n`;
+    combinedContent += `## Manifest & File Tree\n\`\`\`text\n${payload.treeMarkdown}\n\`\`\`\n\n`;
     combinedContent += `## Files\n\n`;
 
     payload.files.forEach((file) => {
       try {
         const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
         let lines = content.split('\n');
-        const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
+        const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
         for (const comp of sortedComps) {
           const skipCount = comp.endLine - comp.startLine + 1;
           const marker = `// ... [Skipped ${skipCount} lines] ...`;
@@ -257,7 +250,7 @@ async function processEphemeralExport(payload) {
     return createdPaths;
   }
 
-  const treePath = path.join(ephemeralDir, 'ExportedFileTree.md');
+  const treePath = path.join(ephemeralDir, manifestFileName);
   fsSync.writeFileSync(treePath, payload.treeMarkdown, 'utf-8');
   createdPaths.push(treePath);
 
@@ -266,11 +259,10 @@ async function processEphemeralExport(payload) {
       const content = fsSync.readFileSync(file.absolutePath, 'utf-8');
       let lines = content.split('\n');
       
-      const sortedComps = [...file.compressions].sort((a, b) => b.startLine - a.startLine);
+      const sortedComps = [...(file.compressions || [])].sort((a, b) => b.startLine - a.startLine);
       for (const comp of sortedComps) {
         const skipCount = comp.endLine - comp.startLine + 1;
         const marker = `// ... [Skipped ${skipCount} lines] ...`;
-   
         lines.splice(comp.startLine - 1, skipCount, marker);
       }
       
@@ -301,10 +293,6 @@ async function setupWatcher() {
     }
     
     if (watchedPaths.size > 0) {
-      
-      // 1. BULLETPROOF WINDOWS IGNORING:
-      // Instead of failing string globs, we split the path natively.
-      // If ANY folder in the path matches a blacklist word, Chokidar instantly drops it.
       const ignoreFunc = (testPath) => {
         const pathParts = testPath.split(/[\/\\]/);
         return currentBlacklist.some(b => pathParts.includes(b));
@@ -314,11 +302,10 @@ async function setupWatcher() {
         ignored: ignoreFunc,
         persistent: true,
         ignoreInitial: true,
+        useFsEvents: false,
+        usePolling: false,
       });
 
-      // 2. EVENT SHIELDING:
-      // Do not attach the 'all' listener until the initial background scan is 100% complete.
-      // This prevents thousands of 'add' events from flooding the IPC bridge and freezing React.
       fileWatcher.on('ready', () => {
         fileWatcher.on('all', (event, filePath) => {
           if (['change', 'add', 'unlink'].includes(event) && mainWindow) {
@@ -338,8 +325,8 @@ async function setupWatcher() {
 // --- Window Management ---
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1280,
+    height: 840,
     frame: false,
     titleBarStyle: 'hidden',
     webPreferences: {
@@ -360,12 +347,9 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   await fs.mkdir(SESSIONS_DIR, { recursive: true });
-  // Fire and forget the temp folder cleanup
   cleanupOldExports().catch(() => {});
-
   createWindow();
 
-  // Initialize Background Auto-Updater
   if (app.isPackaged) {
     autoUpdater.checkForUpdatesAndNotify();
   }
@@ -382,14 +366,11 @@ app.on('window-all-closed', () => {
 
 // --- IPC Handlers ---
 ipcMain.handle('ping', () => 'pong');
-
 ipcMain.handle('window:minimize', (e) => { BrowserWindow.fromWebContents(e.sender)?.minimize(); });
-
 ipcMain.handle('window:maximize', (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   if (win) win.isMaximized() ? win.unmaximize() : win.maximize();
 });
-
 ipcMain.handle('window:close', (e) => { BrowserWindow.fromWebContents(e.sender)?.close(); });
 
 ipcMain.handle('dialog:selectDirectory', async () => {
@@ -398,66 +379,62 @@ ipcMain.handle('dialog:selectDirectory', async () => {
   return result.filePaths[0];
 });
 
-// --- Auto-Updater IPC Handlers ---
 autoUpdater.on('update-available', () => {
   if (mainWindow) mainWindow.webContents.send('updater:status', 'update-available');
 });
-
 autoUpdater.on('update-downloaded', () => {
   if (mainWindow) mainWindow.webContents.send('updater:status', 'update-downloaded');
 });
-
 autoUpdater.on('download-progress', (progressObj) => {
   if (mainWindow) mainWindow.webContents.send('updater:progress', progressObj.percent);
 });
-
-ipcMain.handle('updater:check', () => {
-  autoUpdater.checkForUpdatesAndNotify();
-});
-
-ipcMain.handle('updater:install', () => {
-  autoUpdater.quitAndInstall(false, true);
-});
+ipcMain.handle('updater:check', () => { autoUpdater.checkForUpdatesAndNotify(); });
+ipcMain.handle('updater:install', () => { autoUpdater.quitAndInstall(false, true); });
 
 ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist, respectGitignore) => {
   try {
     watchedPaths.add(dirPath);
     currentBlacklist = blacklist;
-    
     const payload = await scanDirectory(dirPath, blacklist, respectGitignore); 
-    
     setTimeout(() => {
       setupWatcher().catch(e => console.error("Watcher setup failed:", e));
     }, 500);
-    
     return payload;
-  } 
-  catch (error) { console.error('Error scanning:', error); throw error; }
+  } catch (error) {
+    console.error('Error scanning:', error);
+    throw error;
+  }
 });
 
+// Guaranteed file descriptor release: zero file locks on Windows
 ipcMain.handle('fs:readFile', async (_, filePath) => {
+  let fh = null;
   try {
     const stats = await fs.stat(filePath);
     if (stats.size > 5 * 1024 * 1024) {
-      throw new Error(`File is too large (${(stats.size / (1024 * 1024)).toFixed(2)} MB). Preview disabled to protect memory.`);
+      throw new Error(`File exceeds 5MB limit (${(stats.size / (1024 * 1024)).toFixed(2)} MB). Preview disabled.`);
     }
 
-    const fh = await fs.open(filePath, 'r');
+    fh = await fs.open(filePath, 'r');
     const buffer = Buffer.alloc(4096);
     const { bytesRead } = await fh.read(buffer, 0, 4096, 0);
-    await fh.close();
 
     for (let i = 0; i < bytesRead; i++) {
       if (buffer[i] === 0) {
-        throw new Error("Binary file detected. Preview disabled to protect memory.");
+        throw new Error("Binary file detected. Preview disabled.");
       }
     }
 
     return await fs.readFile(filePath, 'utf-8');
-  } 
-  catch (error) { 
+  } catch (error) { 
     console.error('Error reading:', error); 
     throw error; 
+  } finally {
+    if (fh) {
+      try {
+        await fh.close();
+      } catch (e) { /* ignore */ }
+    }
   }
 });
 
@@ -485,14 +462,11 @@ ipcMain.handle('fs:calculateTokens', async (_, filePaths) => {
     const enc = getEncoding("cl100k_base");
     let totalTokens = 0;
     
-    // Process files sequentially to avoid starving the I/O thread pool on massive selections
     for (const filePath of filePaths) {
       try {
         const content = await fs.readFile(filePath, 'utf-8');
         totalTokens += enc.encode(content).length;
-      } catch (e) {
-        // Ignore unreadable or locked files
-      }
+      } catch (e) {}
     }
     return totalTokens;
   } catch (error) {
@@ -511,17 +485,9 @@ ipcMain.handle('fs:stageEphemeralExport', async (_, payload) => {
   catch (error) { console.error('Error staging ephemeral export:', error); throw error; }
 });
 
-ipcMain.handle('shell:openPath', async (_, targetPath) => {
-  return await shell.openPath(targetPath);
-});
-
-ipcMain.handle('shell:openExternal', async (_, url) => {
-  return await shell.openExternal(url);
-});
-
-ipcMain.on('shell:showItemInFolder', (_, targetPath) => {
-  shell.showItemInFolder(targetPath);
-});
+ipcMain.handle('shell:openPath', async (_, targetPath) => { return await shell.openPath(targetPath); });
+ipcMain.handle('shell:openExternal', async (_, url) => { return await shell.openExternal(url); });
+ipcMain.on('shell:showItemInFolder', (_, targetPath) => { shell.showItemInFolder(targetPath); });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
 
@@ -579,7 +545,6 @@ ipcMain.handle('workspace:loadSession', async (_, id) => {
   try {
     watchedPaths.clear();
     setupWatcher();
-    
     const data = await fs.readFile(path.join(SESSIONS_DIR, `${id}.json`), 'utf-8');
     return JSON.parse(data);
   } catch (e) { return null; }
@@ -598,7 +563,7 @@ ipcMain.handle('workspace:getMetadata', async () => {
       try {
         const data = JSON.parse(await fs.readFile(path.join(SESSIONS_DIR, file), 'utf-8'));
         if (data.metadata) metadataList.push(data.metadata);
-      } catch (e) { /* skip malformed */ }
+      } catch (e) {}
     }
     return metadataList.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   } catch (e) { return []; }

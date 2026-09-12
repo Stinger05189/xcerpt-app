@@ -4,7 +4,8 @@ import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
 import { useWorkspaceStore, type CompressionRule } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { useHistoryStore } from '../../store/historyStore';
-import { FileCode2, Undo2, Trash2, Eye, Code2, BookOpen } from 'lucide-react';
+import { toScopedPathKey } from '../../utils/filterEngine';
+import { FileCode2, Undo2, Trash2, Eye, Code2, BookOpen, Pin } from 'lucide-react';
 import { ImageViewer } from './ImageViewer';
 import { MarkdownViewer } from './MarkdownViewer';
 
@@ -27,22 +28,26 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const monaco = useMonaco();
   const config = useAppStore(s => s.config);
 
+  const scopedKey = toScopedPathKey(rootPath, relativePath);
   const { 
     setCompressions, 
-    compressions, 
+    compressions,
+    editorTabs,
+    pinEditorTab
   } = useWorkspaceStore();
+
+  const currentTab = editorTabs.find(t => t.id === scopedKey);
+  const isPinned = currentTab?.isPinned ?? false;
 
   const canUndo = useHistoryStore(s => s.undoStack.length > 0);
   const globalUndo = useHistoryStore(s => s.undo);
 
-  const rawCompressions = compressions[relativePath];
+  const rawCompressions = compressions[scopedKey] || compressions[relativePath];
   const fileCompressions = useMemo(() => rawCompressions || [], [rawCompressions]);
 
-  // Local Draft Engine
   const [draftCompressions, setDraftCompressions] = useState<CompressionRule[]>(fileCompressions);
   const lastGlobalStrRef = useRef<string>(JSON.stringify(fileCompressions));
 
-  // Resync draft state securely if it changes externally (e.g. Undo/Redo/Drift Heal)
   useEffect(() => {
     const currentGlobalStr = JSON.stringify(fileCompressions);
     if (currentGlobalStr !== lastGlobalStrRef.current) {
@@ -51,18 +56,17 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     }
   }, [fileCompressions]);
 
-  // Pure calculation during render, avoiding Ref reads
   const isDirty = JSON.stringify(draftCompressions) !== JSON.stringify(fileCompressions);
 
   const handleSave = () => {
-    setCompressions(relativePath, draftCompressions);
+    setCompressions(scopedKey, draftCompressions);
+    pinEditorTab(scopedKey);
   };
 
   const handleDiscard = () => {
     setDraftCompressions(fileCompressions);
   };
 
-  // Metrics Calculations
   const stats = useMemo(() => {
     if (!content) return { lines: 0, kb: '0.0', estLines: 0, estKb: '0.0' };
     const lines = content.split('\n').length;
@@ -80,12 +84,11 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     };
   }, [content, draftCompressions]);
 
-  // Load File, Auto-Heal Drift, and Watch for Live External Edits
   useEffect(() => {
     let isMounted = true;
     const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
     const isImage = /\.(png|jpe?g|gif|svg|ico|webp)$/i.test(relativePath);
-    
+
     if (isImage) {
       setTimeout(() => {
         if (isMounted) {
@@ -95,36 +98,33 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
       }, 0);
       return;
     }
-    
+
     const loadFile = async () => {
       setLoading(true);
       try {
         const text = await window.api.readFile(absolutePath);
         if (!isMounted) return;
-        
+
         setContent(text);
         setLoading(false);
-        
-        // Use getState() to avoid stale closures when this is triggered by the external watcher
+
         const currentStore = useWorkspaceStore.getState();
-        const currentCompressions = currentStore.compressions[relativePath] || [];
-        
-        // Drift Reconciliation: Check if external edits shifted our skip markers
+        const currentCompressions = currentStore.compressions[scopedKey] || currentStore.compressions[relativePath] || [];
+
         if (currentCompressions.length > 0) {
           const lines = text.split('\n');
           let needsUpdate = false;
-          
+
           const healedCompressions = currentCompressions.map(comp => {
             const expectedLine = lines[comp.startLine - 1];
-            if (expectedLine === comp.signature) return comp; // Perfect match
-          
-            // Drift detected, search +/- 50 lines for the exact signature
+            if (expectedLine === comp.signature) return comp;
+
             let foundOffset = 0;
             for (let i = 1; i <= 50; i++) {
               if (lines[comp.startLine - 1 + i] === comp.signature) { foundOffset = i; break; }
               if (lines[comp.startLine - 1 - i] === comp.signature) { foundOffset = -i; break; }
             }
-          
+
             if (foundOffset !== 0) {
               needsUpdate = true;
               return { 
@@ -133,11 +133,11 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
                 endLine: comp.endLine + foundOffset 
               };
             }
-            return comp; // Signature lost (block was likely deleted entirely)
+            return comp;
           });
-          
+
           if (needsUpdate) {
-            currentStore.setCompressions(relativePath, healedCompressions);
+            currentStore.setCompressions(scopedKey, healedCompressions);
           }
         }
       } catch (err: unknown) {
@@ -147,11 +147,9 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         }
       }
     };
-    
-    // 1. Initial Load
+
     loadFile();
-    
-    // 2. Attach live watcher for this specific file
+
     const cleanupWatcher = window.api.onFileChange((event, changedPath) => {
       const normalizedChanged = changedPath.replace(/\\/g, '/');
       if (['change', 'add'].includes(event) && normalizedChanged === absolutePath) {
@@ -163,33 +161,31 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
       isMounted = false; 
       cleanupWatcher();
     };
-  }, [rootPath, relativePath]);
+  }, [rootPath, relativePath, scopedKey]);
 
-  // Compute the compressed text for preview mode
   const previewContent = useMemo(() => {
     if (!isPreviewMode) return content;
     const lines = content.split('\n');
     const sortedComps = [...draftCompressions].sort((a, b) => b.startLine - a.startLine);
-    
+
     const resultLines = [...lines];
     sortedComps.forEach(comp => {
       const skipCount = comp.endLine - comp.startLine + 1;
       const marker = `// ... [Skipped ${skipCount} lines] ...`;
       resultLines.splice(comp.startLine - 1, skipCount, marker);
     });
-    
+
     return resultLines.join('\n');
   }, [content, draftCompressions, isPreviewMode]);
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
-    
-    // Turn off Typescript Diagnostics (No Red Squiggles)
+
     monacoInstance.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
       noSemanticValidation: true,
       noSyntaxValidation: true,
     });
-    
+
     editor.addAction({
       id: 'xcerpt-skip-block',
       label: 'Skip Block (Context Compression)',
@@ -210,7 +206,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
               signature: model.getLineContent(sel.startLineNumber),
               lineCount: sel.endLineNumber - sel.startLineNumber + 1
             }));
-            
+
           if (newRules.length > 0) {
             setDraftCompressions(prev => {
               const combined = [...prev, ...newRules].sort((a, b) => a.startLine - b.startLine);
@@ -221,7 +217,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
                   continue;
                 }
                 const last = merged[merged.length - 1];
-                if (curr.startLine <= last.endLine + 1) { // Overlaps or is adjacent
+                if (curr.startLine <= last.endLine + 1) {
                   last.endLine = Math.max(last.endLine, curr.endLine);
                   last.lineCount = last.endLine - last.startLine + 1;
                 } else {
@@ -230,12 +226,13 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
               }
               return merged;
             });
+            pinEditorTab(scopedKey);
             ed.setSelection({ startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 });
           }
         }
       }
     });
-    
+
     editor.addAction({
       id: 'xcerpt-unskip-block',
       label: 'Un-Skip Block',
@@ -252,14 +249,11 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     });
   };
 
-  // Apply Visual Decorations safely when content and rules are synced
   useEffect(() => {
     if (!editorRef.current || !monaco || isPreviewMode || !content) return;
     const editor = editorRef.current;
-    
-    // Safety check: ensure Monaco has actually loaded the string content
     if (editor.getModel()?.getValue() !== content) return;
-    
+
     const newDecorations = draftCompressions.map(comp => ({
       range: new monaco.Range(comp.startLine, 1, comp.endLine, 1),
       options: {
@@ -272,13 +266,13 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         }
       }
     }));
-    
+
     if (!decorationsCollectionRef.current) {
       decorationsCollectionRef.current = editor.createDecorationsCollection(newDecorations);
     } else {
       decorationsCollectionRef.current.set(newDecorations);
     }
-    
+
     return () => {
       if (decorationsCollectionRef.current) decorationsCollectionRef.current.clear();
     };
@@ -290,13 +284,26 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="h-10 bg-bg-hover flex items-center px-4 border-b border-border-subtle shrink-0 gap-2">
-        <FileCode2 size={16} className="text-accent" />
-        <span className="text-sm font-medium">{fileName}</span>
-        {draftCompressions.length > 0 && (
-          <span className="ml-2 text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full">
-            {draftCompressions.length} Skips Applied
+      <div className="h-10 bg-bg-hover flex items-center px-4 border-b border-border-subtle shrink-0 gap-2 justify-between">
+        <div className="flex items-center gap-2">
+          <FileCode2 size={16} className="text-accent" />
+          <span className={`text-sm font-medium ${!isPinned ? 'italic opacity-90' : ''}`}>
+            {fileName} {!isPinned && <span className="text-[10px] text-text-muted font-normal">(Preview)</span>}
           </span>
+          {draftCompressions.length > 0 && (
+            <span className="ml-2 text-xs bg-accent/20 text-accent px-2 py-0.5 rounded-full">
+              {draftCompressions.length} Skips Applied
+            </span>
+          )}
+        </div>
+        {!isPinned && (
+          <button 
+            onClick={() => pinEditorTab(scopedKey)}
+            className="flex items-center gap-1 text-xs text-text-muted hover:text-accent transition-colors px-2 py-1 rounded"
+            title="Keep Open (Pin Tab)"
+          >
+            <Pin size={12} /> Pin Tab
+          </button>
         )}
       </div>
       
@@ -376,20 +383,20 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
           <Editor
             height="100%"
             defaultLanguage="typescript"
-          theme="vs-dark"
-          value={isPreviewMode ? previewContent : content}
-          onMount={handleEditorMount}
-          options={{
-            fontSize: config.theme.font.size,
-            readOnly: true, 
-            minimap: { enabled: true, scale: 0.75, renderCharacters: false, showSlider: 'always', size: 'fill' },
-            glyphMargin: !isPreviewMode,
-            lineNumbersMinChars: 4,
-            scrollBeyondLastLine: false,
-            wordWrap: 'on',
-            padding: { top: 16 },
-            hover: { enabled: false },
-            matchBrackets: 'never'
+            theme="vs-dark"
+            value={isPreviewMode ? previewContent : content}
+            onMount={handleEditorMount}
+            options={{
+              fontSize: config.theme.font.size,
+              readOnly: true, 
+              minimap: { enabled: true, scale: 0.75, renderCharacters: false, showSlider: 'always', size: 'fill' },
+              glyphMargin: !isPreviewMode,
+              lineNumbersMinChars: 4,
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              padding: { top: 16 },
+              hover: { enabled: false },
+              matchBrackets: 'never'
             }}
           />
         )}

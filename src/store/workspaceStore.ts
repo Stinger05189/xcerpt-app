@@ -1,8 +1,16 @@
 // src/store/workspaceStore.ts
 import { create } from 'zustand';
-import type { FileNode, Preset, ExportHistory } from '../types/ipc';
+import type { 
+  FileNode, 
+  Preset, 
+  ExportHistory, 
+  StagingStatus, 
+  VirtualPayloadGraph, 
+  EditorTab 
+} from '../types/ipc';
 import { useAppStore } from './appStore';
-import { useHistoryStore, compressHistoryPayload, decompressHistoryPayload } from './historyStore';
+import { toScopedPathKey, isScopedKey, compactRules, ScopedRuleIndex } from '../utils/filterEngine';
+import { generateVirtualPayloadGraph, generateExportPayload } from '../utils/exportEngine';
 
 export interface CompressionRule {
   id: string;
@@ -11,6 +19,23 @@ export interface CompressionRule {
   type: 'SKIP' | 'GHOST';
   signature: string; 
   lineCount: number; 
+}
+
+export interface WorkspaceProfileReport {
+  timestamp: string;
+  rootCount: number;
+  totalFilesCount: number;
+  ruleCounts: {
+    includes: number;
+    excludes: number;
+    treeOnly: number;
+    compressions: number;
+  };
+  timings: {
+    indexBuildMs: number;
+    traversalCheckMs: number;
+    virtualGraphMs: number;
+  };
 }
 
 interface WorkspaceState {
@@ -45,12 +70,21 @@ interface WorkspaceState {
   maxFilesPerChunk: number;
   mergeToSingleFile: boolean;
   respectGitignore: boolean;
+  embedProtocol: boolean;
+
+  // Staging State Machine & Virtual Graph
+  stagingStatus: StagingStatus;
+  virtualGraph: VirtualPayloadGraph | null;
 
   activeTab: string | null;
   activeFile: string | null;
   selectedFiles: Set<string>; 
   isExportStaging: boolean;
   expandedFolders: Set<string>;
+
+  // Tab Lifecycle: Transient vs Pinned
+  editorTabs: EditorTab[];
+  activeEditorTabId: string | null;
 
   // UI States
   isSidebarOpen: boolean;
@@ -77,9 +111,14 @@ interface WorkspaceState {
   setMaxFilesPerChunk: (val: number) => void;
   setMergeToSingleFile: (val: boolean) => void;
   setRespectGitignore: (val: boolean) => Promise<void>;
+  setEmbedProtocol: (val: boolean) => void;
   setPaneWidth: (pane: 'sidebar' | 'tree', width: number) => void;
   incrementStat: (type: 'totalExports' | 'ephemeralExports', files?: string[]) => void;
   fetchGitStatus: () => Promise<void>;
+
+  refreshVirtualGraph: () => void;
+  stagePayloadJIT: () => Promise<string[]>;
+  profileActiveWorkspace: () => WorkspaceProfileReport;
 
   setExportState: (state: Partial<{ isStale: boolean; isBuilding: boolean; chunkPaths: string[]; isEphemeralBuilding: boolean; ephemeralDragPaths: string[] | null; }>) => void;
   setSidebarOpen: (val: boolean) => void;
@@ -87,8 +126,18 @@ interface WorkspaceState {
   setHideExcluded: (val: boolean) => void;
   setHideTreeOnly: (val: boolean) => void;
 
+  // Tab Actions
+  openEditorTab: (rootPath: string, relativePath: string, pin?: boolean) => void;
+  closeEditorTab: (id: string) => void;
+  closeOtherEditorTabs: (id: string) => void;
+  closeEditorTabsToTheRight: (id: string) => void;
+  closeAllEditorTabs: () => void;
+  pinEditorTab: (id: string) => void;
+
   getPackedPresets: () => Preset[];
   createPreset: (name: string) => void;
+  duplicatePreset: (id: string, newName?: string) => void;
+  createPresetFromSelection: (name: string) => void;
   switchPreset: (id: string) => void;
   renamePreset: (id: string, newName: string) => void;
   deletePreset: (id: string) => void;
@@ -119,12 +168,13 @@ interface WorkspaceState {
   addTreeOnlyRule: (pattern: string) => void;
   removeTreeOnlyRule: (pattern: string) => void;
 
-  applyRuleToSelection: (ruleType: 'include' | 'tree-only' | 'exclude') => void;
+  applyRuleToSelection: (ruleType: 'include' | 'tree-only' | 'exclude', overrideRoot?: string) => void;
+  compactAllRules: () => void;
 
-  addCompressions: (relativePath: string, rules: Omit<CompressionRule, 'id'>[]) => void;
-  removeCompression: (relativePath: string, id: string) => void;
-  setCompressions: (relativePath: string, rules: CompressionRule[]) => void;
-  clearCompressions: (relativePath: string) => void;
+  addCompressions: (targetKey: string, rules: Omit<CompressionRule, 'id'>[]) => void;
+  removeCompression: (targetKey: string, id: string) => void;
+  setCompressions: (targetKey: string, rules: CompressionRule[]) => void;
+  clearCompressions: (targetKey: string) => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -156,12 +206,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   maxFilesPerChunk: 100000,
   mergeToSingleFile: false,
   respectGitignore: true,
+  embedProtocol: false,
+
+  stagingStatus: 'VIRTUAL_READY',
+  virtualGraph: null,
 
   activeTab: null,
   activeFile: null,
   selectedFiles: new Set<string>(),
   isExportStaging: false,
   expandedFolders: new Set<string>(),
+
+  editorTabs: [],
+  activeEditorTabId: null,
 
   isSidebarOpen: false,
   isPainting: false,
@@ -183,37 +240,149 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setWorkspaceName: (name: string) => set({ workspaceName: name.trim() || null, isStale: true }),
 
+  refreshVirtualGraph: () => {
+    const s = get();
+    if (s.rootPaths.length === 0) {
+      set({ virtualGraph: null, stagingStatus: 'VIRTUAL_READY' });
+      return;
+    }
+    const extOverrides = useAppStore.getState().config.extensionOverrides;
+    const graph = generateVirtualPayloadGraph(
+      s.rootPaths,
+      s.rawTrees,
+      s.includes,
+      s.excludes,
+      s.treeOnly,
+      s.compressions,
+      extOverrides,
+      s.mergeToSingleFile,
+      s.embedProtocol
+    );
+    set({ virtualGraph: graph, stagingStatus: 'VIRTUAL_READY' });
+  },
+
+  profileActiveWorkspace: () => {
+    const s = get();
+    const t0 = performance.now();
+    const index = new ScopedRuleIndex(s.includes, s.excludes, s.treeOnly);
+    const tIndex = performance.now() - t0;
+
+    let totalFiles = 0;
+    const t1 = performance.now();
+    for (const root of s.rootPaths) {
+      const tree = s.rawTrees[root];
+      if (!tree) continue;
+      const walk = (node: FileNode, curRel: string) => {
+        totalFiles++;
+        index.getStatus(root, curRel, node.type === 'directory');
+        if (node.children) {
+          for (const c of node.children) {
+            walk(c, curRel ? `${curRel}/${c.name}` : c.name);
+          }
+        }
+      };
+      walk(tree, '');
+    }
+    const tWalk = performance.now() - t1;
+
+    const t2 = performance.now();
+    const extOverrides = useAppStore.getState().config.extensionOverrides;
+    generateVirtualPayloadGraph(
+      s.rootPaths,
+      s.rawTrees,
+      s.includes,
+      s.excludes,
+      s.treeOnly,
+      s.compressions,
+      extOverrides,
+      s.mergeToSingleFile,
+      s.embedProtocol
+    );
+    const tGraph = performance.now() - t2;
+
+    return {
+      timestamp: new Date().toISOString(),
+      rootCount: s.rootPaths.length,
+      totalFilesCount: totalFiles,
+      ruleCounts: {
+        includes: s.includes.length,
+        excludes: s.excludes.length,
+        treeOnly: s.treeOnly.length,
+        compressions: Object.keys(s.compressions).length,
+      },
+      timings: {
+        indexBuildMs: Number(tIndex.toFixed(2)),
+        traversalCheckMs: Number(tWalk.toFixed(2)),
+        virtualGraphMs: Number(tGraph.toFixed(2)),
+      }
+    };
+  },
+
+  stagePayloadJIT: async () => {
+    const s = get();
+    if (s.rootPaths.length === 0) return [];
+
+    set({ stagingStatus: 'STAGING_LOCK', isBuilding: true });
+    try {
+      const extOverrides = useAppStore.getState().config.extensionOverrides;
+      const payload = generateExportPayload(
+        s.rootPaths,
+        s.rawTrees,
+        s.includes,
+        s.excludes,
+        s.treeOnly,
+        s.compressions,
+        s.maxFilesPerChunk,
+        extOverrides,
+        s.mergeToSingleFile,
+        s.embedProtocol
+      );
+
+      const stagedPaths = await window.api.stageExport(payload);
+      set({
+        stagingStatus: 'DISK_READY',
+        isBuilding: false,
+        chunkPaths: stagedPaths,
+        isStale: false
+      });
+      return stagedPaths;
+    } catch (err) {
+      console.error('JIT Physical Staging Failed:', err);
+      set({ stagingStatus: 'VIRTUAL_READY', isBuilding: false });
+      throw err;
+    }
+  },
+
   hydrateWorkspace: (payload) => set(() => {
     let activePresetId = payload.activePresetId;
     let presets = payload.presets || [];
-    
-    // Migration for v2.0 Payloads
-    if (payload.version !== "3.0" || !presets.length) {
-      const legacyRules = payload.rules as unknown as { inclusions?: string[]; exclusions?: string[]; treeOnly?: string[] };
-      const legacyPayload = payload as unknown as { compressions?: Record<string, import('../types/ipc').CompressionRuleIPC[]> };
-    
-      const defaultPreset: import('../types/ipc').Preset = {
+
+    if (!presets.length) {
+      const defaultPreset: Preset = {
         id: 'default-' + Date.now(),
         name: 'Default Context',
-        inclusions: legacyRules.inclusions || [],
-        exclusions: legacyRules.exclusions || ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
-        treeOnly: legacyRules.treeOnly || [],
-        compressions: legacyPayload.compressions || {},
+        inclusions: [],
+        exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+        treeOnly: [],
+        compressions: {},
         history: []
       };
       presets = [defaultPreset];
       activePresetId = defaultPreset.id;
     }
-    
+
     const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
-    
-    // AppStore Integration: Pull existing session snapshots or generate new ones
+
     let snapshots = useAppStore.getState().workspaceSnapshots[payload.id];
     if (!snapshots) {
       snapshots = presets.reduce((acc, p) => ({ ...acc, [p.id]: JSON.parse(JSON.stringify(p)) }), {});
       useAppStore.getState().setWorkspaceSnapshots(payload.id, snapshots);
     }
-    
+
+    const editorTabs: EditorTab[] = payload.uiState.openEditorTabs || [];
+    const activeEditorTabId = payload.uiState.activeEditorTabId || (editorTabs[0]?.id ?? null);
+    const activeFile = editorTabs.find(t => t.id === activeEditorTabId)?.relativePath || null;
+
     return {
       workspaceId: payload.id,
       workspaceName: payload.metadata.name,
@@ -221,34 +390,42 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       stats: payload.metadata.stats || { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} },
       paneWidths: payload.uiState.paneWidths || { sidebar: 320, tree: 400 },
       gitStatus: {},
-      rootPaths: [], 
+      rootPaths: [],
       missingRoots: new Set<string>(),
       rawTrees: {},
       hardBlacklist: payload.rules.hardBlacklist,
       pendingBlacklist: [],
-      
+
       activePresetId: activePreset.id,
       presets,
       presetSnapshots: snapshots,
-    
-      includes: activePreset.inclusions,
-      excludes: activePreset.exclusions,
-      treeOnly: activePreset.treeOnly,
-      compressions: activePreset.compressions,
+
+      includes: compactRules(activePreset.inclusions),
+      excludes: compactRules(activePreset.exclusions),
+      treeOnly: compactRules(activePreset.treeOnly),
+      compressions: activePreset.compressions as Record<string, CompressionRule[]>,
 
       maxFilesPerChunk: payload.settings.maxFilesPerChunk,
       mergeToSingleFile: payload.settings.mergeToSingleFile ?? false,
       respectGitignore: payload.settings.respectGitignore ?? true,
+      embedProtocol: payload.settings.embedProtocol ?? false,
+      stagingStatus: 'VIRTUAL_READY',
+      virtualGraph: null,
+
       activeTab: payload.uiState.activeTab,
       expandedFolders: new Set(payload.uiState.expandedFolders),
       hideExcluded: payload.uiState.hideExcluded ?? true,
       hideTreeOnly: payload.uiState.hideTreeOnly ?? true,
+
+      editorTabs,
+      activeEditorTabId,
+      activeFile,
+
       selectedFiles: new Set(),
-      isSidebarOpen: false, 
+      isSidebarOpen: false,
       isPainting: false,
       isEphemeralBuilding: false,
       ephemeralDragPaths: null,
-      activeFile: null,
       isExportStaging: false,
       isStale: true,
       isBuilding: false,
@@ -256,10 +433,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     };
   }),
 
-  setMaxFilesPerChunk: (val: number) => set({ maxFilesPerChunk: val }),
-  setMergeToSingleFile: (val: boolean) => set({ mergeToSingleFile: val, isStale: true }),
+  setMaxFilesPerChunk: (val: number) => {
+    set({ maxFilesPerChunk: val, stagingStatus: 'VIRTUAL_READY', isStale: true });
+    get().refreshVirtualGraph();
+  },
+  setMergeToSingleFile: (val: boolean) => {
+    set({ mergeToSingleFile: val, stagingStatus: 'VIRTUAL_READY', isStale: true });
+    get().refreshVirtualGraph();
+  },
+  setEmbedProtocol: (val: boolean) => {
+    set({ embedProtocol: val, stagingStatus: 'VIRTUAL_READY', isStale: true });
+    get().refreshVirtualGraph();
+  },
   setRespectGitignore: async (val: boolean) => {
-    set({ respectGitignore: val, isStale: true });
+    set({ respectGitignore: val, stagingStatus: 'VIRTUAL_READY', isStale: true });
     for (const root of get().rootPaths) {
       await get().addRootPath(root, true);
     }
@@ -292,6 +479,95 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setHideExcluded: (val: boolean) => set({ hideExcluded: val }),
   setHideTreeOnly: (val: boolean) => set({ hideTreeOnly: val }),
 
+  openEditorTab: (rootPath, relativePath, pin = false) => set(state => {
+    const tabId = toScopedPathKey(rootPath, relativePath);
+    const existing = state.editorTabs.find(t => t.id === tabId);
+
+    if (existing) {
+      return {
+        editorTabs: pin ? state.editorTabs.map(t => t.id === tabId ? { ...t, isPinned: true } : t) : state.editorTabs,
+        activeEditorTabId: tabId,
+        activeFile: relativePath,
+        activeTab: rootPath,
+        isExportStaging: false
+      };
+    }
+
+    const nextTabs = [...state.editorTabs];
+    if (!pin) {
+      const transientIdx = nextTabs.findIndex(t => !t.isPinned);
+      if (transientIdx !== -1) {
+        nextTabs[transientIdx] = { id: tabId, rootPath, relativePath, isPinned: false };
+        return {
+          editorTabs: nextTabs,
+          activeEditorTabId: tabId,
+          activeFile: relativePath,
+          activeTab: rootPath,
+          isExportStaging: false
+        };
+      }
+    }
+
+    nextTabs.push({ id: tabId, rootPath, relativePath, isPinned: pin });
+    return {
+      editorTabs: nextTabs,
+      activeEditorTabId: tabId,
+      activeFile: relativePath,
+      activeTab: rootPath,
+      isExportStaging: false
+    };
+  }),
+
+  closeEditorTab: (id) => set(state => {
+    const nextTabs = state.editorTabs.filter(t => t.id !== id);
+    let nextActiveId = state.activeEditorTabId;
+    if (state.activeEditorTabId === id) {
+      nextActiveId = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null;
+    }
+    const nextActiveTab = nextTabs.find(t => t.id === nextActiveId);
+    return {
+      editorTabs: nextTabs,
+      activeEditorTabId: nextActiveId,
+      activeFile: nextActiveTab ? nextActiveTab.relativePath : null,
+      activeTab: nextActiveTab ? nextActiveTab.rootPath : state.activeTab
+    };
+  }),
+
+  closeOtherEditorTabs: (id) => set(state => {
+    const kept = state.editorTabs.filter(t => t.id === id);
+    const target = kept[0];
+    return {
+      editorTabs: kept,
+      activeEditorTabId: id,
+      activeFile: target ? target.relativePath : null,
+      activeTab: target ? target.rootPath : state.activeTab
+    };
+  }),
+
+  closeEditorTabsToTheRight: (id) => set(state => {
+    const idx = state.editorTabs.findIndex(t => t.id === id);
+    if (idx === -1) return state;
+    const kept = state.editorTabs.slice(0, idx + 1);
+    const activeStillOpen = kept.some(t => t.id === state.activeEditorTabId);
+    const target = activeStillOpen ? kept.find(t => t.id === state.activeEditorTabId) : kept[kept.length - 1];
+    return {
+      editorTabs: kept,
+      activeEditorTabId: target ? target.id : null,
+      activeFile: target ? target.relativePath : null,
+      activeTab: target ? target.rootPath : state.activeTab
+    };
+  }),
+
+  closeAllEditorTabs: () => set({
+    editorTabs: [],
+    activeEditorTabId: null,
+    activeFile: null
+  }),
+
+  pinEditorTab: (id) => set(state => ({
+    editorTabs: state.editorTabs.map(t => t.id === id ? { ...t, isPinned: true } : t)
+  })),
+
   getPackedPresets: () => {
     const state = get();
     return state.presets.map(p => {
@@ -309,16 +585,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   createPreset: (name: string) => {
-    const prevState = {
-      presets: get().presets,
-      snapshots: get().presetSnapshots,
-      activeId: get().activePresetId,
-      includes: get().includes,
-      excludes: get().excludes,
-      treeOnly: get().treeOnly,
-      compressions: get().compressions
-    };
-    
     set(state => {
       const newPreset: Preset = {
         id: 'preset-' + Date.now() + Math.random().toString(36).substring(2, 7),
@@ -329,87 +595,146 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         compressions: {},
         history: []
       };
-      
-      const packedPresets = state.getPackedPresets();
-      packedPresets.push(newPreset);
-      
+
+      const packed = state.getPackedPresets();
+      packed.push(newPreset);
       const newSnapshots = { ...state.presetSnapshots, [newPreset.id]: JSON.parse(JSON.stringify(newPreset)) };
       useAppStore.getState().setWorkspaceSnapshots(state.workspaceId!, newSnapshots);
-      
+
       return {
         activePresetId: newPreset.id,
-        presets: packedPresets,
+        presets: packed,
         presetSnapshots: newSnapshots,
         includes: newPreset.inclusions,
         excludes: newPreset.exclusions,
         treeOnly: newPreset.treeOnly,
         compressions: newPreset.compressions,
+        stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
     });
-    
-    const nextState = {
-      presets: get().presets,
-      snapshots: get().presetSnapshots,
-      activeId: get().activePresetId,
-      includes: get().includes,
-      excludes: get().excludes,
-      treeOnly: get().treeOnly,
-      compressions: get().compressions
-    };
-    
-    useHistoryStore.getState().push(`Create Preset '${name}'`, 
-      () => set({ ...prevState, activePresetId: prevState.activeId, presetSnapshots: prevState.snapshots, isStale: true }),
-      () => set({ ...nextState, activePresetId: nextState.activeId, presetSnapshots: nextState.snapshots, isStale: true })
-    );
+
+    get().refreshVirtualGraph();
   },
 
-  switchPreset: (id: string) => set(state => {
-    if (id === state.activePresetId) return state;
-    
-    const packedPresets = state.getPackedPresets();
-    const target = packedPresets.find(p => p.id === id);
-    if (!target) return state;
-    
-    return {
-      activePresetId: id,
-      presets: packedPresets,
-      includes: target.inclusions,
-      excludes: target.exclusions,
-      treeOnly: target.treeOnly,
-      compressions: target.compressions,
-      compressionHistory: {},
-      isStale: true
+  duplicatePreset: (id: string, newName?: string) => {
+    const s = get();
+    const source = s.presets.find(p => p.id === id) || s.presets.find(p => p.id === s.activePresetId);
+    if (!source) return;
+
+    const sourceCurrent = id === s.activePresetId ? {
+      ...source,
+      inclusions: [...s.includes],
+      exclusions: [...s.excludes],
+      treeOnly: [...s.treeOnly],
+      compressions: JSON.parse(JSON.stringify(s.compressions))
+    } : source;
+
+    const name = newName || `${sourceCurrent.name} (Copy)`;
+    const newId = 'preset-' + Date.now() + Math.random().toString(36).substring(2, 7);
+    const duplicated: Preset = {
+      ...JSON.parse(JSON.stringify(sourceCurrent)),
+      id: newId,
+      name,
+      history: []
     };
-  }),
+
+    const packed = s.getPackedPresets();
+    packed.push(duplicated);
+    const newSnapshots = { ...s.presetSnapshots, [newId]: JSON.parse(JSON.stringify(duplicated)) };
+    useAppStore.getState().setWorkspaceSnapshots(s.workspaceId!, newSnapshots);
+
+    set({
+      activePresetId: newId,
+      presets: packed,
+      presetSnapshots: newSnapshots,
+      includes: duplicated.inclusions,
+      excludes: duplicated.exclusions,
+      treeOnly: duplicated.treeOnly,
+      compressions: duplicated.compressions,
+      stagingStatus: 'VIRTUAL_READY',
+      isStale: true
+    });
+
+    get().refreshVirtualGraph();
+  },
+
+  createPresetFromSelection: (name: string) => {
+    const s = get();
+    if (s.selectedFiles.size === 0) return;
+
+    const newId = 'preset-' + Date.now() + Math.random().toString(36).substring(2, 7);
+    const newInclusions = compactRules(Array.from(s.selectedFiles));
+    const newPreset: Preset = {
+      id: newId,
+      name,
+      inclusions: newInclusions,
+      exclusions: ['.git/', 'node_modules/', '__pycache__/', 'dist/', 'build/'],
+      treeOnly: [],
+      compressions: JSON.parse(JSON.stringify(s.compressions)),
+      history: []
+    };
+
+    const packed = s.getPackedPresets();
+    packed.push(newPreset);
+    const newSnapshots = { ...s.presetSnapshots, [newId]: JSON.parse(JSON.stringify(newPreset)) };
+    useAppStore.getState().setWorkspaceSnapshots(s.workspaceId!, newSnapshots);
+
+    set({
+      activePresetId: newId,
+      presets: packed,
+      presetSnapshots: newSnapshots,
+      includes: newPreset.inclusions,
+      excludes: newPreset.exclusions,
+      treeOnly: newPreset.treeOnly,
+      compressions: newPreset.compressions,
+      stagingStatus: 'VIRTUAL_READY',
+      isStale: true
+    });
+
+    get().refreshVirtualGraph();
+  },
+
+  switchPreset: (id: string) => {
+    set(state => {
+      if (id === state.activePresetId) return state;
+      const packed = state.getPackedPresets();
+      const target = packed.find(p => p.id === id);
+      if (!target) return state;
+
+      return {
+        activePresetId: id,
+        presets: packed,
+        includes: compactRules(target.inclusions),
+        excludes: compactRules(target.exclusions),
+        treeOnly: compactRules(target.treeOnly),
+        compressions: target.compressions as Record<string, CompressionRule[]>,
+        stagingStatus: 'VIRTUAL_READY',
+        isStale: true
+      };
+    });
+    get().refreshVirtualGraph();
+  },
 
   renamePreset: (id: string, newName: string) => set(state => {
-    const updatedPresets = state.presets.map(p => p.id === id ? { ...p, name: newName } : p);
-    return { presets: updatedPresets };
+    const updated = state.presets.map(p => p.id === id ? { ...p, name: newName } : p);
+    return { presets: updated };
   }),
 
   deletePreset: (id: string) => {
-    const prevPresets = get().presets;
-    const prevSnapshots = get().presetSnapshots;
-    const prevActiveId = get().activePresetId;
-    const prevIncludes = get().includes;
-    const prevExcludes = get().excludes;
-    const prevTreeOnly = get().treeOnly;
-    const prevCompressions = get().compressions;
-    
     set(state => {
       const newPresets = state.presets.filter(p => p.id !== id);
       if (newPresets.length === 0) return state; 
-      
+
       const newSnapshots = { ...state.presetSnapshots };
       delete newSnapshots[id];
       useAppStore.getState().deleteWorkspaceSnapshot(state.workspaceId!, id);
-      
+
       let newState: Partial<WorkspaceState> = {
         presets: newPresets,
         presetSnapshots: newSnapshots
       };
-      
+
       if (id === state.activePresetId) {
         const fallback = newPresets[0];
         newState = {
@@ -418,96 +743,82 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           includes: fallback.inclusions,
           excludes: fallback.exclusions,
           treeOnly: fallback.treeOnly,
-          compressions: fallback.compressions,
+          compressions: fallback.compressions as Record<string, CompressionRule[]>,
+          stagingStatus: 'VIRTUAL_READY',
           isStale: true
         };
       }
       return newState;
     });
-    
-    const nextPresets = get().presets;
-    const nextSnapshots = get().presetSnapshots;
-    const nextActiveId = get().activePresetId;
-    
-    useHistoryStore.getState().push(`Delete Preset`, 
-      () => set({ presets: prevPresets, presetSnapshots: prevSnapshots, activePresetId: prevActiveId, includes: prevIncludes, excludes: prevExcludes, treeOnly: prevTreeOnly, compressions: prevCompressions, isStale: true }),
-      () => set({ presets: nextPresets, presetSnapshots: nextSnapshots, activePresetId: nextActiveId, isStale: true })
-    );
+
+    get().refreshVirtualGraph();
   },
 
-  revertPreset: () => set(state => {
-    if (!state.activePresetId) return state;
-    const snapshot = state.presetSnapshots[state.activePresetId];
-    if (!snapshot) return state;
-    
-    const revertedPresets = state.presets.map(p => 
-      p.id === state.activePresetId ? JSON.parse(JSON.stringify(snapshot)) : p
-    );
-    
-    return {
-      presets: revertedPresets,
-      includes: snapshot.inclusions,
-      excludes: snapshot.exclusions,
-      treeOnly: snapshot.treeOnly,
-      compressions: snapshot.compressions,
-      compressionHistory: {},
-      isStale: true
-    };
-  }),
+  revertPreset: () => {
+    set(state => {
+      if (!state.activePresetId) return state;
+      const snap = state.presetSnapshots[state.activePresetId];
+      if (!snap) return state;
+
+      const reverted = state.presets.map(p => 
+        p.id === state.activePresetId ? JSON.parse(JSON.stringify(snap)) : p
+      );
+
+      return {
+        presets: reverted,
+        includes: compactRules(snap.inclusions),
+        excludes: compactRules(snap.exclusions),
+        treeOnly: compactRules(snap.treeOnly),
+        compressions: snap.compressions as Record<string, CompressionRule[]>,
+        stagingStatus: 'VIRTUAL_READY',
+        isStale: true
+      };
+    });
+    get().refreshVirtualGraph();
+  },
 
   addHistoryEntry: (entry) => set(state => {
     if (!state.activePresetId) return state;
     const newEntry = { ...entry, id: crypto.randomUUID() };
-    
-    const updatedPresets = state.presets.map(p => 
-      p.id === state.activePresetId 
-        ? { ...p, history: [newEntry, ...p.history] }
-        : p
+    const updated = state.presets.map(p => 
+      p.id === state.activePresetId ? { ...p, history: [newEntry, ...p.history] } : p
     );
-    
-    return { presets: updatedPresets };
+    return { presets: updated };
   }),
 
   addRootPath: async (rootPath: string, forceRescan = false) => {
     if (!forceRescan && get().rootPaths.includes(rootPath)) return;
-    
+
     const { node, rules, treeOnly, isMissing } = await window.api.scanDirectory(
       rootPath, 
       get().hardBlacklist,
       get().respectGitignore
     );
-    
+
+    const scopedRules = (rules || []).map(r => toScopedPathKey(rootPath, r));
+    const scopedTreeOnly = (treeOnly || []).map(t => toScopedPathKey(rootPath, t));
+
     set((state) => {
       const newMissing = new Set(state.missingRoots);
-      if (isMissing) {
-        newMissing.add(rootPath);
-      } else {
-        newMissing.delete(rootPath);
-      }
+      if (isMissing) newMissing.add(rootPath);
+      else newMissing.delete(rootPath);
 
       return {
         rootPaths: Array.from(new Set([...state.rootPaths, rootPath])),
         rawTrees: { ...state.rawTrees, [rootPath]: node },
         missingRoots: newMissing,
         activeTab: state.activeTab || rootPath,
-        excludes: isMissing ? state.excludes : Array.from(new Set([...state.excludes, ...rules])),
-        treeOnly: isMissing ? state.treeOnly : Array.from(new Set([...state.treeOnly, ...(treeOnly || [])]))
+        excludes: isMissing ? state.excludes : compactRules(Array.from(new Set([...state.excludes, ...scopedRules]))),
+        treeOnly: isMissing ? state.treeOnly : compactRules(Array.from(new Set([...state.treeOnly, ...scopedTreeOnly]))),
+        stagingStatus: 'VIRTUAL_READY',
+        isStale: true
       };
     });
-    
-    if (!forceRescan) {
-      useHistoryStore.getState().push(`Add Root '${rootPath.split(/[/\\]/).pop()}'`, 
-        () => get().removeRootPath(rootPath),
-        () => get().addRootPath(rootPath, true)
-      );
-    }
+
+    get().refreshVirtualGraph();
   },
 
   removeRootPath: (pathToRemove: string) => {
-    const prevRoots = get().rootPaths;
-    const prevTrees = { ...get().rawTrees };
-    const prevActiveTab = get().activeTab;
-    
     set((state) => {
       const newPaths = state.rootPaths.filter(p => p !== pathToRemove);
       const newRawTrees = { ...state.rawTrees };
@@ -515,19 +826,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
       const newMissing = new Set(state.missingRoots);
       newMissing.delete(pathToRemove);
-    
+
       return {
         rootPaths: newPaths,
         missingRoots: newMissing,
         rawTrees: newRawTrees,
-        activeTab: state.activeTab === pathToRemove ? (newPaths[0] || null) : state.activeTab
+        activeTab: state.activeTab === pathToRemove ? (newPaths[0] || null) : state.activeTab,
+        stagingStatus: 'VIRTUAL_READY',
+        isStale: true
       };
     });
-        
-    useHistoryStore.getState().push(`Remove Root '${pathToRemove.split(/[/\\]/).pop()}'`, 
-      () => set({ rootPaths: prevRoots, rawTrees: prevTrees, activeTab: prevActiveTab }),
-      () => get().removeRootPath(pathToRemove)
-    );
+
+    get().refreshVirtualGraph();
   },
 
   relocateRootPath: async (oldPath: string, newPath: string) => {
@@ -536,6 +846,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       get().hardBlacklist,
       get().respectGitignore
     );
+
+    const scopedRules = (rules || []).map(r => toScopedPathKey(newPath, r));
+    const scopedTreeOnly = (treeOnly || []).map(t => toScopedPathKey(newPath, t));
 
     set((state) => {
       const newRoots = state.rootPaths.map(p => p === oldPath ? newPath : p);
@@ -547,55 +860,55 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       newMissing.delete(oldPath);
       if (isMissing) newMissing.add(newPath);
 
+      const migrateKey = (k: string) => k.startsWith(`${oldPath}::`) ? `${newPath}::${k.slice(oldPath.length + 2)}` : k;
+      const migratedIncludes = state.includes.map(migrateKey);
+      const migratedExcludes = state.excludes.map(migrateKey);
+      const migratedTreeOnly = state.treeOnly.map(migrateKey);
+
+      const migratedCompressions: Record<string, CompressionRule[]> = {};
+      Object.entries(state.compressions).forEach(([k, v]) => {
+        migratedCompressions[migrateKey(k)] = v;
+      });
+
       return {
         rootPaths: newRoots,
         rawTrees: newTrees,
         missingRoots: newMissing,
         activeTab: state.activeTab === oldPath ? newPath : state.activeTab,
-        excludes: isMissing ? state.excludes : Array.from(new Set([...state.excludes, ...rules])),
-        treeOnly: isMissing ? state.treeOnly : Array.from(new Set([...state.treeOnly, ...(treeOnly || [])])),
+        includes: compactRules(migratedIncludes),
+        excludes: isMissing ? migratedExcludes : compactRules(Array.from(new Set([...migratedExcludes, ...scopedRules]))),
+        treeOnly: isMissing ? migratedTreeOnly : compactRules(Array.from(new Set([...migratedTreeOnly, ...scopedTreeOnly]))),
+        compressions: migratedCompressions,
+        stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
     });
+
+    get().refreshVirtualGraph();
   },
 
   reorderRootPaths: (draggedPath, targetPath) => {
-    const prevRoots = get().rootPaths;
     set(state => {
-      const draggedIndex = state.rootPaths.indexOf(draggedPath);
-      const targetIndex = state.rootPaths.indexOf(targetPath);
-      if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return state;
-      
-      const newPaths = [...state.rootPaths];
-      const [draggedItem] = newPaths.splice(draggedIndex, 1);
-      newPaths.splice(targetIndex, 0, draggedItem);
-      
-      return { rootPaths: newPaths };
+      const dIdx = state.rootPaths.indexOf(draggedPath);
+      const tIdx = state.rootPaths.indexOf(targetPath);
+      if (dIdx === -1 || tIdx === -1 || dIdx === tIdx) return state;
+      const next = [...state.rootPaths];
+      const [item] = next.splice(dIdx, 1);
+      next.splice(tIdx, 0, item);
+      return { rootPaths: next, stagingStatus: 'VIRTUAL_READY', isStale: true };
     });
-    const nextRoots = get().rootPaths;
-    useHistoryStore.getState().push(`Reorder Roots`, 
-      () => set({ rootPaths: prevRoots }),
-      () => set({ rootPaths: nextRoots })
-    );
+    get().refreshVirtualGraph();
   },
 
   setActiveTab: (path: string) => set({ activeTab: path }),
 
   toggleFolderExpansion: (relativePath: string) => {
-    const prevSet = new Set(get().expandedFolders);
     set((state) => {
       const newSet = new Set(state.expandedFolders);
       if (newSet.has(relativePath)) newSet.delete(relativePath);
       else newSet.add(relativePath);
       return { expandedFolders: newSet };
     });
-    const nextSet = new Set(get().expandedFolders);
-    
-    useHistoryStore.getState().push(
-      `${prevSet.has(relativePath) ? 'Collapse' : 'Expand'} Folder`, 
-      () => set({ expandedFolders: prevSet }),
-      () => set({ expandedFolders: nextSet })
-    );
   },
 
   setFoldersExpanded: (paths: string[], expanded: boolean) => set(state => {
@@ -605,171 +918,170 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   }),
 
   expandAllFolders: () => {
-    const prevCompressed = compressHistoryPayload(Array.from(get().expandedFolders));
     set(state => {
       if (!state.activeTab) return state;
       const tree = state.rawTrees[state.activeTab];
       if (!tree) return state;
-      
+
       const newExpanded = new Set(state.expandedFolders);
-      const traverse = (node: import('../types/ipc').FileNode, currentRelative: string) => {
+      const traverse = (node: FileNode, currentRel: string) => {
         if (node.type === 'directory') {
-          if (currentRelative) newExpanded.add(currentRelative);
+          if (currentRel) newExpanded.add(currentRel);
           if (node.children) {
             node.children.forEach(c => {
-              const childRel = currentRelative ? `${currentRelative}/${c.name}` : c.name;
-              traverse(c, childRel);
+              const cRel = currentRel ? `${currentRel}/${c.name}` : c.name;
+              traverse(c, cRel);
             });
           }
         }
       };
-      
       traverse(tree, '');
       return { expandedFolders: newExpanded };
     });
-    
-    const nextCompressed = compressHistoryPayload(Array.from(get().expandedFolders));
-    useHistoryStore.getState().push('Expand All Folders', 
-      () => set({ expandedFolders: new Set(decompressHistoryPayload<string[]>(prevCompressed)) }),
-      () => set({ expandedFolders: new Set(decompressHistoryPayload<string[]>(nextCompressed)) })
-    );
   },
 
-  collapseAllFolders: () => {
-    const prevCompressed = compressHistoryPayload(Array.from(get().expandedFolders));
-    set({ expandedFolders: new Set() });
-    
-    useHistoryStore.getState().push('Collapse All Folders', 
-      () => set({ expandedFolders: new Set(decompressHistoryPayload<string[]>(prevCompressed)) }),
-      () => set({ expandedFolders: new Set() })
-    );
-  },
+  collapseAllFolders: () => set({ expandedFolders: new Set() }),
 
   setIsPainting: (val: boolean) => set({ isPainting: val }),
 
   addBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: Array.from(new Set([...state.hardBlacklist, pattern])) })),
   removeBlacklistRule: (pattern: string) => set((state) => ({ hardBlacklist: state.hardBlacklist.filter(p => p !== pattern) })),
-
   addPendingBlacklistRule: (pattern: string) => set((state) => ({ pendingBlacklist: Array.from(new Set([...state.pendingBlacklist, pattern])) })),
   removePendingBlacklistRule: (pattern: string) => set((state) => ({ pendingBlacklist: state.pendingBlacklist.filter(p => p !== pattern) })),
 
   commitBlacklist: async () => {
     const state = get();
     if (state.pendingBlacklist.length === 0) return;
-    
+
     const merged = Array.from(new Set([...state.hardBlacklist, ...state.pendingBlacklist]));
-    set({ hardBlacklist: merged, pendingBlacklist: [], isStale: true });
-    
+    set({ hardBlacklist: merged, pendingBlacklist: [], stagingStatus: 'VIRTUAL_READY', isStale: true });
+
     for (const root of state.rootPaths) {
       await get().addRootPath(root, true);
     }
   },
 
-  addExcludeRule: (pattern: string) => set((state) => ({ excludes: Array.from(new Set([...state.excludes, pattern])) })),
-  removeExcludeRule: (pattern: string) => set((state) => ({ excludes: state.excludes.filter((p) => p !== pattern) })),
-
-  addTreeOnlyRule: (pattern: string) => set((state) => ({ treeOnly: Array.from(new Set([...state.treeOnly, pattern])) })),
-  removeTreeOnlyRule: (pattern: string) => set((state) => ({ treeOnly: state.treeOnly.filter((p) => p !== pattern) })),
-
-  applyRuleToSelection: (ruleType) => {
-    const prevExcludes = compressHistoryPayload(get().excludes);
-    const prevTreeOnly = compressHistoryPayload(get().treeOnly);
-    
-    set(state => {
-      if (state.selectedFiles.size === 0) return state;
-      
-      const newExcludes = new Set(state.excludes);
-      const newTreeOnly = new Set(state.treeOnly);
-      
-      state.selectedFiles.forEach(path => {
-        if (ruleType === 'include') {
-          newExcludes.delete(path);
-          newTreeOnly.delete(path);
-        } else if (ruleType === 'tree-only') {
-          newExcludes.delete(path);
-          newTreeOnly.add(path);
-        } else if (ruleType === 'exclude') {
-          newTreeOnly.delete(path);
-          newExcludes.add(path);
-        }
-      });
-      
-      return {
-        excludes: Array.from(newExcludes),
-        treeOnly: Array.from(newTreeOnly),
-        isStale: true 
-      };
-    });
-    
-    const nextExcludes = compressHistoryPayload(get().excludes);
-    const nextTreeOnly = compressHistoryPayload(get().treeOnly);
-    
-    const labels = { 'include': 'Included', 'tree-only': 'Tree-Only', 'exclude': 'Excluded' };
-    useHistoryStore.getState().push(`Marked ${labels[ruleType]}`, 
-      () => set({ excludes: decompressHistoryPayload<string[]>(prevExcludes), treeOnly: decompressHistoryPayload<string[]>(prevTreeOnly), isStale: true }),
-      () => set({ excludes: decompressHistoryPayload<string[]>(nextExcludes), treeOnly: decompressHistoryPayload<string[]>(nextTreeOnly), isStale: true })
-    );
+  addExcludeRule: (pattern: string) => {
+    set((state) => ({ excludes: compactRules(Array.from(new Set([...state.excludes, pattern]))), stagingStatus: 'VIRTUAL_READY', isStale: true }));
+    get().refreshVirtualGraph();
+  },
+  removeExcludeRule: (pattern: string) => {
+    set((state) => ({ excludes: state.excludes.filter((p) => p !== pattern), stagingStatus: 'VIRTUAL_READY', isStale: true }));
+    get().refreshVirtualGraph();
+  },
+  addTreeOnlyRule: (pattern: string) => {
+    set((state) => ({ treeOnly: compactRules(Array.from(new Set([...state.treeOnly, pattern]))), stagingStatus: 'VIRTUAL_READY', isStale: true }));
+    get().refreshVirtualGraph();
+  },
+  removeTreeOnlyRule: (pattern: string) => {
+    set((state) => ({ treeOnly: state.treeOnly.filter((p) => p !== pattern), stagingStatus: 'VIRTUAL_READY', isStale: true }));
+    get().refreshVirtualGraph();
   },
 
-  setActiveFile: (path: string | null) => set({ activeFile: path, isExportStaging: false }),
+  applyRuleToSelection: (ruleType, overrideRoot) => {
+    const rootId = overrideRoot || get().activeTab || get().rootPaths[0] || '';
+    set(state => {
+      if (state.selectedFiles.size === 0) return state;
+
+      const newExcludes = new Set(state.excludes);
+      const newTreeOnly = new Set(state.treeOnly);
+      const newIncludes = new Set(state.includes);
+
+      state.selectedFiles.forEach(rawPath => {
+        const scopedKey = isScopedKey(rawPath) ? rawPath : toScopedPathKey(rootId, rawPath);
+        if (ruleType === 'include') {
+          newExcludes.delete(scopedKey);
+          newTreeOnly.delete(scopedKey);
+          newIncludes.add(scopedKey);
+        } else if (ruleType === 'tree-only') {
+          newExcludes.delete(scopedKey);
+          newTreeOnly.add(scopedKey);
+          newIncludes.delete(scopedKey);
+        } else if (ruleType === 'exclude') {
+          newTreeOnly.delete(scopedKey);
+          newExcludes.add(scopedKey);
+          newIncludes.delete(scopedKey);
+        }
+      });
+
+      return {
+        includes: compactRules(Array.from(newIncludes)),
+        excludes: compactRules(Array.from(newExcludes)),
+        treeOnly: compactRules(Array.from(newTreeOnly)),
+        stagingStatus: 'VIRTUAL_READY',
+        isStale: true
+      };
+    });
+
+    get().refreshVirtualGraph();
+  },
+
+  compactAllRules: () => {
+    set(state => ({
+      includes: compactRules(state.includes),
+      excludes: compactRules(state.excludes),
+      treeOnly: compactRules(state.treeOnly),
+      stagingStatus: 'VIRTUAL_READY',
+      isStale: true
+    }));
+    get().refreshVirtualGraph();
+  },
+
+  setActiveFile: (path: string | null) => {
+    if (path && get().activeTab) {
+      get().openEditorTab(get().activeTab!, path, false);
+    } else {
+      set({ activeFile: path, isExportStaging: false });
+    }
+  },
+
   setSelectedFiles: (files: Set<string>) => set({ selectedFiles: files, ephemeralDragPaths: null }),
   setExportStaging: (val: boolean) => set({ isExportStaging: val }),
 
-  addCompressions: (relativePath, rules) => {
-    const prevComp = get().compressions[relativePath] || [];
+  addCompressions: (targetKey, rules) => {
     set((state) => {
-      const existing = state.compressions[relativePath] || [];
+      const existing = state.compressions[targetKey] || [];
       const newRules = rules.map(r => ({ ...r, id: Math.random().toString(36).substr(2, 9) }));
       return {
-        compressions: { ...state.compressions, [relativePath]: [...existing, ...newRules] },
+        compressions: { ...state.compressions, [targetKey]: [...existing, ...newRules] },
+        stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
     });
-    const nextComp = get().compressions[relativePath] || [];
-    useHistoryStore.getState().push(`Skip Block`, 
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: prevComp }, isStale: true })),
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: nextComp }, isStale: true }))
-    );
+    get().refreshVirtualGraph();
   },
 
-  setCompressions: (relativePath, rules) => {
-    const prevComp = get().compressions[relativePath] || [];
-    set(state => ({ compressions: { ...state.compressions, [relativePath]: rules }, isStale: true }));
-    useHistoryStore.getState().push(`Update Skips`, 
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: prevComp }, isStale: true })),
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: rules }, isStale: true }))
-    );
+  setCompressions: (targetKey, rules) => {
+    set(state => ({
+      compressions: { ...state.compressions, [targetKey]: rules },
+      stagingStatus: 'VIRTUAL_READY',
+      isStale: true
+    }));
+    get().refreshVirtualGraph();
   },
 
-  removeCompression: (relativePath, id) => {
-    const prevComp = get().compressions[relativePath] || [];
+  removeCompression: (targetKey, id) => {
     set((state) => {
-      const existing = state.compressions[relativePath] || [];
+      const existing = state.compressions[targetKey] || [];
       return {
-        compressions: { ...state.compressions, [relativePath]: existing.filter(c => c.id !== id) },
+        compressions: { ...state.compressions, [targetKey]: existing.filter(c => c.id !== id) },
+        stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
     });
-    const nextComp = get().compressions[relativePath] || [];
-    useHistoryStore.getState().push(`Un-Skip Block`, 
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: prevComp }, isStale: true })),
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: nextComp }, isStale: true }))
-    );
+    get().refreshVirtualGraph();
   },
 
-  clearCompressions: (relativePath) => {
-    const prevComp = get().compressions[relativePath] || [];
+  clearCompressions: (targetKey) => {
     set((state) => {
-      const existing = state.compressions[relativePath] || [];
-      if (existing.length === 0) return state;
+      const next = { ...state.compressions };
+      delete next[targetKey];
       return {
-        compressions: { ...state.compressions, [relativePath]: [] },
+        compressions: next,
+        stagingStatus: 'VIRTUAL_READY',
         isStale: true
       };
     });
-    useHistoryStore.getState().push(`Clear Skips`, 
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: prevComp }, isStale: true })),
-      () => set(s => ({ compressions: { ...s.compressions, [relativePath]: [] }, isStale: true }))
-    );
+    get().refreshVirtualGraph();
   }
 }));

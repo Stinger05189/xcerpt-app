@@ -5,6 +5,7 @@ import { TreeNode } from './TreeNode';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
+import { toScopedPathKey, parseScopedPathKey } from '../../utils/filterEngine';
 import { Search, Plus, LayoutTemplate, EyeOff, X, Zap, Loader2, GripVertical, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useFlattenedTree } from './useFlattenedTree';
@@ -24,6 +25,8 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const isPainting = useWorkspaceStore(s => s.isPainting);
   const isEphemeralBuilding = useWorkspaceStore(s => s.isEphemeralBuilding);
   const ephemeralDragPaths = useWorkspaceStore(s => s.ephemeralDragPaths);
+  const rootPaths = useWorkspaceStore(s => s.rootPaths);
+  const rawTrees = useWorkspaceStore(s => s.rawTrees);
 
   const [stats, setStats] = useState({ fileCount: 0, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 });
   const [hasSelection, setHasSelection] = useState(false);
@@ -31,7 +34,6 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const [exactTokens, setExactTokens] = useState<number | null>(null);
   const [isCalculatingTokens, setIsCalculatingTokens] = useState(false);
 
-  // --- Virtualization Architecture ---
   const expandedFolders = useWorkspaceStore(s => s.expandedFolders);
   const hideExcluded = useWorkspaceStore(s => s.hideExcluded);
   const hideTreeOnly = useWorkspaceStore(s => s.hideTreeOnly);
@@ -61,108 +63,109 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     }
   }, [targetScrollY, setTargetScrollY]);
 
-  // --- Marquee & Drag Engine ---
   const [marquee, setMarquee] = useState<{ startIndex: number; currentIndex: number; mode: 'add' | 'remove' } | null>(null);
-
   const baseSelectionRef = useRef<Set<string>>(new Set());
   const dragStateRef = useRef<{ startIndex: number, mode: 'add' | 'remove' } | null>(null);
   const lastPointerYRef = useRef<number>(0);
   const autoScrollRafRef = useRef<number | null>(null);
 
-  const clickTargetRef = useRef<string | null>(null);
+  const clickTargetRef = useRef<{ rootPath: string; relativePath: string } | null>(null);
   const hasDraggedRef = useRef<boolean>(false);
   const startPointerYRef = useRef<number>(0);
 
-  // Deferred Calculation Engine
   useEffect(() => {
-    const calculateStats = (rootNode: FileNode, selFiles: Set<string>) => {
+    const calculateStats = (selFiles: Set<string>) => {
       let fileCount = 0;
       let totalBytes = 0;
-    
+
       if (selFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 };
-    
-      const traverse = (n: FileNode, currentRelative: string, isParentSelected: boolean) => {
-        const isDir = n.type === 'directory';
-        const pattern = isDir ? (currentRelative ? `${currentRelative}/` : '') : currentRelative;
-        const isSelected = selFiles.has(pattern) || isParentSelected;
+
+      selFiles.forEach(key => {
+        const { rootId, relativePath } = parseScopedPathKey(key);
+        if (relativePath.endsWith('/')) return;
+        const targetTree = rawTrees[rootId] || node;
         
-        if (!isDir && isSelected) {
+        const findSize = (n: FileNode, curRel: string): number => {
+          if (curRel === relativePath && n.type === 'file') return n.size;
+          if (n.children) {
+            for (const c of n.children) {
+              const nextRel = curRel ? `${curRel}/${c.name}` : c.name;
+              const res = findSize(c, nextRel);
+              if (res > 0) return res;
+            }
+          }
+          return 0;
+        };
+
+        const sz = findSize(targetTree, '');
+        if (sz > 0) {
           fileCount++;
-          totalBytes += n.size;
+          totalBytes += sz;
         }
-        
-        if (n.children) {
-          n.children.forEach(child => {
-            const childRelative = currentRelative ? `${currentRelative}/${child.name}` : child.name;
-            traverse(child, childRelative, isSelected);
-          });
-        }
-      };
-    
-      traverse(rootNode, '', false);
+      });
+
       const rawTokens = Math.round(totalBytes / 4);
-    
       return {
         fileCount,
         kb: (totalBytes / 1024).toFixed(1),
         tokens: rawTokens.toLocaleString(),
         rawBytes: totalBytes,
-        rawTokens: rawTokens
+        rawTokens
       };
     };
-    
+
     const unsub = useWorkspaceStore.subscribe((state, prevState) => {
       const selectionChanged = state.selectedFiles !== prevState.selectedFiles;
       const justStoppedPainting = prevState.isPainting && !state.isPainting;
-    
+
       if (selectionChanged) {
         setHasSelection(state.selectedFiles.size > 0);
       }
-    
-      // ONLY run the heavy O(N) calculation if we are NOT actively painting
-      // This ensures 60fps marquee selections without blocking the UI thread
+
       if (!state.isPainting && (selectionChanged || justStoppedPainting)) {
-        setStats(calculateStats(node, state.selectedFiles));
+        setStats(calculateStats(state.selectedFiles));
       }
     });
-    
-    // Initial calc on mount
-    const initialStore = useWorkspaceStore.getState();
-    setHasSelection(initialStore.selectedFiles.size > 0);
-    setStats(calculateStats(node, initialStore.selectedFiles));
-    
-    return unsub;
-  }, [node]);
 
-  // Exact BPE Token Calculation Engine (Offline/Async)
+    const initStore = useWorkspaceStore.getState();
+    setHasSelection(initStore.selectedFiles.size > 0);
+    setStats(calculateStats(initStore.selectedFiles));
+
+    return unsub;
+  }, [node, rawTrees]);
+
   useEffect(() => {
     if (isPainting) {
       setExactTokens(null);
       setIsCalculatingTokens(false);
       return;
     }
-    
+
     if (!hasSelection) {
       setExactTokens(0);
       setIsCalculatingTokens(false);
       return;
     }
-    
+
     const calculateExactTokens = async () => {
       setIsCalculatingTokens(true);
       const state = useWorkspaceStore.getState();
-      
-      // Filter out directory stubs and map to absolute paths for Node.js
-      const filePaths = Array.from(state.selectedFiles)
-        .filter(p => !p.endsWith('/'))
-        .map(p => `${rootPath}/${p}`.replace(/\\/g, '/'));
-    
+
+      const filePaths: string[] = [];
+      state.selectedFiles.forEach(k => {
+        const { rootId, relativePath } = parseScopedPathKey(k);
+        if (!relativePath.endsWith('/')) {
+          const r = rootId || rootPath;
+          filePaths.push(`${r}/${relativePath}`.replace(/\\/g, '/'));
+        }
+      });
+
       if (filePaths.length === 0) {
         setExactTokens(0);
         setIsCalculatingTokens(false);
         return;
       }
-    
+
       try {
         const tokens = await window.api.calculateTokens(filePaths);
         setExactTokens(tokens);
@@ -172,8 +175,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
         setIsCalculatingTokens(false);
       }
     };
-    
-    // Debounce to ensure it only runs once a rapid click/select event settles
+
     const timer = setTimeout(calculateExactTokens, 300);
     return () => clearTimeout(timer);
   }, [isPainting, hasSelection, stats.fileCount, rootPath]);
@@ -181,10 +183,20 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const handleStageEphemeral = async () => {
     const state = useWorkspaceStore.getState();
     state.setExportState({ isEphemeralBuilding: true, ephemeralDragPaths: null });
-    setHasLoggedDrag(false); 
-    
+    setHasLoggedDrag(false);
+
     try {
-      const payload = generateEphemeralPayload(rootPath, node, state.selectedFiles, state.compressions, config.extensionOverrides, state.mergeToSingleFile);
+      const multiRoots = rootPaths.map(rp => ({ rootPath: rp, tree: rawTrees[rp] })).filter(r => Boolean(r.tree));
+      const payload = generateEphemeralPayload(
+        rootPath,
+        node,
+        state.selectedFiles,
+        state.compressions,
+        config.extensionOverrides,
+        state.mergeToSingleFile,
+        state.embedProtocol,
+        multiRoots
+      );
       const paths = await window.api.stageEphemeralExport(payload);
       state.setExportState({ isEphemeralBuilding: false, ephemeralDragPaths: paths });
     } catch (e) {
@@ -194,15 +206,14 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   };
 
   const visiblePaths = useMemo(() => {
-    if (!searchQuery.trim()) return null; 
-    
+    if (!searchQuery.trim()) return null;
     const term = searchQuery.toLowerCase();
     const visible = new Set<string>();
-    
+
     const checkNode = (n: FileNode, currentRelative: string): boolean => {
       const isMatch = n.name.toLowerCase().includes(term);
       let hasMatchingChild = false;
-    
+
       if (n.children) {
         for (const child of n.children) {
           const childRelative = currentRelative ? `${currentRelative}/${child.name}` : child.name;
@@ -211,21 +222,30 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
           }
         }
       }
-    
+
       if (isMatch || hasMatchingChild) {
         visible.add(currentRelative);
         return true;
       }
       return false;
     };
-    
+
     checkNode(node, '');
     return visible;
   }, [node, searchQuery]);
 
-  const flatNodes = useFlattenedTree(node, expandedFolders, visiblePaths, includes, excludes, treeOnly, hideExcluded, hideTreeOnly);
+  const flatNodes = useFlattenedTree(
+    rootPath,
+    node,
+    expandedFolders,
+    visiblePaths,
+    includes,
+    excludes,
+    treeOnly,
+    hideExcluded,
+    hideTreeOnly
+  );
 
-  // ANTI-STALE CLOSURE REF: Guarantees the drag engine always sees the live tree
   const flatNodesRef = useRef(flatNodes);
   useEffect(() => {
     flatNodesRef.current = flatNodes;
@@ -237,85 +257,44 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     count: flatNodes.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
-    overscan: 15, 
+    overscan: 15,
   });
-
-  // --- 1D Mathematical Marquee System ---
 
   const updateSelectionFromPointer = (clientY: number) => {
     if (!parentRef.current || !dragStateRef.current) return;
     const container = parentRef.current;
     const rect = container.getBoundingClientRect();
-    
+
     const offsetY = container.scrollTop + (clientY - rect.top);
     let currentIndex = Math.floor(offsetY / ROW_HEIGHT);
     currentIndex = Math.max(0, Math.min(currentIndex, flatNodesRef.current.length - 1));
-    
+
     setMarquee(prev => prev ? { ...prev, currentIndex } : null);
-    
+
     const { startIndex, mode } = dragStateRef.current;
     const minIdx = Math.min(startIndex, currentIndex);
     const maxIdx = Math.max(startIndex, currentIndex);
-    
+
     const newSelection = new Set(baseSelectionRef.current);
     for (let i = minIdx; i <= maxIdx; i++) {
       const flatNode = flatNodesRef.current[i];
       if (!flatNode) continue;
       const pattern = flatNode.node.type === 'directory' ? `${flatNode.relativePath}/` : flatNode.relativePath;
-      
-      if (mode === 'add') newSelection.add(pattern);
-      else newSelection.delete(pattern);
+      const scoped = toScopedPathKey(rootPath, pattern);
+
+      if (mode === 'add') newSelection.add(scoped);
+      else newSelection.delete(scoped);
     }
-    
+
     useWorkspaceStore.getState().setSelectedFiles(newSelection);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
     lastPointerYRef.current = e.clientY;
-    
     if (Math.abs(e.clientY - startPointerYRef.current) > 5) {
       hasDraggedRef.current = true;
     }
-
     updateSelectionFromPointer(e.clientY);
-    
-    if (!autoScrollRafRef.current) {
-      startAutoScroll();
-    }
-  };
-
-  const startAutoScroll = () => {
-    hasDraggedRef.current = true;
-    const loop = () => {
-      if (!parentRef.current || !dragStateRef.current) {
-        autoScrollRafRef.current = null;
-        return;
-      }
-      
-      const container = parentRef.current;
-      const rect = container.getBoundingClientRect();
-      const y = lastPointerYRef.current;
-    
-      const SCROLL_SPEED = 15;
-      const THRESHOLD = 40;
-    
-      let scrolled = false;
-      if (y < rect.top + THRESHOLD) {
-        container.scrollTop -= SCROLL_SPEED;
-        scrolled = true;
-      } else if (y > rect.bottom - THRESHOLD) {
-        container.scrollTop += SCROLL_SPEED;
-        scrolled = true;
-      }
-    
-      if (scrolled) {
-        updateSelectionFromPointer(y);
-        autoScrollRafRef.current = requestAnimationFrame(loop);
-      } else {
-        autoScrollRafRef.current = null; 
-      }
-    };
-    autoScrollRafRef.current = requestAnimationFrame(loop);
   };
 
   const handlePointerUp = () => {
@@ -326,31 +305,31 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     dragStateRef.current = null;
     setMarquee(null);
     useWorkspaceStore.getState().setIsPainting(false);
-    
+
     if (clickTargetRef.current && !hasDraggedRef.current) {
-      useWorkspaceStore.getState().setActiveFile(clickTargetRef.current);
+      useWorkspaceStore.getState().openEditorTab(clickTargetRef.current.rootPath, clickTargetRef.current.relativePath, false);
     }
   };
 
   const handleRowPointerDown = (e: React.PointerEvent, index: number, pattern: string, isDirectory: boolean) => {
     if (e.button !== 0) return;
-    
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (e.clientX - rect.left <= 32) return; 
-    
+    if (e.clientX - rect.left <= 32) return;
+
     e.stopPropagation();
-    e.preventDefault(); 
-    
+    e.preventDefault();
+
     const store = useWorkspaceStore.getState();
-    const hasPattern = store.selectedFiles.has(pattern);
-    
+    const scoped = toScopedPathKey(rootPath, pattern);
+    const hasPattern = store.selectedFiles.has(scoped) || store.selectedFiles.has(pattern);
+
     hasDraggedRef.current = false;
     startPointerYRef.current = e.clientY;
-    clickTargetRef.current = !isDirectory ? pattern : null;
-    
+    clickTargetRef.current = !isDirectory ? { rootPath, relativePath: pattern } : null;
+
     let mode: 'add' | 'remove' = 'add';
     let clearFirst = false;
-    
+
     if (e.shiftKey) mode = 'add';
     else if (e.altKey) mode = 'remove';
     else if (e.ctrlKey || e.metaKey) mode = hasPattern ? 'remove' : 'add';
@@ -358,65 +337,63 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
       mode = 'add';
       clearFirst = true;
     }
-    
+
     const baseSelection = clearFirst ? new Set<string>() : new Set(store.selectedFiles);
-    if (mode === 'add') baseSelection.add(pattern);
-    else baseSelection.delete(pattern);
-    
+    if (mode === 'add') baseSelection.add(scoped);
+    else {
+      baseSelection.delete(scoped);
+      baseSelection.delete(pattern);
+    }
+
     store.setSelectedFiles(baseSelection);
     store.setIsPainting(true);
-    
+
     setMarquee({ startIndex: index, currentIndex: index, mode });
-    
     baseSelectionRef.current = baseSelection;
     dragStateRef.current = { startIndex: index, mode };
     lastPointerYRef.current = e.clientY;
-    
+
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Prevent keybinds from firing inside search bars or the Monaco Editor
       const activeTag = document.activeElement?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
-      
+
       const state = useWorkspaceStore.getState();
 
-      // Select All binding (Ctrl+A / Cmd+A)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        const allVisiblePatterns = flatNodesRef.current.map(fn => 
-          fn.node.type === 'directory' ? `${fn.relativePath}/` : fn.relativePath
-        );
-        state.setSelectedFiles(new Set(allVisiblePatterns));
+        const allVisibleScoped = flatNodesRef.current.map(fn => {
+          const pat = fn.node.type === 'directory' ? `${fn.relativePath}/` : fn.relativePath;
+          return toScopedPathKey(rootPath, pat);
+        });
+        state.setSelectedFiles(new Set(allVisibleScoped));
         return;
       }
-      
-      // Stop execution for active-selection actions if nothing is selected
+
       if (state.selectedFiles.size === 0) return;
 
-      // Reveal in OS binding
       if (e.shiftKey && e.altKey && e.key.toLowerCase() === 'r') {
         e.preventDefault();
         const firstSelected = Array.from(state.selectedFiles)[0];
         if (firstSelected) {
-          const cleanPath = firstSelected.replace(/\/$/, '');
-          const absPath = `${rootPath}/${cleanPath}`.replace(/\\/g, '/');
-          window.api.showItemInFolder(absPath);
+          const { rootId, relativePath } = parseScopedPathKey(firstSelected);
+          const cleanPath = relativePath.replace(/\/$/, '');
+          const r = rootId || rootPath;
+          window.api.showItemInFolder(`${r}/${cleanPath}`.replace(/\\/g, '/'));
         }
         return;
       }
 
-      // Ignore standard keybinds if the user is holding Ctrl/Cmd/Alt 
-      // (prevents conflict with Ctrl+A, Cmd+S, etc.)
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-    
+
       switch(e.key.toLowerCase()) {
-        case 'a': state.applyRuleToSelection('include'); break;
-        case 's': state.applyRuleToSelection('tree-only'); break;
-        case 'd': state.applyRuleToSelection('exclude'); break;
+        case 'a': state.applyRuleToSelection('include', rootPath); break;
+        case 's': state.applyRuleToSelection('tree-only', rootPath); break;
+        case 'd': state.applyRuleToSelection('exclude', rootPath); break;
         case 'escape': state.setSelectedFiles(new Set()); break;
       }
     };
@@ -426,7 +403,6 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
   return (
     <div className="flex flex-col h-full relative @container">
-      {/* Local Tree Search & Toggles */}
       <div className="mb-4 flex flex-col gap-2 shrink-0">
         <div className="flex items-center gap-1.5">
           <div className="relative flex-1">
@@ -472,8 +448,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
           </div>
         </div>
       </div>
-    
-      {/* Scrollable Virtualized Tree Container */}
+
       <div 
         ref={parentRef}
         className={`flex-1 overflow-y-auto font-mono text-text-primary relative pb-4 select-none ${isPainting ? 'is-painting' : ''}`}
@@ -493,7 +468,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
             const flatNode = flatNodes[virtualRow.index];
             const isDirectory = flatNode.node.type === 'directory';
             const pattern = isDirectory ? `${flatNode.relativePath}/` : flatNode.relativePath;
-            
+
             return (
               <TreeNode
                 key={flatNode.relativePath}
@@ -501,6 +476,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
                 rootPath={rootPath}
                 relativePath={flatNode.relativePath}
                 depth={flatNode.depth}
+                status={flatNode.status}
                 onPointerDown={(e) => handleRowPointerDown(e, virtualRow.index, pattern, isDirectory)}
                 style={{
                   position: 'absolute',
@@ -513,8 +489,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
               />
             );
           })}
-          
-          {/* Virtual Selection Brush */}
+
           {marquee && (
             <div
               style={{
@@ -533,8 +508,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
           )}
         </div>
       </div>
-       
-      {/* Persistent Stats & Actions Bar */}
+
       <div className={`shrink-0 bg-bg-base border-t border-border-subtle p-3 flex flex-col gap-3 transition-all duration-200 z-20 ${hasSelection ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
         <div className="flex items-center justify-between text-xs text-text-muted px-1">
           <span className="font-medium text-text-primary">{hasSelection ? stats.fileCount : 0} Files Selected</span>
@@ -548,30 +522,30 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
             </span>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-1.5">
           <button 
-            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('include')} 
+            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('include', rootPath)} 
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-bg-hover hover:bg-green-500/20 rounded text-xs font-medium transition-colors text-green-400 border border-transparent hover:border-green-500/30 whitespace-nowrap"
             title="Include File & Export [A]"
           >
             <Plus size={14}/> <span className="hidden @[240px]:inline">Include</span>
           </button>
           <button 
-            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('tree-only')} 
+            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('tree-only', rootPath)} 
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-bg-hover hover:bg-accent/20 rounded text-xs font-medium transition-colors text-accent border border-transparent hover:border-accent/30 whitespace-nowrap"
             title="Show in Tree, Skip Export [S]"
           >
             <LayoutTemplate size={14}/> <span className="hidden @[240px]:inline">Tree</span>
           </button>
           <button 
-            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('exclude')} 
+            onClick={() => useWorkspaceStore.getState().applyRuleToSelection('exclude', rootPath)} 
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 bg-bg-hover hover:bg-red-500/20 rounded text-xs font-medium transition-colors text-text-muted hover:text-red-400 border border-transparent hover:border-red-500/30 whitespace-nowrap"
             title="Exclude Entirely [D]"
           >
             <EyeOff size={14}/> <span className="hidden @[240px]:inline">Exclude</span>
           </button>
-          
+
           <button 
             onClick={() => useWorkspaceStore.getState().setSelectedFiles(new Set())} 
             className="px-2 py-1.5 bg-bg-hover hover:bg-red-500/20 rounded transition-colors text-text-muted hover:text-red-400 border border-transparent hover:border-red-500/30 shrink-0"
@@ -580,9 +554,9 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
             <X size={14} />
           </button>
         </div>
-        
+
         <div className="h-px bg-border-subtle my-0.5" />
-      
+
         {isEphemeralBuilding ? (
           <div className="w-full flex items-center justify-center gap-2 py-1.5 text-accent text-xs font-medium">
             <Loader2 size={14} className="animate-spin" /> Packaging Context...

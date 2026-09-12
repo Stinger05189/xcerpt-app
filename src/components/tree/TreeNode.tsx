@@ -1,9 +1,10 @@
 // src/components/tree/TreeNode.tsx
 import { useState, memo } from 'react';
-import { ChevronRight, ChevronDown, File, Folder } from 'lucide-react';
+import { ChevronRight, ChevronDown, File, Folder, Edit3 } from 'lucide-react';
 import type { FileNode } from '../../types/ipc';
+import type { FileStatus } from '../../utils/filterEngine';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { getFileStatus } from '../../utils/filterEngine';
+import { toScopedPathKey } from '../../utils/filterEngine';
 import { ContextMenu } from './ContextMenu';
 
 interface TreeNodeProps {
@@ -11,22 +12,24 @@ interface TreeNodeProps {
   rootPath: string;
   relativePath: string;
   depth?: number;
+  status: FileStatus;
   style?: React.CSSProperties;
   onPointerDown?: (e: React.PointerEvent) => void;
 }
 
-const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onPointerDown }: TreeNodeProps) => {
+const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, style, onPointerDown }: TreeNodeProps) => {
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
 
   const isDirectory = node.type === 'directory';
   const pattern = isDirectory ? `${relativePath}/` : relativePath;
+  const scopedPattern = toScopedPathKey(rootPath, pattern);
 
+  // Granular selectors: strictly boolean returns so unselected rows never re-render during drag painting
   const isExpanded = useWorkspaceStore(s => s.expandedFolders.has(relativePath));
-  const isActiveFile = useWorkspaceStore(s => s.activeFile === relativePath && !isDirectory);
-  const isSelected = useWorkspaceStore(s => s.selectedFiles.has(pattern));
+  const isActiveFile = useWorkspaceStore(s => s.activeTab === rootPath && s.activeFile === relativePath && !isDirectory);
+  const isSelected = useWorkspaceStore(s => s.selectedFiles.has(scopedPattern) || s.selectedFiles.has(pattern));
   const gitStatusRaw = useWorkspaceStore(s => s.gitStatus[relativePath]);
 
-  // Map Git Status Codes (e.g., ' M', '??', 'A ')
   let gitColorClass = '';
   if (gitStatusRaw && !isDirectory) {
     if (gitStatusRaw.includes('M')) gitColorClass = 'text-orange-400';
@@ -34,13 +37,13 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
     else if (gitStatusRaw.includes('D')) gitColorClass = 'text-red-400 line-through opacity-70';
   }
 
-  const includes = useWorkspaceStore(s => s.includes);
-  const excludes = useWorkspaceStore(s => s.excludes);
-  const treeOnly = useWorkspaceStore(s => s.treeOnly);
-
-  const status = getFileStatus(relativePath, isDirectory, includes, excludes, treeOnly);
+  // Pure prop-derived status: ZERO rule indexing performed on render
   const isExcluded = status === 'excluded';
   const isTreeOnly = status === 'tree-only';
+
+  const compressions = useWorkspaceStore(s => s.compressions[scopedPattern] || s.compressions[relativePath]);
+  const skipCount = compressions?.length || 0;
+  const skippedLines = compressions?.reduce((acc, c) => acc + (c.lineCount || 0), 0) || 0;
 
   const handleChevronClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -49,16 +52,20 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isDirectory) useWorkspaceStore.getState().toggleFolderExpansion(relativePath);
+    if (isDirectory) {
+      useWorkspaceStore.getState().toggleFolderExpansion(relativePath);
+    } else {
+      useWorkspaceStore.getState().openEditorTab(rootPath, relativePath, true);
+    }
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     const store = useWorkspaceStore.getState();
-    if (!store.selectedFiles.has(pattern)) {
-      store.setSelectedFiles(new Set([pattern]));
+    if (!store.selectedFiles.has(scopedPattern) && !store.selectedFiles.has(pattern)) {
+      store.setSelectedFiles(new Set([scopedPattern]));
     }
     setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
@@ -93,6 +100,16 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
         <span className={`truncate flex-1 pr-2 ${isTreeOnly ? 'italic font-medium text-accent' : (gitColorClass ? gitColorClass : '')}`} title={node.name}>
           {node.name}
         </span>
+
+        {!isDirectory && skipCount > 0 && (
+          <span 
+            className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-400/10 px-1.5 py-0.2 rounded mr-2 font-mono"
+            title={`${skipCount} skip block${skipCount > 1 ? 's' : ''} active (-${skippedLines} lines)`}
+          >
+            <Edit3 size={10} className="shrink-0" />
+            <span>{skipCount}</span>
+          </span>
+        )}
         
         {!isDirectory && !isExcluded && !isTreeOnly && (
           <span className="text-[10px] text-accent font-medium pr-3 whitespace-nowrap hidden @[200px]:inline">
@@ -117,7 +134,9 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, style, onP
 export const TreeNode = memo(TreeNodeComponent, (prev, next) => {
   return (
     prev.relativePath === next.relativePath &&
+    prev.rootPath === next.rootPath &&
     prev.node === next.node &&
+    prev.status === next.status &&
     prev.style?.transform === next.style?.transform
   );
 });
