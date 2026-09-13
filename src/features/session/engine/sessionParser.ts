@@ -3,16 +3,12 @@ import type {
   DevSession, 
   ParsedFileAction, 
   FileActionType, 
+  ActionReviewStatus,
   MarkdownExplanationSection, 
   DevSessionSummary 
 } from '../types/session';
 
-const PROTOCOL_HEADER_PATTERNS = [
-  /^\s*\/\/\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
-  /^\s*#\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
-  /^\s*<!--\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+.*-->/i,
-  /^\s*--\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
-];
+const PROTOCOL_TAG_REGEX = /^\s*(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*(.*)$/i;
 
 export function stripProtocolScaffolding(rawCode: string, targetPath?: string): string {
   const lines = rawCode.split('\n');
@@ -21,23 +17,30 @@ export function stripProtocolScaffolding(rawCode: string, targetPath?: string): 
   const firstNonEmptyIndex = lines.findIndex(l => l.trim().length > 0);
   if (firstNonEmptyIndex === -1) return rawCode;
 
-  const candidateLine = lines[firstNonEmptyIndex].trim();
-  let shouldStrip = PROTOCOL_HEADER_PATTERNS.some(pattern => pattern.test(candidateLine));
+  const candidateLine = lines[firstNonEmptyIndex];
+  const tagMatch = candidateLine.match(PROTOCOL_TAG_REGEX);
 
-  if (!shouldStrip && targetPath) {
-    const normalizedTarget = targetPath.replace(/\\/g, '/');
-    const commentPrefixes = ['//', '#', '<!--', '--'];
-    for (const cp of commentPrefixes) {
-      if (candidateLine.startsWith(cp) && candidateLine.includes(normalizedTarget)) {
-        shouldStrip = true;
-        break;
-      }
+  if (tagMatch) {
+    const commentPrefix = tagMatch[1];
+    let remainder = tagMatch[3].trim();
+
+    // Clean HTML comment closing tags if present on the single line
+    if (commentPrefix === '<!--' && remainder.endsWith('-->')) {
+      remainder = remainder.slice(0, -3).trim();
     }
-  }
 
-  if (shouldStrip) {
-    lines.splice(firstNonEmptyIndex, 1);
-    if (lines[firstNonEmptyIndex]?.trim() === '') {
+    if (remainder.length > 0) {
+      // Retain the comment prefix with the path intact
+      lines[firstNonEmptyIndex] = commentPrefix === '<!--'
+        ? `<!-- ${remainder} -->`
+        : `${commentPrefix} ${remainder}`;
+    } else if (targetPath) {
+      // If action had no inline path, retain canonical commented relative path
+      lines[firstNonEmptyIndex] = commentPrefix === '<!--'
+        ? `<!-- ${targetPath} -->`
+        : `${commentPrefix} ${targetPath}`;
+    } else {
+      // Prune line if empty action tag with no path
       lines.splice(firstNonEmptyIndex, 1);
     }
   }
@@ -173,6 +176,14 @@ export function parseSessionMarkdown(
 
     const proposedContent = stripProtocolScaffolding(rawPayloadContent, targetRelativePath);
 
+    // No-Op Auto-Detection: Identical contents to disk are pre-marked as MERGED
+    const isIdenticalToDisk = originalContent !== null && originalContent === proposedContent;
+    let reviewStatus: ActionReviewStatus = 'PENDING';
+    if (isIdenticalToDisk && actionType !== 'DELETED') {
+      reviewStatus = 'MERGED';
+      warnings.push('Identical to file on disk (no changes detected; auto-completed).');
+    }
+
     const skipBlockMatches = proposedContent.match(/(\/\/|#|<!--|--)\s*\.\.\.\s*\[Skipped.*\]\s*\.\.\./gi);
     const skipBlockCount = skipBlockMatches ? skipBlockMatches.length : 0;
     const hasSkipBlocks = skipBlockCount > 0;
@@ -185,13 +196,15 @@ export function parseSessionMarkdown(
       targetRootPath: targetRoot,
       targetRelativePath,
       actionType,
-      reviewStatus: 'PENDING',
+      reviewStatus,
       originalContent,
       proposedContent,
+      workingContent: proposedContent,
       rawPayloadContent,
       hunks: [],
       hasSkipBlocks,
       skipBlockCount,
+      isIdenticalToDisk,
       parseWarnings: warnings,
       orderIndex: actions.length
     });
@@ -219,16 +232,17 @@ export function parseSessionMarkdown(
         }
       }
     } else {
+      const meetsLengthInvariant = Boolean(fenceMatch && fenceMatch[1].length >= codeFenceLength);
+
       const isClosingFence = Boolean(
-        fenceMatch && 
-        fenceMatch[1][0] === codeFenceChar && 
-        fenceMatch[1].length >= codeFenceLength &&
-        fenceMatch[2].trim().length === 0
+        meetsLengthInvariant && 
+        fenceMatch![1][0] === codeFenceChar && 
+        fenceMatch![2].trim().length === 0
       );
 
       const isNewOpeningFenceWhileUnclosed = Boolean(
-        fenceMatch &&
-        fenceMatch[2].trim().length > 0
+        meetsLengthInvariant &&
+        fenceMatch![2].trim().length > 0
       );
 
       const isHeaderBoundary = Boolean(

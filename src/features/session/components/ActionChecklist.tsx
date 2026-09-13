@@ -1,6 +1,6 @@
 // src/features/session/components/ActionChecklist.tsx
 import type { ParsedFileAction } from '../types/session';
-import { Plus, Edit3, Trash2, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Plus, Edit3, Trash2, CheckCircle2, XCircle, Clock, AlertTriangle, Sparkles } from 'lucide-react';
 
 interface ActionChecklistProps {
   actions: ParsedFileAction[];
@@ -22,7 +22,14 @@ export function ActionChecklist({ actions, activeActionId, onSelectAction }: Act
     }
   };
 
-  const getStatusIcon = (status: ParsedFileAction['reviewStatus']) => {
+  const getStatusIcon = (status: ParsedFileAction['reviewStatus'], isIdentical?: boolean) => {
+    if (isIdentical && status === 'MERGED') {
+      return (
+        <span title="Identical to disk (no changes needed)">
+          <CheckCircle2 size={14} className="text-blue-400 shrink-0 opacity-80" />
+        </span>
+      );
+    }
     switch (status) {
       case 'MERGED':
         return <CheckCircle2 size={14} className="text-green-400 shrink-0" />;
@@ -34,12 +41,14 @@ export function ActionChecklist({ actions, activeActionId, onSelectAction }: Act
     }
   };
 
+  const mergedCount = actions.filter(a => a.reviewStatus === 'MERGED').length;
+
   return (
     <div className="flex flex-col h-full bg-bg-panel border-r border-border-subtle w-72 shrink-0 select-none">
       <div className="h-10 px-4 border-b border-border-subtle flex items-center justify-between shrink-0 bg-bg-base">
         <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Target Files ({actions.length})</span>
         <span className="text-[10px] font-mono text-accent">
-          {actions.filter(a => a.reviewStatus === 'MERGED').length} / {actions.length} Merged
+          {mergedCount} / {actions.length} Merged
         </span>
       </div>
 
@@ -48,6 +57,7 @@ export function ActionChecklist({ actions, activeActionId, onSelectAction }: Act
           const isActive = action.id === activeActionId;
           const fileName = action.targetRelativePath.split('/').pop() || action.targetRelativePath;
           const dirPath = action.targetRelativePath.substring(0, action.targetRelativePath.length - fileName.length);
+          const isDirty = action.workingContent !== action.proposedContent;
 
           return (
             <div
@@ -66,7 +76,7 @@ export function ActionChecklist({ actions, activeActionId, onSelectAction }: Act
                     {fileName}
                   </span>
                 </div>
-                {getStatusIcon(action.reviewStatus)}
+                {getStatusIcon(action.reviewStatus, action.isIdenticalToDisk)}
               </div>
 
               {dirPath && (
@@ -75,13 +85,23 @@ export function ActionChecklist({ actions, activeActionId, onSelectAction }: Act
                 </div>
               )}
 
-              <div className="flex items-center gap-2 pt-0.5">
+              <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                {action.isIdenticalToDisk && (
+                  <span className="text-[9px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1 rounded flex items-center gap-0.5">
+                    <Sparkles size={8} /> No-Op (Same)
+                  </span>
+                )}
+                {isDirty && (
+                  <span className="text-[9px] bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-1 rounded flex items-center gap-0.5">
+                    <Edit3 size={8} /> Modified
+                  </span>
+                )}
                 {action.hasSkipBlocks && (
                   <span className="text-[9px] bg-amber-400/10 text-amber-400 px-1 rounded flex items-center gap-0.5">
                     <Edit3 size={8} /> {action.skipBlockCount} Skips
                   </span>
                 )}
-                {action.parseWarnings.length > 0 && (
+                {action.parseWarnings.length > 0 && !action.isIdenticalToDisk && (
                   <span className="text-[9px] bg-yellow-500/10 text-yellow-400 px-1 rounded flex items-center gap-0.5" title={action.parseWarnings.join(' ')}>
                     <AlertTriangle size={8} /> Warn
                   </span>

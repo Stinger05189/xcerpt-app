@@ -20,10 +20,12 @@ export interface ParsedFileAction {
   reviewStatus: ActionReviewStatus;
   originalContent: string | null;
   proposedContent: string;
+  workingContent: string;
   rawPayloadContent: string;
   hunks: DiffHunk[];
   hasSkipBlocks: boolean;
   skipBlockCount: number;
+  isIdenticalToDisk?: boolean;
   parseWarnings: string[];
   orderIndex: number;
 }

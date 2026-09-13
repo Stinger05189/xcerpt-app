@@ -1,6 +1,4 @@
 // scripts/test-session-parser.mjs
-import { performance } from 'node:perf_hooks';
-
 console.log('\n' + '='.repeat(70));
 console.log('  XCEPT v2.0 DEV SESSION PARSER DIAGNOSTIC & SPEC COMPLIANCE SUITE');
 console.log('='.repeat(70) + '\n');
@@ -18,16 +16,10 @@ function assert(condition, message) {
   }
 }
 
-// Fence builder constants preventing premature markdown code block termination
 const B3 = '`' + '`' + '`';
 const B4 = '`' + '`' + '`' + '`';
 
-const PROTOCOL_HEADER_PATTERNS = [
-  /^\s*\/\/\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
-  /^\s*#\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
-  /^\s*<!--\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+.*-->/i,
-  /^\s*--\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s+[^\r\n]+/i,
-];
+const PROTOCOL_TAG_REGEX = /^\s*(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*(.*)$/i;
 
 function stripProtocolScaffolding(rawCode, targetPath) {
   const lines = rawCode.split('\n');
@@ -36,23 +28,26 @@ function stripProtocolScaffolding(rawCode, targetPath) {
   const firstNonEmptyIndex = lines.findIndex(l => l.trim().length > 0);
   if (firstNonEmptyIndex === -1) return rawCode;
 
-  const candidateLine = lines[firstNonEmptyIndex].trim();
-  let shouldStrip = PROTOCOL_HEADER_PATTERNS.some(pattern => pattern.test(candidateLine));
+  const candidateLine = lines[firstNonEmptyIndex];
+  const tagMatch = candidateLine.match(PROTOCOL_TAG_REGEX);
 
-  if (!shouldStrip && targetPath) {
-    const normalizedTarget = targetPath.replace(/\\/g, '/');
-    const commentPrefixes = ['//', '#', '<!--', '--'];
-    for (const cp of commentPrefixes) {
-      if (candidateLine.startsWith(cp) && candidateLine.includes(normalizedTarget)) {
-        shouldStrip = true;
-        break;
-      }
+  if (tagMatch) {
+    const commentPrefix = tagMatch[1];
+    let remainder = tagMatch[3].trim();
+
+    if (commentPrefix === '<!--' && remainder.endsWith('-->')) {
+      remainder = remainder.slice(0, -3).trim();
     }
-  }
 
-  if (shouldStrip) {
-    lines.splice(firstNonEmptyIndex, 1);
-    if (lines[firstNonEmptyIndex]?.trim() === '') {
+    if (remainder.length > 0) {
+      lines[firstNonEmptyIndex] = commentPrefix === '<!--'
+        ? `<!-- ${remainder} -->`
+        : `${commentPrefix} ${remainder}`;
+    } else if (targetPath) {
+      lines[firstNonEmptyIndex] = commentPrefix === '<!--'
+        ? `<!-- ${targetPath} -->`
+        : `${commentPrefix} ${targetPath}`;
+    } else {
       lines.splice(firstNonEmptyIndex, 1);
     }
   }
@@ -180,6 +175,13 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
 
     const proposedContent = stripProtocolScaffolding(rawPayloadContent, targetRelativePath);
 
+    const isIdenticalToDisk = originalContent !== null && originalContent === proposedContent;
+    let reviewStatus = 'PENDING';
+    if (isIdenticalToDisk && actionType !== 'DELETED') {
+      reviewStatus = 'MERGED';
+      warnings.push('Identical to file on disk (no changes detected; auto-completed).');
+    }
+
     const skipBlockMatches = proposedContent.match(/(\/\/|#|<!--|--)\s*\.\.\.\s*\[Skipped.*\]\s*\.\.\./gi);
     const skipBlockCount = skipBlockMatches ? skipBlockMatches.length : 0;
     const hasSkipBlocks = skipBlockCount > 0;
@@ -192,13 +194,15 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
       targetRootPath: targetRoot,
       targetRelativePath,
       actionType,
-      reviewStatus: 'PENDING',
+      reviewStatus,
       originalContent,
       proposedContent,
+      workingContent: proposedContent,
       rawPayloadContent,
       hunks: [],
       hasSkipBlocks,
       skipBlockCount,
+      isIdenticalToDisk,
       parseWarnings: warnings,
       orderIndex: actions.length
     });
@@ -226,15 +230,16 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
         }
       }
     } else {
+      const meetsLengthInvariant = Boolean(fenceMatch && fenceMatch[1].length >= codeFenceLength);
+
       const isClosingFence = Boolean(
-        fenceMatch && 
+        meetsLengthInvariant && 
         fenceMatch[1][0] === codeFenceChar && 
-        fenceMatch[1].length >= codeFenceLength &&
         fenceMatch[2].trim().length === 0
       );
 
       const isNewOpeningFenceWhileUnclosed = Boolean(
-        fenceMatch &&
+        meetsLengthInvariant &&
         fenceMatch[2].trim().length > 0
       );
 
@@ -320,7 +325,7 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
   };
 }
 
-// --- TEST SUITE 1: NESTED BACKTICK ISOLATION (BUG-02 RESOLUTION) ---
+// --- SUITE 1: NESTED BACKTICK ISOLATION ---
 console.log('\x1b[36m--- Suite 1: Nested Code Fence & 4-Backtick Isolation ---\x1b[0m');
 {
   const nestedMarkdown = [
@@ -348,26 +353,28 @@ console.log('\x1b[36m--- Suite 1: Nested Code Fence & 4-Backtick Isolation ---\x
   assert(action.targetRelativePath === 'docs/instructions.md', `Target path is correct: ${action.targetRelativePath}`);
   assert(action.actionType === 'NEW', `Action type identified as [NEW]`);
   assert(action.proposedContent.includes(B3 + 'bash'), 'Inner 3-backtick bash block preserved without breaking outer fence');
-  assert(!action.proposedContent.startsWith('<!-- [NEW]'), 'Protocol scaffolding line stripped from proposed content');
+  assert(action.proposedContent.startsWith('<!-- docs/instructions.md -->'), 'Line 1 action prefix stripped while retaining commented file path');
 }
 
-// --- TEST SUITE 2: MULTI-SYNTAX PROTOCOL SCAFFOLDING STRIPPING ---
-console.log('\n\x1b[36m--- Suite 2: Multi-Syntax Protocol Comment Header Stripping ---\x1b[0m');
+// --- SUITE 2: MULTI-SYNTAX PROTOCOL ACTION PREFIX STRIPPING ---
+console.log('\n\x1b[36m--- Suite 2: Multi-Syntax Protocol Action Prefix Stripping ---\x1b[0m');
 {
   const tsRaw = '// [MODIFIED] src/auth/token.ts\nexport const rotate = () => {};';
   const pyRaw = '# [NEW] app/config.py\nTIMEOUT = 5.0';
   const htmlRaw = '<!-- [DELETED] public/legacy.html -->\n';
   const sqlRaw = '-- [MODIFIED] db/migration.sql\nSELECT 1;';
+  const luaRaw = '-- [NEW] scripts/player.lua\nlocal player = {}';
   const cleanPathRaw = '// src/utils/api.ts\nexport const fetcher = () => {};';
 
-  assert(stripProtocolScaffolding(tsRaw, 'src/auth/token.ts') === 'export const rotate = () => {};', 'Stripped C-style // [MODIFIED] header');
-  assert(stripProtocolScaffolding(pyRaw, 'app/config.py') === 'TIMEOUT = 5.0', 'Stripped Python # [NEW] header');
-  assert(stripProtocolScaffolding(htmlRaw, 'public/legacy.html') === '', 'Stripped HTML <!-- [DELETED] --> tombstone');
-  assert(stripProtocolScaffolding(sqlRaw, 'db/migration.sql') === 'SELECT 1;', 'Stripped SQL -- [MODIFIED] header');
-  assert(stripProtocolScaffolding(cleanPathRaw, 'src/utils/api.ts') === 'export const fetcher = () => {};', 'Stripped line-1 path-only comment matching filename');
+  assert(stripProtocolScaffolding(tsRaw, 'src/auth/token.ts').startsWith('// src/auth/token.ts'), 'Stripped C-style [MODIFIED] tag while preserving "// src/auth/token.ts"');
+  assert(stripProtocolScaffolding(pyRaw, 'app/config.py').startsWith('# app/config.py'), 'Stripped Python [NEW] tag while preserving "# app/config.py"');
+  assert(stripProtocolScaffolding(htmlRaw, 'public/legacy.html').startsWith('<!-- public/legacy.html -->'), 'Stripped HTML [DELETED] tag while preserving "<!-- public/legacy.html -->"');
+  assert(stripProtocolScaffolding(sqlRaw, 'db/migration.sql').startsWith('-- db/migration.sql'), 'Stripped SQL [MODIFIED] tag while preserving "-- db/migration.sql"');
+  assert(stripProtocolScaffolding(luaRaw, 'scripts/player.lua').startsWith('-- scripts/player.lua'), 'Stripped Lua [NEW] tag while preserving "-- scripts/player.lua"');
+  assert(stripProtocolScaffolding(cleanPathRaw, 'src/utils/api.ts').startsWith('// src/utils/api.ts'), 'Preserved pre-existing clean path comment unchanged');
 }
 
-// --- TEST SUITE 3: EXTENSION-PRESERVING DEDUPLICATION (BUG-01 RESOLUTION) ---
+// --- SUITE 3: EXTENSION-PRESERVING DEDUPLICATION ---
 console.log('\n\x1b[36m--- Suite 3: Extension-Preserving Filename Deduplication ---\x1b[0m');
 {
   const multiPartMarkdown = [
@@ -385,10 +392,10 @@ console.log('\n\x1b[36m--- Suite 3: Extension-Preserving Filename Deduplication 
   const session = parseSessionMarkdown(multiPartMarkdown, 'ws-test', ['C:/Repo']);
   assert(session.actions.length === 2, `Extracted 2 actions from repeated filename`);
   assert(session.actions[0].targetRelativePath === 'src/largeComponent.tsx', `First part retains original path`);
-  assert(session.actions[1].targetRelativePath === 'src/largeComponent.Part2.tsx', `Second part injects suffix before .tsx extension (got: ${session.actions[1].targetRelativePath})`);
+  assert(session.actions[1].targetRelativePath === 'src/largeComponent.Part2.tsx', `Second part injects suffix before .tsx extension`);
 }
 
-// --- TEST SUITE 4: UNCLOSED FENCE AUTO-RECOVERY AT HEADER / EOF BOUNDARY ---
+// --- SUITE 4: UNCLOSED FENCE AUTO-RECOVERY ---
 console.log('\n\x1b[36m--- Suite 4: Unclosed Code Fence Heuristic Recovery ---\x1b[0m');
 {
   const unclosedAtHeader = [
@@ -403,12 +410,12 @@ console.log('\n\x1b[36m--- Suite 4: Unclosed Code Fence Heuristic Recovery ---\x
   ].join('\n');
 
   const session = parseSessionMarkdown(unclosedAtHeader, 'ws-test', ['C:/Repo']);
-  assert(session.actions.length === 2, `Recovered both actions despite missing closing fence on first block (got ${session.actions.length})`);
+  assert(session.actions.length === 2, `Recovered both actions despite missing closing fence on first block`);
   assert(session.actions[0].parseWarnings.some(w => w.includes('Auto-closed')), 'Appended parse warning for auto-closed fence');
   assert(session.actions[1].targetRelativePath === 'script.py', 'Second action extracted accurately');
 }
 
-// --- TEST SUITE 5: SKIP BLOCK DETECTION & TRANSPARENCY ---
+// --- SUITE 5: SKIP BLOCK DETECTION ---
 console.log('\n\x1b[36m--- Suite 5: Skip Block Detection & Accounting ---\x1b[0m');
 {
   const skipMarkdown = [
@@ -424,11 +431,11 @@ console.log('\n\x1b[36m--- Suite 5: Skip Block Detection & Accounting ---\x1b[0m
   assert(session.actions.length === 1, 'Extracted action with skip blocks');
   const action = session.actions[0];
   assert(action.hasSkipBlocks === true, 'Detected hasSkipBlocks: true');
-  assert(action.skipBlockCount === 2, `Detected exactly 2 skip blocks (got: ${action.skipBlockCount})`);
-  assert(action.proposedContent.includes('// ... [Skipped: Unchanged state initializers] ...'), 'Preserved transparent skip marker in proposed content');
+  assert(action.skipBlockCount === 2, `Detected exactly 2 skip blocks`);
+  assert(action.proposedContent.includes('// ... [Skipped: Unchanged state initializers] ...'), 'Preserved transparent skip marker');
 }
 
-// --- TEST SUITE 6: INTER-PACKET EXPLANATION & INTENT ASSOCIATION ---
+// --- SUITE 6: INTER-PACKET EXPLANATION & INTENT ---
 console.log('\n\x1b[36m--- Suite 6: Inter-Packet Prose & Intent Association ---\x1b[0m');
 {
   const packetMarkdown = [
@@ -459,8 +466,32 @@ console.log('\n\x1b[36m--- Suite 6: Inter-Packet Prose & Intent Association ---\
   assert(session.explanations.some(e => e.associatedActionIds.length > 0), 'Associated prose sections to corresponding file actions');
 }
 
+// --- SUITE 7: NO-OP IDENTICAL FILE AUTO-COMPLETION ---
+console.log('\n\x1b[36m--- Suite 7: No-Op Identical File Auto-Completion ---\x1b[0m');
+{
+  const identicalCode = '// src/unchanged.ts\nexport const unchanged = () => 42;';
+  const existingMap = {
+    'C:/Repo/src/unchanged.ts': identicalCode
+  };
+
+  const noOpMarkdown = [
+    '# [WORK PACKET]: Refactor Run',
+    B3 + 'typescript',
+    '// [MODIFIED] src/unchanged.ts',
+    'export const unchanged = () => 42;',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(noOpMarkdown, 'ws-test', ['C:/Repo'], existingMap);
+  assert(session.actions.length === 1, 'Parsed 1 modification action');
+  const action = session.actions[0];
+  assert(action.isIdenticalToDisk === true, 'Identified isIdenticalToDisk as true');
+  assert(action.reviewStatus === 'MERGED', 'Auto-completed reviewStatus initialized directly as MERGED');
+  assert(action.parseWarnings.some(w => w.includes('Identical to file on disk')), 'Captured no-op auto-completed warning');
+}
+
 console.log('\n' + '='.repeat(70));
-console.log(`  PARSER DIAGNOSTIC SUMMARY: \x1b[32m${passCount} PASSED\x1b[0m, \x1b[${failCount > 0 ? '31' : '32'}m${failCount} FAILED\x1b[0m`);
+console.log(`  PARSER DIAGNOSTIC SUMMARY: \x1b[32${passCount} PASSED\x1b[0m, \x1b[${failCount > 0 ? '31' : '32'}m${failCount} FAILED\x1b[0m`);
 console.log('='.repeat(70) + '\n');
 
 if (failCount > 0) process.exit(1);

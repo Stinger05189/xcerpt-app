@@ -50,3 +50,12 @@ body {
 .monaco-skip-block-margin {
   background-color: rgba(239, 68, 68, 0.5) !important;
 }
+
+/* Typography styles for markdown prose & inline code */
+.prose code:not(pre code) {
+  @apply font-mono text-accent text-[11px] px-1.5 py-0.5 rounded border border-border-subtle bg-bg-hover/70;
+}
+
+.prose pre {
+  @apply border border-border-subtle bg-bg-panel rounded-xl;
+}

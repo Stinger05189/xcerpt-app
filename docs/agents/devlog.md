@@ -18,27 +18,29 @@
 
 ## Active Epoch: 05 - Bidirectional LLM Dev Studio (v2.0.0)
 
-### Session 025
+### Session 026
 
-- **Focus Area:** Inbound Dev Session Domain Architecture, Standalone Protocol Parser, Monaco Diff Merge Viewers, and Diagnostic Test Suite.
+- **Focus Area:** Line 1 Path Scaffolding Preservation, Monaco Model Isolation, Single Action Toolbar Streamlining, Comprehensive Language Syntax Engine, and Interactive Full Plan Viewer.
 - **Key Decisions:**
-  - **Decoupled Feature Enclave (`src/features/session/`):** Established the inbound dev session studio completely isolated from `workspaceStore.ts`. Designed `sessionStore.ts` to manage active sessions, file actions, review statuses (`PENDING`, `MERGED`, `REJECTED`), pre-session file snapshots, and physical mutations via dedicated IPC handlers (`session:*`).
-  - **Protocol-Compliant Parsing Engine (`sessionParser.ts`):** Implemented an off-thread pure parser supporting depth-aware backtick code fence parsing, extension-preserving deduplication (`.Part2.ext`), unclosed fence auto-recovery at header boundaries, and automated regex stripping (`stripProtocolScaffolding`) to purge line-1 action comments from diff inputs across C-style, Python, HTML, and SQL comment formats.
-  - **Monaco Diff & Specialized Viewers:** Integrated `@monaco-editor/react` `DiffEditor` for side-by-side and inline visual comparisons, paired with `NewFilePreview.tsx` (syntax-highlighted single editor for `[NEW]`) and `DeletedFileBanner.tsx` (tombstone view for `[DELETED]`).
-  - **Reasoning Drawer & Full Plan Viewer:** Built a collapsible drawer rendering pre-code summaries and linked architectural intent directly above diffs, and created `FullPlanViewer.tsx` to display unadulterated markdown commentary.
-  - **Diagnostic Test Harness (`scripts/test-session-parser.mjs`):** Built a standalone Node.js diagnostic suite achieving 22 passing assertions across 6 suites.
-  - **Identified Roadblocks for Session 026:**
-    - _Suite 1 Nested Fence Defect:_ In `sessionParser.ts`, when `inCodeBlock === true` with outer fence length $N=4$, an inner 3-backtick fence with an info string (` ```bash `) was falsely matched as `isNewOpeningFenceWhileUnclosed`. Any fence where `length < codeFenceLength` must be strictly treated as text.
-    - _Monaco Diff Interactivity:_ Need interactive merge gutter actions / arrows to cherry-pick individual hunks, and verify full-file disk writing for modified files.
-    - _Markdown File Ingestion:_ Files targeting `.md` or `.mdx` require specialized fence escaping so their contents are not swallowed by outer markdown fences.
-    - _Modal Header Dragging:_ `DevStudioModal` header needs `WebkitAppRegion: 'drag'` with `'no-drag'` leaf controls to restore native window movement.
+  - **Line 1 Action Prefix Pruning:** Refactored `stripProtocolScaffolding` to strip strictly the action tag (`[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)]\s*`) from the first non-empty comment line, preserving the language comment prefix and relative file path (`// src/auth/token.ts`, `# app/config.py`, `<!-- docs/instructions.md -->`, `-- db/migration.sql`). This preserves path context for developers and downstream prompts while eliminating false diff conflicts.
+  - **Monaco Model Isolation (`key={activeAction.id}`):** Diagnosed and resolved the cross-action content bleed bug where switching between file actions caused Monaco's `onDidChangeModelContent` to fire against stale closures. Binding `key={activeAction.id}` to both `SessionDiffEditor` and `NewFilePreview` guarantees clean component unmounting and model isolation.
+  - **Unified Single Action Toolbar:** Eradicated the duplicate secondary headers in `NewFilePreview` and `SessionDiffEditor`. Consolidated all metadata (language, lines, size, skip badges, status) and controls into a single action toolbar in `DevStudioModal.tsx`.
+  - **Context-Sensitive Inline Diff Toggle:** Moved the `Switch to Inline Diff` toggle out of the window title bar and placed it directly inside the file action toolbar, visible strictly for diff actions (`MODIFIED` / `PARTIAL_DIFF`) and hidden for new/deleted files.
+  - **Comprehensive Syntax Highlighting:** Expanded `languageHelper.ts` to support game development languages (Lua, HLSL/GLSL shaders, C#, C++, GDScript), web technologies, system languages, JSON, SQL, and dotfiles. Explicitly bound model languages on mount via `monaco.editor.setModelLanguage`.
+  - **Interactive Buffer Editing & Rollback:** Enabled `readOnly: false` on the modified pane of `SessionDiffEditor` and `NewFilePreview`. Added `workingContent` buffer tracking in `sessionStore.ts`, allowing users to make manual adjustments prior to or following a merge. Added `revertAction` to restore individual files to pre-session snapshots on disk and reset action status to `PENDING`.
+  - **Dedicated Full Plan View & Syntactic Reasoning:** Replaced unformatted plan text with an interactive two-pane architecture in `FullPlanViewer.tsx` featuring categorized navigation (Intent, Work Packets, Extracted Code Artifacts), collapsible artifact cards with popout Monaco inspectors, persistent scroll offsets (`planScrollTop`), and styled inline code pills across `ReasoningDrawer.tsx`.
+  - **Identified Roadblocks for Session 027:**
+    - _Workspace-Scoped Dev Studio Containment:_ Dev studio currently mounts as a full-screen window overlay covering the main TitleBar. It needs to be refactored to mount below the TitleBar (`top-10`) so users can switch workspace tabs without losing studio context. The entry button in the top-left TitleBar must be removed, leaving the MainStage button as the sole workspace-scoped entry point.
+    - _Ingestion Focus Trap & Interactive Triage:_ Fix the bug where empty sessions prevent typing or pasting into the raw input. Overhaul the ingestion modal into an Interactive Triage Studio with one-click clipboard paste, split-pane action previews with file boundary rulers, direct raw text editing, and live re-parsing.
+    - _Multi-Location Reasoning Trace Association:_ Extend parser to bind preamble, interstitial, and epilogue markdown commentary to their corresponding file actions.
 - **Core Files Modified:**
   - `src/features/session/types/session.ts`, `src/features/session/engine/sessionParser.ts`
-  - `src/features/session/engine/diffHunkEngine.ts`, `src/features/session/engine/checkpointEngine.ts`
-  - `src/features/session/store/sessionStore.ts`, `src/features/session/components/diff/*`
-  - `src/features/session/components/drawer/*`, `src/features/session/components/DevStudioModal.tsx`
-  - `src/components/layout/TitleBar.tsx`, `src/App.tsx`, `main.cjs`, `preload.cjs`, `package.json`
-  - `scripts/test-session-parser.mjs`
+  - `src/features/session/store/sessionStore.ts`, `src/features/session/components/diff/SessionDiffEditor.tsx`
+  - `src/features/session/components/diff/NewFilePreview.tsx`, `src/features/session/components/diff/languageHelper.ts`
+  - `src/features/session/components/DevStudioModal.tsx`, `src/features/session/components/ActionChecklist.tsx`
+  - `src/features/session/components/drawer/FullPlanViewer.tsx`, `src/features/session/components/drawer/ReasoningDrawer.tsx`
+  - `src/features/session/components/SessionBrowserModal.tsx`, `src/components/layout/MainStage.tsx`
+  - `scripts/test-session-parser.mjs`, `src/index.css`
 
 ---
 

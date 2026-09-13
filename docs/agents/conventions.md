@@ -52,16 +52,18 @@
 
 - **Visual Filtering:** Excluded items are NOT removed from the DOM. Apply an "excluded" status flag for `opacity: 0.4` and a disabled state.
 - **Frameless Window (`frame: false`):** Apply `WebkitAppRegion: 'drag'` to the layout container. Apply `'no-drag'` ONLY to interactive leaf nodes (buttons/tabs) and use padding on the parent to expose the drag region.
-- **Modal Overlays & Frameless Windows:** When implementing full-screen overlays (like the Workspace Browser), do not unmount the `TitleBar`. Apply `opacity-30 pointer-events-none` to the background UI, ensuring OS window controls (Minimize, Maximize, Close) remain functional.
+- **Modal Overlays & Frameless Windows:** When implementing full-screen overlays (like the Workspace Browser), do not unmount or obscure the `TitleBar`. Apply `opacity-30 pointer-events-none` to the background UI, ensuring OS window controls (Minimize, Maximize, Close) remain functional.
 - **Virtualization & Fixed Positioning (CSS Transforms):** Virtualization relies on `transform: translateY(px)` to move rows. In CSS, `transform` creates a new containing block, breaking `position: fixed`. Any context menu or fixed overlay triggered from inside a virtualized list MUST use `createPortal(..., document.body)` to escape the transformed container.
 - **Tick-Independent Dragging:** For 60fps continuous selections (like marquee brushing), never rely on `onMouseEnter` or `onMouseOver`. Always use mathematical 1D indexing based on pointer coordinates (`Math.floor(offsetY / ROW_HEIGHT)`).
 - **Anti-Stale Closure Ref-Pinning:** When reading layout arrays in virtualized drag engines, read from a mutable `useRef` tracking the latest flat layout array to prevent referencing stale closure state.
 
-## 5. Monaco Editor
+## 5. Monaco Editor & Diff Studio
 
+- **Monaco Component Lifecycle & Model Isolation:** In dynamic multi-file diff editors or previewers, ALWAYS bind `key={activeAction.id}` to the editor component. If an editor instance is reused across changing file action props, Monaco's internal model updates will fire `onDidChangeModelContent` against stale action state closures, corrupting working buffers.
+- **Explicit Model Language Assignment:** Do not rely exclusively on the `language` prop of `@monaco-editor/react` for custom extensions (like Lua, GLSL, HLSL, GDScript). In the editor's `onMount` callback, explicitly execute `monaco.editor.setModelLanguage(model, language)` on both original and modified models to guarantee syntax highlighting activates immediately.
 - **Compression Coordinates:** Skip markers (`startLine`, `endLine`) map to the file's canonical scoped key in workspace state.
 - **Drift Management:** Store the exact string `signature` of the target line and search a $\pm 50$-line heuristic window on load to auto-heal offsets after external git pulls or edits.
-- **Lifecycle & Syncing:** Force React wrapper remount via `key={activeFile}` to prevent stale closures. Before applying decorations, verify `editor.getModel()?.getValue() === reactContent`.
+- **Unified Action Toolbars:** Avoid nested secondary headers inside editor previewers (`NewFilePreview`, `SessionDiffEditor`). Maintain a single, high-density toolbar above the editor managing target paths, language tags, line counts, skip badges, unsaved dirty states, and action triggers.
 
 ## 6. UX, Theming & Data Integrity
 
@@ -87,15 +89,19 @@
 ## 8. Inbound Dev Session & Diff Merge Architecture (v2.0+)
 
 - **Subsystem Enclave Decoupling:** All dev session studio logic MUST reside within `src/features/session/`. `sessionStore.ts` must maintain strict zero-state bleed with `workspaceStore.ts`—it receives only `workspaceId` and `rootPaths` as operational parameters.
+- **Workspace-Scoped Studio Viewport:** Dev studio views MUST live under the active workspace context below the application TitleBar (`top-10 inset-x-0 bottom-0` or embedded in `MainStage`), NEVER as a blind window overlay covering TitleBar tabs. The TitleBar tabs must remain visible and interactive so users can switch workspaces without losing studio session state.
+- **Line 1 Action Prefix Pruning Rule:**
+  - `stripProtocolScaffolding` must strip ONLY the action tag prefix (`[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)]\s*`) from the first non-empty comment line.
+  - The commented relative path (`// path/to/file.ext`, `# path/to/file.ext`, `<!-- path/to/file.ext -->`, `-- path/to/file.ext`) MUST be preserved for developer clarity and downstream model context.
 - **Nested Code Fence Depth Invariant (BUG-02 Resolution):** When `inCodeBlock === true` with outer fence length $N$ (e.g. 4 backticks ` ```` `):
   - A closing fence MUST have length $\ge N$ with zero trailing info string characters (`fenceMatch[2].trim().length === 0`).
   - Any candidate fence with length $< N$ (such as inner 3-backtick blocks ` ```bash `) MUST be treated strictly as code content. It MUST NOT trigger `isNewOpeningFenceWhileUnclosed` or close the active block.
 - **Unclosed Code Fence Boundary Auto-Recovery:** If a new primary markdown header (`# [WORK PACKET]`, `### Pre-Code Summary`) or a new opening fence with an explicit info string of length $\ge N$ is encountered while `inCodeBlock === true`, the parser must auto-close the previous block with an informational warning and immediately begin the subsequent section.
-- **The Purity Invariant (Scaffolding Comment Stripping):**
-  - `rawPayloadContent`: Preserves the verbatim code block extracted from the markdown stream for diagnostic auditing.
-  - `proposedContent`: The sanitized code payload used for Monaco Diff comparison and physical disk writes. All line-1 protocol action comments (`// [NEW]`, `# [MODIFIED]`, `<!-- [DELETED] -->`, `-- [ACTION]`, and path-only header comments) MUST be purged before entering Monaco Diff to eliminate false line-1 conflict markers.
 - **Skip Block Transparency Directive:** Xcerpt strictly prohibits synthesizing artificial code to hide skip blocks. If the model emits `// ... [Skipped: N lines] ...`, the skip marker is rendered directly in the diff stream with an amber decoration badge, empowering the developer to verify intentional skips versus accidental omissions.
 - **Extension-Preserving Deduplication:** If an LLM restates a file in multiple parts without closing tags, subsequent occurrences append `.PartN` before the file extension (e.g. `src/App.Part2.tsx`), preserving syntax highlighting and language server features.
+- **Single-Accept & Revert Workflow:**
+  - When reviewing pending actions, a single primary button accepts and writes the file.
+  - If a file is manually modified after merging, the button becomes `Save Additional Edits`.
+  - Reverting an action (`revertAction`) cleanly restores the pre-session disk snapshot (deleting new files, restoring original files) and resets status to `PENDING`.
 - **Safe Test Fixtures (Preventing Markdown Fence Collisions):** Never write literal triple backticks inside template strings in `.mjs`, `.js`, or `.ts` test scripts. Markdown code block extractors will misinterpret inner triple backticks as closing fences and truncate the file. Always use string concatenation: `const B3 = '`' + '`' + '`';`.
 - **JSON File Purity:** Never inject line-1 comment headers (`// path/to/file.json`) into `.json` files (`package.json`, `tsconfig*.json`). Node.js and Electron native JSON loaders strictly reject comments with `SyntaxError: Unexpected token /`.
-- **Frameless Window Dragging in Full-Screen Overlays:** Full-screen overlays and modals (such as `DevStudioModal`) that obscure the main title bar MUST apply `WebkitAppRegion: 'drag'` to their top header bar, and `WebkitAppRegion: 'no-drag'` to all interior interactive controls (buttons, inputs, tabs), preventing the window from becoming unmovable during review sessions.

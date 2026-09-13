@@ -16,30 +16,35 @@
 
 ---
 
-## Active Queue: Version 2.0.0 (Session 026 Focus)
+## Active Queue: Version 2.0.0 (Session 027 Focus)
 
-- [ ] **WP-01: Nested Code Fence & Markdown File Ingestion Hardening**
-  - _Details:_ In `sessionParser.ts` and `test-session-parser.mjs`, enforce strict depth checking: when inside an outer block of length $N$ (e.g. 4 backticks), any candidate fence with length $< N$ must be treated strictly as content lines. Add robust handling for Markdown (`.md`, `.mdx`) target files containing nested code blocks to ensure they parse into actions cleanly. Bring `npm run test:session` to 24/24 PASS.
-- [ ] **WP-02: Monaco Diff Merge Actions & Physical Disk Modification Pipeline**
-  - _Details:_ Upgrade `SessionDiffEditor.tsx` to allow full file merges and hunk cherry-picking. Verify that clicking "Accept & Next" or "Merge Full File" accurately writes the proposed file to disk, updates the active file buffer, and triggers the active review queue auto-advance.
-- [ ] **WP-03: Frameless Window Dragging & Dev Studio Header Polish**
-  - _Details:_ Apply `WebkitAppRegion: 'drag'` to the header of `DevStudioModal.tsx`, and add `'no-drag'` to interactive buttons (action toggles, merge buttons, tabs, close icon) so the window can be moved freely while in session review.
+- [ ] **WP-01: Workspace-Scoped Dev Studio & TitleBar Preservation Architecture**
+  - _Details:_ Remove the Dev Studio icon from the top-left TitleBar (`TitleBar.tsx`), making the MainStage header button (`Stage Context -> Dev Studio -> Configure`) the sole workspace-scoped entry point. Refactor `DevStudioModal.tsx` from a full-screen window overlay (`fixed inset-0`) to mount below the TitleBar (`top-10 inset-x-0 bottom-0` or embedded stage view) so the TitleBar workspace tabs remain visible, draggable, and clickable. Bind dev session store state strictly to the active `workspaceId`, allowing users to switch workspace tabs seamlessly without losing studio review state.
+- [ ] **WP-02: Fix Ingestion Focus Trap & Build Interactive Ingestion Triage Studio**
+  - _Details:_ Fix the focus/click bug in the ingestion modal that prevented pasting into the raw markdown textarea on fresh sessions. Overhaul the ingestion modal into a two-pane Interactive Triage Studio: provide a primary `[Paste from Clipboard]` action, a left pane showing live extracted actions/warnings, and a right pane with a searchable raw markdown editor with visual file boundary markers and a `[Re-Parse Response]` live recalculation button.
+- [ ] **WP-03: Multi-Location Reasoning Association & Markdown Action Resilience**
+  - _Details:_ Enhance `sessionParser.ts` to capture and correlate reasoning commentary located at the start of a packet, between files, and at the end of files. Ensure that target Markdown files (`.md`, `.mdx`) wrapped inside outer code fences are properly isolated and do not break parser fence boundaries.
 - [ ] **WP-04: Non-Invasive Git Integration & Post-Session Commit Generator**
-  - _Details:_ Implement pre-session git status inspection (`git status --porcelain`) and post-session commit creation offering a commit message pre-populated with the parsed architectural intent.
+  - _Details:_ Implement pre-session git status inspection (`git status --porcelain`) and post-session commit creation offering a commit message pre-populated with the parsed architectural intent summary.
+
+---
+
+## Completed in Version 2.0.0 (Session 026)
+
+- [x] **WP-01: Line 1 Protocol Stripping Refinement & Parser Diagnostic Suite**
+  - Updated `stripProtocolScaffolding` to strip strictly the action tag prefix while preserving commented file paths on line 1. Diagnostic test suite expanded to 26/26 passing assertions.
+- [x] **WP-02: Monaco Model Isolation & Syntax Highlighting Engine**
+  - Mounted editors with `key={activeAction.id}` to eliminate model reuse and cross-action content bleed. Expanded `languageHelper.ts` with Lua, shaders (HLSL, GLSL), C#, C++, GDScript, JSON, and dotfiles, calling `monaco.editor.setModelLanguage` on mount.
+- [x] **WP-03: Unified Single Action Toolbar & Single-Accept Workflow**
+  - Merged dual headers into a single cohesive action toolbar in `DevStudioModal.tsx`. Moved the inline diff toggle into the file toolbar and implemented `revertAction` for disk restoration.
+- [x] **WP-04: Full Plan View Artifact Overhaul & Syntactic Reasoning**
+  - Built categorized sidebar navigation in `FullPlanViewer.tsx` (Intent, Work Packets, Code Artifacts), collapsible artifact cards with popout Monaco inspectors, persistent scroll offsets, and styled inline code pills.
 
 ---
 
 ## Completed in Version 2.0.0 (Session 025)
 
-- [x] **WP-01: Dev Session Domain Architecture & Store Foundation**
-  - Implemented domain schemas in `src/features/session/types/session.ts` and standalone `sessionStore.ts` with pre-session checkpoint rollback.
-- [x] **WP-02: Fault-Tolerant Protocol Parser & Header Stripping Engine**
-  - Implemented `sessionParser.ts` with `stripProtocolScaffolding`, extension-preserving deduplication, unclosed fence auto-recovery, and intent extraction.
-- [x] **WP-03: IPC Persistence Layer for Dev Sessions**
-  - Registered `session:save`, `session:load`, `session:list`, `session:delete`, `session:applyAction`, and `session:revertCheckpoint` in `main.cjs` and `preload.cjs`.
-- [x] **WP-04: Monaco Side-by-Side Diff Editor & Specialized Action Viewers**
-  - Built `SessionDiffEditor.tsx`, `NewFilePreview.tsx` (for `[NEW]`), and `DeletedFileBanner.tsx` (for `[DELETED]`).
-- [x] **WP-05: Co-Located Reasoning Drawer & Full Plan Viewer**
-  - Built `ReasoningDrawer.tsx` linked to active action IDs and `FullPlanViewer.tsx` for rendered and raw markdown views.
-- [x] **WP-06: Standalone Diagnostic Test Suite**
-  - Created `scripts/test-session-parser.mjs` and wired `npm run test:session`.
+- [x] **Dev Session Domain Architecture & Store Foundation** (`sessionStore.ts`, `session.ts`)
+- [x] **Protocol Parser Engine** (`sessionParser.ts`, depth invariant, deduplication)
+- [x] **Monaco Diff Merge Engine** (`SessionDiffEditor.tsx`, `NewFilePreview.tsx`, `DeletedFileBanner.tsx`)
+- [x] **Reasoning Drawer & Checkpoint Persistence** (`ReasoningDrawer.tsx`, `checkpointEngine.ts`)

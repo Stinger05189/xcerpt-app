@@ -1,6 +1,7 @@
 // src/components/layout/MainStage.tsx
 import { useEffect, useState, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useSessionStore } from '../../features/session/store/sessionStore';
 import { FileTree } from '../tree/FileTree';
 import { ContextEditor } from '../editor/ContextEditor';
 import { ExportStage } from '../export/ExportStage';
@@ -8,14 +9,15 @@ import {
   Plus, 
   FolderOpen, 
   X, 
-  GripVertical, 
   Settings2, 
   Loader2, 
   FolderSearch, 
   AlertTriangle,
   FileCode,
   Copy,
-  FolderSymlink
+  FolderSymlink,
+  GitPullRequest,
+  GripVertical
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 
@@ -51,6 +53,10 @@ export function MainStage() {
     pinEditorTab,
     refreshVirtualGraph
   } = useWorkspaceStore();
+
+  const activeSession = useSessionStore(s => s.activeSession);
+  const setStudioOpen = useSessionStore(s => s.setStudioOpen);
+  const setIngestionModalOpen = useSessionStore(s => s.setIngestionModalOpen);
 
   const [draggedRootPath, setDraggedRootPath] = useState<string | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -177,6 +183,7 @@ export function MainStage() {
 
   const activeTree = activeTab ? rawTrees[activeTab] : null;
   const isActiveMissing = activeTab ? missingRoots.has(activeTab) : false;
+  const pendingSessionActions = activeSession?.actions.filter(a => a.reviewStatus === 'PENDING').length || 0;
 
   return (
     <main className="flex-1 h-full flex flex-col min-w-0">
@@ -244,7 +251,7 @@ export function MainStage() {
 
         {rootPaths.length > 0 && (
           <div className="flex items-center gap-2 mb-2 mr-2 shrink-0 z-30 backdrop-blur-md">
-            <div className="flex items-center gap-2 mr-4">
+            <div className="flex items-center gap-2 mr-2">
               {stagingStatus === 'STAGING_LOCK' ? (
                 <div className="flex items-center gap-2 text-sm text-accent px-3 py-1.5 bg-accent/10 rounded-full">
                   <Loader2 size={14} className="animate-spin" />
@@ -285,6 +292,28 @@ export function MainStage() {
                 </button>
               )}
             </div>
+
+            {/* Inbound Dev Studio Trigger */}
+            <button
+              onClick={() => {
+                if (activeSession) setStudioOpen(true);
+                else setIngestionModalOpen(true);
+              }}
+              className={`px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1.5 transition-all border ${
+                activeSession && pendingSessionActions > 0
+                  ? 'bg-accent/20 text-accent border-accent/40 shadow-sm'
+                  : 'bg-bg-base border-border-subtle text-text-muted hover:text-text-primary hover:bg-bg-hover'
+              }`}
+              title={activeSession ? `Resume Active Session (${pendingSessionActions} files pending)` : 'Import LLM Work Packet'}
+            >
+              <GitPullRequest size={14} className={activeSession && pendingSessionActions > 0 ? 'text-accent animate-pulse' : ''} />
+              <span>Dev Studio</span>
+              {activeSession && (
+                <span className="text-[10px] bg-accent text-white px-1.5 rounded-full font-mono">
+                  {pendingSessionActions}
+                </span>
+              )}
+            </button>
 
             <button 
               onClick={() => setExportStaging(!isExportStaging)}
