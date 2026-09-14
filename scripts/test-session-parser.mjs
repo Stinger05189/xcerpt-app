@@ -1,6 +1,6 @@
 // scripts/test-session-parser.mjs
 console.log('\n' + '='.repeat(70));
-console.log('  XCEPT v2.0 DEV SESSION PARSER DIAGNOSTIC & SPEC COMPLIANCE SUITE');
+console.log('  XCEPT v2.2 DEV SESSION PARSER DIAGNOSTIC & SPEC COMPLIANCE SUITE');
 console.log('='.repeat(70) + '\n');
 
 let passCount = 0;
@@ -60,19 +60,28 @@ function extractActionAndPath(firstLine, fenceInfo) {
   let targetPath = null;
 
   const line = firstLine.trim();
-  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s\->]+)/i);
+  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s]+)/i);
   if (protocolMatch) {
     actionType = protocolMatch[1].toUpperCase();
-    targetPath = protocolMatch[2].replace(/-->$/, '').replace(/[->]+$/, '').trim();
+    let rawPath = protocolMatch[2];
+    rawPath = rawPath
+      .replace(/\s*-->.*$/, '')
+      .replace(/-->$/, '')
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/^[./\\]+/, '')
+      .trim();
+    targetPath = rawPath;
     return { actionType, targetPath };
   }
 
   const commentClean = line
     .replace(/^(\/\/|#|<!--|--)\s*/, '')
     .replace(/\s*(-->)$/, '')
+    .replace(/^["'`]|["'`]$/g, '')
+    .replace(/^[./\\]+/, '')
     .trim();
 
-  const pathCandidateMatch = commentClean.match(/^([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9_-]+)/);
+  const pathCandidateMatch = commentClean.match(/^([-a-zA-Z0-9_./\\]+\.[a-zA-Z0-9_-]+)/);
   if (pathCandidateMatch) {
     targetPath = pathCandidateMatch[1].trim();
   }
@@ -81,7 +90,10 @@ function extractActionAndPath(firstLine, fenceInfo) {
     const infoClean = fenceInfo.replace(/^```+/, '').trim();
     const infoColon = infoClean.split(/[:\s]/);
     if (infoColon.length > 1 && infoColon[1].includes('.')) {
-      targetPath = infoColon[1].trim();
+      targetPath = infoColon[1]
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^[./\\]+/, '')
+        .trim();
     }
   }
 
@@ -190,7 +202,11 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
 
     let targetRelativePath = extractedPath || `unnamed_snippet_${actions.length + 1}.txt`;
-    targetRelativePath = targetRelativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    targetRelativePath = targetRelativePath
+      .replace(/\\/g, '/')
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/^[./\\]+/, '')
+      .replace(/^\/+/, '');
 
     pathCounts[targetRelativePath] = (pathCounts[targetRelativePath] || 0) + 1;
     if (pathCounts[targetRelativePath] > 1) {
@@ -205,20 +221,65 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
 
     const defaultRoot = rootPaths[0] || '';
     let targetRoot = defaultRoot;
+    let matchedOriginalContent = null;
+    let resolvedRelPath = targetRelativePath;
+
+    // Multi-Root Content Matcher: First scan for roots with verified non-null content on disk
     for (const root of rootPaths) {
-      const key = `${root}/${targetRelativePath}`.replace(/\\/g, '/');
-      if (existingFilesMap[key] !== undefined) {
+      const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+      const rootBase = cleanRoot.split('/').pop() || '';
+
+      const keyDirect = `${cleanRoot}/${targetRelativePath}`.replace(/\\/g, '/');
+      if (existingFilesMap[keyDirect] !== undefined && existingFilesMap[keyDirect] !== null) {
         targetRoot = root;
+        matchedOriginalContent = existingFilesMap[keyDirect];
+        resolvedRelPath = targetRelativePath;
         break;
+      }
+
+      if (rootBase && targetRelativePath.startsWith(`${rootBase}/`)) {
+        const strippedRel = targetRelativePath.slice(rootBase.length + 1);
+        const keyStripped = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
+        if (existingFilesMap[keyStripped] !== undefined && existingFilesMap[keyStripped] !== null) {
+          targetRoot = root;
+          matchedOriginalContent = existingFilesMap[keyStripped];
+          resolvedRelPath = strippedRel;
+          break;
+        }
       }
     }
 
-    const absKey = `${targetRoot}/${targetRelativePath}`.replace(/\\/g, '/');
-    const originalContent = existingFilesMap[absKey] !== undefined ? existingFilesMap[absKey] : null;
+    if (matchedOriginalContent === null) {
+      for (const root of rootPaths) {
+        const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+        const rootBase = cleanRoot.split('/').pop() || '';
+
+        const keyDirect = `${cleanRoot}/${targetRelativePath}`.replace(/\\/g, '/');
+        if (existingFilesMap[keyDirect] !== undefined) {
+          targetRoot = root;
+          break;
+        }
+
+        if (rootBase && targetRelativePath.startsWith(`${rootBase}/`)) {
+          const strippedRel = targetRelativePath.slice(rootBase.length + 1);
+          const keyStripped = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
+          if (existingFilesMap[keyStripped] !== undefined) {
+            targetRoot = root;
+            resolvedRelPath = strippedRel;
+            break;
+          }
+        }
+      }
+    }
+
+    targetRelativePath = resolvedRelPath;
+    const originalContent = matchedOriginalContent;
 
     let actionType = extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
     if (firstNonEmpty.includes('[DELETED]')) {
       actionType = 'DELETED';
+    } else if (firstNonEmpty.includes('[PARTIAL_DIFF]')) {
+      actionType = 'PARTIAL_DIFF';
     }
 
     const warnings = [];
@@ -663,6 +724,95 @@ console.log('\n\x1b[36m--- Suite 10: Multi-Segment Paths & Path Separation Invar
   assert(session.actions.length === 1, 'Parsed multi-segment Lua action');
   assert(session.actions[0].targetRelativePath === 'src/plugins/renderer_svg/templates.lua', `Extracted full path without stopping at slash: "${session.actions[0].targetRelativePath}"`);
   assert(session.actions[0].actionType === 'NEW', 'Accurately recognized action as NEW');
+}
+
+// --- SUITE 11: HYPHENATED FILENAME & PATH INVARIANT ---
+console.log('\n\x1b[36m--- Suite 11: Hyphenated Filename & Path Invariant (run-diagnostics.mjs fix) ---\x1b[0m');
+{
+  const hyphenPacket = [
+    '# [WORK PACKET]: Update Diagnostics',
+    B3 + 'javascript',
+    '// [MODIFIED] scripts/run-diagnostics.mjs',
+    'console.log("diagnostic test");',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(hyphenPacket, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, `Extracted 1 action (got ${session.actions.length})`);
+  const action = session.actions[0];
+  assert(action.targetRelativePath === 'scripts/run-diagnostics.mjs', `Preserved hyphenated path intact: "${action.targetRelativePath}" (NOT "scripts/run")`);
+  const fileName = action.targetRelativePath.split('/').pop();
+  assert(fileName === 'run-diagnostics.mjs', `File name is "run-diagnostics.mjs" (NOT "${fileName}")`);
+  assert(action.actionType === 'MODIFIED', `Action type is MODIFIED`);
+
+  const pyHyphen = extractActionAndPath('# [NEW] scripts/worker-process-v2.py', '');
+  assert(pyHyphen.targetPath === 'scripts/worker-process-v2.py', `Extracted python hyphenated path: "${pyHyphen.targetPath}"`);
+
+  const htmlHyphen = extractActionAndPath('<!-- [DELETED] public/old-styles-v2.html -->', '');
+  assert(htmlHyphen.targetPath === 'public/old-styles-v2.html', `Extracted HTML comment hyphenated path: "${htmlHyphen.targetPath}"`);
+}
+
+// --- SUITE 12: ROOT PATH MATCHING & MULTI-ROOT DISK DIFFING ---
+console.log('\n\x1b[36m--- Suite 12: Root Path Matching & Multi-Root Disk Diffing Querying ---\x1b[0m');
+{
+  const existingFiles = {
+    'C:/Projects/RepoA/src/index.ts': null,
+    'C:/Projects/RepoB/scripts/run-diagnostics.mjs': 'export const run = true;'
+  };
+
+  const roots = ['C:/Projects/RepoA', 'C:/Projects/RepoB'];
+  const testMarkdown = [
+    '# [WORK PACKET]: Diff Check',
+    B3 + 'javascript',
+    '// [MODIFIED] scripts/run-diagnostics.mjs',
+    'export const run = false;',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(testMarkdown, 'ws-test', roots, existingFiles);
+  assert(session.actions.length === 1, 'Extracted action');
+  const action = session.actions[0];
+  assert(action.targetRootPath === 'C:/Projects/RepoB', `Matched root to RepoB where content physically exists (got: "${action.targetRootPath}")`);
+  assert(action.originalContent === 'export const run = true;', 'Correctly populated originalContent from RepoB');
+  assert(action.actionType === 'MODIFIED', 'Preserved MODIFIED action type');
+
+  // Test root folder name prepended by model: 'RepoB/scripts/run-diagnostics.mjs'
+  const prependedMarkdown = [
+    '# [WORK PACKET]: Diff Check 2',
+    B3 + 'javascript',
+    '// [MODIFIED] RepoB/scripts/run-diagnostics.mjs',
+    'export const run = false;',
+    B3
+  ].join('\n');
+
+  const sessionPrepended = parseSessionMarkdown(prependedMarkdown, 'ws-test', roots, existingFiles);
+  const actionPrepended = sessionPrepended.actions[0];
+  assert(actionPrepended.targetRootPath === 'C:/Projects/RepoB', `Resolved root directory when model prepended RepoB folder name`);
+  assert(actionPrepended.targetRelativePath === 'scripts/run-diagnostics.mjs', `Stripped redundant root folder name from relative path (got: "${actionPrepended.targetRelativePath}")`);
+  assert(actionPrepended.originalContent === 'export const run = true;', `Loaded originalContent after stripping root folder name`);
+}
+
+// --- SUITE 13: PARTIAL DIFF ACTION TAG RECOGNITION ---
+console.log('\n\x1b[36m--- Suite 13: PARTIAL_DIFF Action Tag Recognition & Diff Scaffolding ---\x1b[0m');
+{
+  const partialDiffMarkdown = [
+    '# [WORK PACKET]: Partial Diff Update',
+    B3 + 'typescript',
+    '// [PARTIAL_DIFF] src/features/session/engine/sessionParser.ts',
+    '// ... [Skipped: 100 lines of unchanged imports] ...',
+    'export function newHelper() { return true; }',
+    '// ... [Skipped: 50 lines of trailing logic] ...',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(partialDiffMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, 'Parsed 1 partial diff action');
+  const action = session.actions[0];
+  assert(action.actionType === 'PARTIAL_DIFF', `Action type correctly recognized as PARTIAL_DIFF (got: ${action.actionType})`);
+  assert(action.targetRelativePath === 'src/features/session/engine/sessionParser.ts', `Path is accurate: "${action.targetRelativePath}"`);
+  assert(action.hasSkipBlocks === true, 'Detected skip blocks in partial diff');
+  assert(action.skipBlockCount === 2, `Counted exactly 2 skip blocks (got: ${action.skipBlockCount})`);
+  assert(session.summary.actionsCount.PARTIAL_DIFF === 1, 'Summary recorded 1 PARTIAL_DIFF count');
 }
 
 console.log('\n' + '='.repeat(70));

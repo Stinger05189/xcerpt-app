@@ -53,28 +53,44 @@ export function extractActionAndPath(
   let targetPath: string | null = null;
 
   const line = firstLine.trim();
-  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s\->]+)/i);
+
+  // 1. Explicit Protocol Action Tag matching (preserves hyphens and path characters)
+  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s]+)/i);
   if (protocolMatch) {
     actionType = protocolMatch[1].toUpperCase() as FileActionType;
-    targetPath = protocolMatch[2].replace(/-->$/, '').replace(/[->]+$/, '').trim();
+    let rawPath = protocolMatch[2];
+    rawPath = rawPath
+      .replace(/\s*-->.*$/, '')
+      .replace(/-->$/, '')
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/^[./\\]+/, '')
+      .trim();
+    targetPath = rawPath;
     return { actionType, targetPath };
   }
 
+  // 2. Comment-based path detection fallback
   const commentClean = line
     .replace(/^(\/\/|#|<!--|--)\s*/, '')
     .replace(/\s*(-->)$/, '')
+    .replace(/^["'`]|["'`]$/g, '')
+    .replace(/^[./\\]+/, '')
     .trim();
 
-  const pathCandidateMatch = commentClean.match(/^([a-zA-Z0-9_\-./\\]+\.[a-zA-Z0-9_-]+)/);
+  const pathCandidateMatch = commentClean.match(/^([-a-zA-Z0-9_./\\]+\.[a-zA-Z0-9_-]+)/);
   if (pathCandidateMatch) {
     targetPath = pathCandidateMatch[1].trim();
   }
 
+  // 3. Fence Info String path detection fallback (e.g. ```typescript:path/to/file.ts)
   if (!targetPath && fenceInfo) {
     const infoClean = fenceInfo.replace(/^```+/, '').trim();
     const infoColon = infoClean.split(/[:\s]/);
     if (infoColon.length > 1 && infoColon[1].includes('.')) {
-      targetPath = infoColon[1].trim();
+      targetPath = infoColon[1]
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/^[./\\]+/, '')
+        .trim();
     }
   }
 
@@ -201,7 +217,11 @@ export function parseSessionMarkdown(
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
 
     let targetRelativePath = extractedPath || `unnamed_snippet_${actions.length + 1}.txt`;
-    targetRelativePath = targetRelativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    targetRelativePath = targetRelativePath
+      .replace(/\\/g, '/')
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/^[./\\]+/, '')
+      .replace(/^\/+/, '');
 
     pathCounts[targetRelativePath] = (pathCounts[targetRelativePath] || 0) + 1;
     if (pathCounts[targetRelativePath] > 1) {
@@ -216,20 +236,68 @@ export function parseSessionMarkdown(
 
     const defaultRoot = rootPaths[0] || '';
     let targetRoot = defaultRoot;
+    let matchedOriginalContent: string | null = null;
+    let resolvedRelPath = targetRelativePath;
+
+    // Multi-Root Content Matcher: First scan for roots with verified non-null content on disk
     for (const root of rootPaths) {
-      const key = `${root}/${targetRelativePath}`.replace(/\\/g, '/');
-      if (existingFilesMap[key] !== undefined) {
+      const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+      const rootBase = cleanRoot.split('/').pop() || '';
+
+      // Direct relative path
+      const keyDirect = `${cleanRoot}/${targetRelativePath}`.replace(/\\/g, '/');
+      if (existingFilesMap[keyDirect] !== undefined && existingFilesMap[keyDirect] !== null) {
         targetRoot = root;
+        matchedOriginalContent = existingFilesMap[keyDirect];
+        resolvedRelPath = targetRelativePath;
         break;
+      }
+
+      // Root folder name prepended by LLM (e.g. 'xcerpt-app/scripts/run-diagnostics.mjs')
+      if (rootBase && targetRelativePath.startsWith(`${rootBase}/`)) {
+        const strippedRel = targetRelativePath.slice(rootBase.length + 1);
+        const keyStripped = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
+        if (existingFilesMap[keyStripped] !== undefined && existingFilesMap[keyStripped] !== null) {
+          targetRoot = root;
+          matchedOriginalContent = existingFilesMap[keyStripped];
+          resolvedRelPath = strippedRel;
+          break;
+        }
       }
     }
 
-    const absKey = `${targetRoot}/${targetRelativePath}`.replace(/\\/g, '/');
-    const originalContent = existingFilesMap[absKey] !== undefined ? existingFilesMap[absKey] : null;
+    // Fallback: If no non-null content found, locate first root where key was evaluated
+    if (matchedOriginalContent === null) {
+      for (const root of rootPaths) {
+        const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+        const rootBase = cleanRoot.split('/').pop() || '';
+
+        const keyDirect = `${cleanRoot}/${targetRelativePath}`.replace(/\\/g, '/');
+        if (existingFilesMap[keyDirect] !== undefined) {
+          targetRoot = root;
+          break;
+        }
+
+        if (rootBase && targetRelativePath.startsWith(`${rootBase}/`)) {
+          const strippedRel = targetRelativePath.slice(rootBase.length + 1);
+          const keyStripped = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
+          if (existingFilesMap[keyStripped] !== undefined) {
+            targetRoot = root;
+            resolvedRelPath = strippedRel;
+            break;
+          }
+        }
+      }
+    }
+
+    targetRelativePath = resolvedRelPath;
+    const originalContent = matchedOriginalContent;
 
     let actionType: FileActionType = extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
     if (firstNonEmpty.includes('[DELETED]')) {
       actionType = 'DELETED';
+    } else if (firstNonEmpty.includes('[PARTIAL_DIFF]')) {
+      actionType = 'PARTIAL_DIFF';
     }
 
     const warnings: string[] = [];

@@ -2,23 +2,38 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import type { FileNode } from '../../types/ipc';
 import { TreeNode } from './TreeNode';
+import { ContextMenu } from './ContextMenu';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
 import { toScopedPathKey, parseScopedPathKey } from '../../utils/filterEngine';
-import { Search, Plus, LayoutTemplate, EyeOff, X, Zap, Loader2, GripVertical, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
+import { 
+  Search, 
+  Plus, 
+  LayoutTemplate, 
+  EyeOff, 
+  X, 
+  Zap, 
+  Loader2, 
+  GripVertical, 
+  ChevronsUpDown, 
+  ChevronsDownUp,
+  TableProperties
+} from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useFlattenedTree } from './useFlattenedTree';
 
 interface FileTreeProps {
   node: FileNode;
   rootPath: string;
-  relativePath: string;
+  relativePath?: string;
+  onToggleView?: () => void;
 }
 
-export function FileTree({ node, rootPath }: FileTreeProps) {
+export function FileTree({ node, rootPath, onToggleView }: FileTreeProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [hasLoggedDrag, setHasLoggedDrag] = useState(false);
+  const [contextMenuState, setContextMenuState] = useState<{ x: number; y: number; relativePath: string } | null>(null);
 
   const config = useAppStore(s => s.config);
 
@@ -28,6 +43,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const rootPaths = useWorkspaceStore(s => s.rootPaths);
   const rawTrees = useWorkspaceStore(s => s.rawTrees);
   const isWhitelistMode = useWorkspaceStore(s => s.isWhitelistMode);
+  const setLeftPaneMode = useWorkspaceStore(s => s.setLeftPaneMode);
 
   const [stats, setStats] = useState({ fileCount: 0, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 });
   const [hasSelection, setHasSelection] = useState(false);
@@ -46,6 +62,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
   const excludes = useWorkspaceStore(s => s.excludes);
   const treeOnly = useWorkspaceStore(s => s.treeOnly);
   const parentRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const bindScrollGetter = useWorkspaceStore(s => s.bindScrollGetter);
   const targetScrollY = useWorkspaceStore(s => s.targetScrollY);
@@ -121,6 +138,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
       if (selectionChanged) {
         setHasSelection(state.selectedFiles.size > 0);
+        setContextMenuState(null);
       }
 
       if (!state.isPainting && (selectionChanged || justStoppedPainting)) {
@@ -319,6 +337,12 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     if (e.clientX - rect.left <= 32) return;
 
+    // Defensively blur search inputs to prevent trapping keyboard shortcuts
+    if (document.activeElement instanceof HTMLElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+      document.activeElement.blur();
+    }
+    setContextMenuState(null);
+
     e.stopPropagation();
     e.preventDefault();
 
@@ -369,6 +393,7 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
+        setContextMenuState(null);
         const allVisibleScoped = flatNodesRef.current.map(fn => {
           const isDir = fn.node.type === 'directory';
           const pat = isDir ? `${fn.relativePath}/` : fn.relativePath;
@@ -395,10 +420,22 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch(e.key.toLowerCase()) {
-        case 'a': state.applyRuleToSelection('include', rootPath); break;
-        case 's': state.applyRuleToSelection('tree-only', rootPath); break;
-        case 'd': state.applyRuleToSelection('exclude', rootPath); break;
-        case 'escape': state.setSelectedFiles(new Set()); break;
+        case 'a': 
+          setContextMenuState(null);
+          state.applyRuleToSelection('include', rootPath); 
+          break;
+        case 's': 
+          setContextMenuState(null);
+          state.applyRuleToSelection('tree-only', rootPath); 
+          break;
+        case 'd': 
+          setContextMenuState(null);
+          state.applyRuleToSelection('exclude', rootPath); 
+          break;
+        case 'escape': 
+          setContextMenuState(null);
+          state.setSelectedFiles(new Set()); 
+          break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -407,18 +444,36 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
 
   return (
     <div className="flex flex-col h-full relative @container">
-      <div className="mb-4 flex flex-col gap-2 shrink-0">
+      {/* Top Search and View Mode Toolbars */}
+      <div className="mb-3 flex flex-col gap-2 shrink-0">
         <div className="flex items-center gap-1.5">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
             <input 
+              ref={searchInputRef}
               type="text" 
               placeholder="Filter tree visually..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-bg-panel border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setSearchQuery('');
+                  searchInputRef.current?.blur();
+                }
+              }}
+              className="w-full bg-bg-panel border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-xs text-text-primary outline-none focus:border-accent transition-colors"
             />
           </div>
+
+          {/* Switch to Flat Table View Toggle */}
+          <button
+            onClick={() => onToggleView ? onToggleView() : setLeftPaneMode('table')}
+            className="p-1.5 bg-bg-panel border border-border-subtle text-text-muted hover:text-accent hover:border-accent/40 rounded-md transition-all shrink-0"
+            title="Switch to Flat Table View (Sortable by size)"
+          >
+            <TableProperties size={15} />
+          </button>
+
           <div className="flex items-center bg-bg-panel border border-border-subtle rounded-md p-0.5 shrink-0">
             <button
               onClick={() => setHideExcluded(!hideExcluded)}
@@ -458,7 +513,13 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
         className={`flex-1 overflow-y-auto font-mono text-text-primary relative pb-4 select-none ${isPainting ? 'is-painting' : ''}`}
         style={{ fontSize: config.theme.font.size }}
         onClick={(e) => {
-          if (e.target === e.currentTarget) useWorkspaceStore.getState().setSelectedFiles(new Set());
+          if (document.activeElement instanceof HTMLElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+            document.activeElement.blur();
+          }
+          if (e.target === e.currentTarget) {
+            useWorkspaceStore.getState().setSelectedFiles(new Set());
+            setContextMenuState(null);
+          }
         }}
       >
         <div
@@ -482,6 +543,9 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
                 depth={flatNode.depth}
                 status={flatNode.status}
                 onPointerDown={(e) => handleRowPointerDown(e, virtualRow.index, pattern, isDirectory)}
+                onContextMenu={(e, relPath) => {
+                  setContextMenuState({ x: e.clientX, y: e.clientY, relativePath: relPath });
+                }}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -513,6 +577,17 @@ export function FileTree({ node, rootPath }: FileTreeProps) {
         </div>
       </div>
 
+      {contextMenuState && (
+        <ContextMenu
+          x={contextMenuState.x}
+          y={contextMenuState.y}
+          targetRelativePath={contextMenuState.relativePath}
+          rootPath={rootPath}
+          onClose={() => setContextMenuState(null)}
+        />
+      )}
+
+      {/* Selection Bottom Action Bar */}
       <div className={`shrink-0 bg-bg-base border-t border-border-subtle p-3 flex flex-col gap-3 transition-all duration-200 z-20 ${hasSelection ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
         <div className="flex items-center justify-between text-xs text-text-muted px-1">
           <span className="font-medium text-text-primary">{hasSelection ? stats.fileCount : 0} Files Selected</span>

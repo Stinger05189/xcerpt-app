@@ -16,25 +16,51 @@
 
 ---
 
-## Active Epoch: 06 - Native LLM Integrations & Copilot Automation (v2.1.0)
+## Active Epoch: 06 - Native LLM Integrations & Copilot Automation (v2.2.0)
 
-### Session 028
+### Session 029
 
-- **Focus Area:** Provider-Agnostic LLM Engine Architecture, Zero-Code Session Creation Copilot, Developer-Guided Commit Synthesizer, Settings Modal Overhaul & Viewport Occlusion Stacking Resolution.
+- **Focus Area:** Dual-Width Left Pane Layout Architecture, Ultra-High-Performance Flat File/Folder Table View, Modal-Driven Export Configuration, Search Input Focus-Blurring Resolution, Hoisted Context Menu Dismissal, Parser Hyphen Path Invariant, and Multi-Root Disk Diffing Resolution.
 - **Key Decisions:**
-  - **Provider-Agnostic LLM Engine (`main.cjs` / `llmService.ts`):** Implemented native Electron main process IPC handlers (`llm:complete`, `llm:testConnection`) utilizing native Node.js `fetch`. Decoupled business logic into standalone async helper `executeLLMComplete` to eliminate dependencies on private `ipcMain.handlers` internal maps. Configured OpenRouter as the default provider with `google/gemini-3.5-flash-lite`, with multi-provider adapters for Google Gemini, OpenAI, and Anthropic.
-  - **Zero-Code Token Discipline Copilot (`IngestionTriageStudio.tsx`):** Added an AI Copilot action in the triage studio. Enforced strict token discipline by assembling payloads strictly from parsed reasoning traces (preamble/summary) and target file paths (`[NEW] path.ext`, `[MOD] path.ext`), guaranteeing zero code leak and keeping token usage under ~300 tokens per session creation.
-  - **Developer-Guided Commit Synthesizer (`DevStudioModal.tsx` / `commitContextEngine.ts`):** Added a dedicated "Additional Guidance / Trajectory Context" input to the Git commit creator. Assembled session architectural intent, file action metadata, physical Git diffs (via new `git:getDiff` IPC handler), recent Git log history (`git:getLog`), and developer trajectory notes into a structured JSON schema (`{ subject, body }`).
-  - **Settings Modal Master-Detail Overhaul & Stacking Resolution:**
-    - Diagnosed and resolved the occlusion bug where `DevStudioModal` (`z-40`) rendered on top of `SettingsModal` in DOM order. Moved `<SettingsModal />` below `<DevStudioModal />` in `App.tsx` and elevated its stacking context to `fixed top-10 inset-x-0 bottom-0 z-50` with a dark translucent backdrop (`bg-black/60 backdrop-blur-sm`).
-    - Overhauled `SettingsModal.tsx` from a single running scroll list into a two-column desktop IDE suite featuring a left category navigation rail (`Appearance`, `AI & Copilot`, `File Overrides`, `System & Maintenance`).
-    - Fixed header layout by anchoring the close button (`X`) at the top right and relocating the "Reset to Defaults" action into the System panel with confirmation guards.
-  - **Sandbox Cleanliness & Type Integrity:** Replaced Node `process.versions` calls in the renderer process with sandbox-safe environment strings and resolved TypeScript type mismatches in connection status callbacks.
-- **Core Files Modified:**
-  - `src/features/llm/types/llm.ts`, `src/features/llm/schemas/sessionCopilotSchemas.ts`, `src/features/llm/engine/llmService.ts`
-  - `src/features/session/engine/commitContextEngine.ts`, `src/features/session/components/triage/IngestionTriageStudio.tsx`
-  - `src/features/session/components/DevStudioModal.tsx`, `src/components/layout/SettingsModal.tsx`
-  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`, `src/store/appStore.ts`, `src/App.tsx`, `scripts/test-llm-provider.mjs`, `package.json`
+  - **Dual-Width Left Pane Architecture (`workspaceStore.ts` / `Bootstrapper.tsx` / `MainStage.tsx`):**
+    - Recognized that multi-column table views require significantly wider viewports (size, tokens, skips, actions, types) than hierarchical tree views. Extended `paneWidths` to `{ sidebar: 320, tree: 400, table: 680 }` and introduced `leftPaneMode: 'tree' | 'table'`.
+    - Persisted `leftPaneMode` and `paneWidths.table` across workspace serialization (`getWorkspacePayload`, `generateFreshWorkspace`, `hydrateWorkspace`).
+    - Wired drag-resizing in `MainStage.tsx` to conditionally update `paneWidths.table` vs `paneWidths.tree` depending on the active mode, allowing users to toggle between modes with instant layout restoration.
+  - **Ultra-High-Performance Flat Table View (`FileTableView.tsx`):**
+    - Implemented a completely flat, non-hierarchical virtualized table using `@tanstack/react-virtual`.
+    - Created dual sub-modes: **Files Mode** (individual files with path, extension, bytes/KB, tokens, skips, status, and 1-click rule actions) and **Folders Mode** (directories with aggregated file counts, included counts, total size, tokens, and skips).
+    - Added multi-column sorting: File Size (asc/desc with raw byte precision), Tokens, Skips, Path/Name, Type, and Status.
+    - Added comprehensive filter suite: **Exported (Included)** (directly solving user requests to view only staged files), **Tree-Only**, **Excluded**, **Has Skips**, and file extension filtering.
+    - Implemented 1D mathematical marquee brushing, range selection, multi-selection keybind parity (`A`, `S`, `D`, `Escape`, `Ctrl+A`), and the bottom selection stats bar with ephemeral drag-and-drop packaging.
+  - **Modal-Driven Export Configuration (`ExportConfigModal.tsx`):**
+    - Completely removed the full-screen `ExportStage` view that previously took over the central Monaco code editor viewport.
+    - Built `ExportConfigModal.tsx` as a clean, low-frequency dialog triggered from `MainStage.tsx` header, housing `mergeToSingleFile`, chunk size limits (`maxFilesPerChunk`), `.gitignore` inheritance, the `embedProtocol` toggle, live manifest text preview, and OS export cache folder launcher.
+    - Ensured the central Monaco code editor and active file tabs remain permanently mounted and visible.
+  - **Search Input Keyboard Focus Blurring:**
+    - Diagnosed the root cause of keyboard shortcuts (`A`, `S`, `D`, `Esc`) failing after typing in search: `e.preventDefault()` inside row pointer-down handlers prevented Chromium from blurring active `<input>` elements.
+    - Implemented explicit programmatic blurring (`document.activeElement.blur()`) on row pointer-down and container clicks across `FileTree.tsx` and `FileTableView.tsx`, alongside `Escape` key handling inside search inputs.
+  - **Hoisted Context Menu State Invariant:**
+    - Hoisted right-click context menu state to container level in `FileTree.tsx` and `FileTableView.tsx`, rendering via `createPortal` at the root and auto-dismissing whenever selections change, marquee painting begins, or hotkeys are pressed.
+  - **Parser Hyphen Invariant Fix (`sessionParser.ts`):**
+    - Resolved the critical bug where `// [MODIFIED] scripts/run-diagnostics.mjs` was parsed as `scripts/run` (filename: `run`). Discovered that character class `[^\s\->]+` was interpreting `\-` as a negated hyphen, truncating paths at the first hyphen. Replaced with `/[^\s]+/` and trailing comment stripping.
+  - **Multi-Root Disk Content Resolution (`sessionStore.ts` / `sessionParser.ts`):**
+    - Refactored `initSessionFromMarkdown` to parse actions deterministically before disk lookup, and query each path on disk across all `rootPaths` using `window.api.readFile`.
+    - Resolved root selection precedence: the parser scans all roots and strictly binds to the root where file content is non-null, preventing false fallbacks to empty roots.
+    - Added root-folder prefix stripping (e.g. `xcerpt-app/scripts/...`).
+  - **Manifest Code Generation Protocol Expansion (`exportEngine.ts` / `Xcerpt_Manifest_xcerpt-app.md`):**
+    - Expanded `CODE_GENERATION_PROTOCOL_INSTRUCTION` to provide explicit guidance on when models must use `[MODIFIED]` (full file output for small files <300 lines or complete rewrites) vs `[PARTIAL_DIFF]` (targeted slices with natural structural anchors and skip taxonomies for large files to avoid 5,000+ line outputs).
+    - Enforced `embedProtocol: true` as the default configuration across all workspaces.
+  - **Diagnostic Test Suites:**
+    - Extended `scripts/run-diagnostics.mjs` with Suite 9 (Flat table extraction, size sorting, exported filter, embedProtocol default).
+    - Extended `scripts/test-session-parser.mjs` with Suites 11, 12, and 13 (Hyphenated path invariant, multi-root disk diffing, and `PARTIAL_DIFF` recognition).
+- **Core Files Modified / Created:**
+  - `src/types/ipc.d.ts`, `src/store/workspaceStore.ts`, `src/components/layout/Bootstrapper.tsx`
+  - `src/components/export/ExportConfigModal.tsx` (new), `src/components/tree/FileTableView.tsx` (new)
+  - `src/components/tree/TreeNode.tsx`, `src/components/tree/FileTree.tsx`, `src/components/layout/MainStage.tsx`
+  - `src/features/session/engine/sessionParser.ts`, `src/features/session/store/sessionStore.ts`
+  - `src/features/session/components/triage/IngestionTriageStudio.tsx`, `src/features/session/components/ActionChecklist.tsx`
+  - `src/utils/exportEngine.ts`, `Xcerpt_Manifest_xcerpt-app.md`
+  - `scripts/run-diagnostics.mjs`, `scripts/test-session-parser.mjs`
 
 ---
 

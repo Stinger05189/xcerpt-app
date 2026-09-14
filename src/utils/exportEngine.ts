@@ -16,12 +16,24 @@ export const CODE_GENERATION_PROTOCOL_INSTRUCTION = `
 
 When generating code replacements, diffs, or new files, you MUST adhere to the deterministic extraction contract:
 1. **Zero Interstitial Chatter:** Once the first code block begins, emit NO conversational text or commentary between code blocks. Each code block must immediately follow the previous.
-2. **Deterministic Line 1 Action Header:** The first line inside EVERY code block must declare the target action and relative path using standard language comment syntax:
-   - C-Style/TS/JS/Go/Rust: \`// path/to/file.ext\`
-   - Python/Bash/YAML: \`# path/to/file.ext\`
-   - Markdown/HTML: \`<!-- path/to/file.ext -->\`
-3. **Natural Structural Anchors:** When providing partial modifications, include enclosing class/function headers and boundary lines rather than synthetic comments.
-4. **Standardized Skip Taxonomy:** Preserve unchanged regions using:
+2. **Deterministic Line 1 Action Header:** The first line inside EVERY code block must declare the target action tag followed by the relative path using standard language comment syntax:
+   - Valid Action Tags: \`[NEW]\`, \`[MODIFIED]\`, \`[DELETED]\`, or \`[PARTIAL_DIFF]\`
+   - C-Style/TS/JS/Go/Rust: \`// [ACTION] path/to/file.ext\`
+   - Python/Bash/YAML: \`# [ACTION] path/to/file.ext\`
+   - SQL/Lua: \`-- [ACTION] path/to/file.ext\`
+   - Markdown/HTML: \`<!-- [ACTION] path/to/file.ext -->\`
+   *Concrete Examples:*
+     - \`// [MODIFIED] src/utils/exportEngine.ts\`
+     - \`# [NEW] scripts/worker.py\`
+     - \`<!-- [DELETED] public/legacy.html -->\`
+     - \`// [PARTIAL_DIFF] src/features/session/engine/sessionParser.ts\`
+3. **Action Taxonomy & Scope Selection (\`[MODIFIED]\` vs \`[PARTIAL_DIFF]\`):**
+   - **\`[MODIFIED]\` (Full File Output):** Use for new files, small files under ~300 lines, or files where the majority of lines are being refactored. Provide the complete, unabridged file content.
+   - **\`[PARTIAL_DIFF]\` (Targeted Slices):** REQUIRED when modifying large files where large sections (>50 lines) remain unchanged. Do NOT emit thousands of lines of untouched code. Instead, use \`[PARTIAL_DIFF]\`, provide natural structural anchors (class/function headers and boundary lines), and replace unchanged regions with the standardized skip taxonomy. This keeps output fast, token-efficient, and under 1,000 lines instead of 5,000+ lines.
+   - **\`[NEW]\`:** For brand new files. Provide complete file content.
+   - **\`[DELETED]\`:** For files to be deleted from disk.
+4. **Natural Structural Anchors:** When providing partial modifications, include enclosing class/function headers and boundary lines rather than synthetic comments.
+5. **Standardized Skip Taxonomy:** Preserve unchanged regions using:
    \`// ... [Skipped: Unchanged logic] ...\`
 `;
 

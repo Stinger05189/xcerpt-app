@@ -1,6 +1,6 @@
 // src/features/session/components/ActionChecklist.tsx
 import type { ParsedFileAction } from '../types/session';
-import { Plus, Edit3, Trash2, CheckCircle2, XCircle, Clock, AlertTriangle, Sparkles } from 'lucide-react';
+import { Plus, Edit3, Trash2, CheckCircle2, XCircle, Clock, AlertTriangle, Sparkles, GitPullRequest } from 'lucide-react';
 
 interface ActionChecklistProps {
   actions: ParsedFileAction[];
@@ -15,6 +15,8 @@ export function ActionChecklist({ actions, activeActionId, onSelectAction }: Act
         return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 border border-green-500/30 flex items-center gap-1"><Plus size={10} /> NEW</span>;
       case 'MODIFIED':
         return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center gap-1"><Edit3 size={10} /> MOD</span>;
+      case 'PARTIAL_DIFF':
+        return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center gap-1"><GitPullRequest size={10} /> DIFF</span>;
       case 'DELETED':
         return <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1"><Trash2 size={10} /> DEL</span>;
       default:

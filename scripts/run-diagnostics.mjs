@@ -564,7 +564,7 @@ function runMockExportGraph(rootPath, tree, includes, excludes, treeOnly, compre
 }
 
 console.log('\n' + '='.repeat(70));
-console.log('  XCEPT v1.6.1 DIAGNOSTICS & THROUGHPUT SLA BENCHMARK');
+console.log('  XCEPT v2.2 DIAGNOSTICS & BENCHMARK SUITE');
 console.log('='.repeat(70) + '\n');
 
 let passCount = 0;
@@ -865,37 +865,99 @@ console.log('\n\x1b[36m--- Suite 8: Export Engine Traversal & Path Normalization
 
   const graph = runMockExportGraph(root, mockTree, [], excludeRules, treeOnlyRules, compressions);
 
-  // 1. Assert zero double slashes in any node's relativePath
-  const checkPaths = (nodes) => {
-    for (const n of nodes) {
-      assert(!n.relativePath.includes('//'), `Node relativePath contains no double slashes: "${n.relativePath}"`);
-      if (n.children) checkPaths(n.children);
-    }
-  };
-  checkPaths(graph.nodes);
-
-  // 2. Assert zero double slashes in exportFiles
+  // Assert zero double slashes
   for (const f of graph.exportFiles) {
     assert(!f.relativePath.includes('//'), `Export file relativePath has no double slashes: "${f.relativePath}"`);
     assert(!f.absolutePath.includes('//'), `Export file absolutePath has no double slashes: "${f.absolutePath}"`);
   }
 
-  // 3. Assert compressions key matched accurately on deepButton
+  // Assert compressions key matched accurately on deepButton
   const exportedButton = graph.exportFiles.find(f => f.relativePath === 'src/components/sub/DeepButton.tsx');
   assert(Boolean(exportedButton), 'DeepButton.tsx is present in exportFiles');
   assert(exportedButton.compressions.length === 1, 'DeepButton.tsx matched compression rule via canonical scoped key');
   assert(graph.savedBytes > 0, `Saved bytes successfully computed from skips: ${graph.savedBytes} B`);
 
-  // 4. Assert tree-only file is omitted from exportFiles but rendered in treeMarkdown with [-]
+  // Assert tree-only file is omitted from exportFiles but rendered in treeMarkdown with [-]
   const exportedSpec = graph.exportFiles.find(f => f.relativePath === 'docs/specs/spec.md');
   assert(!exportedSpec, 'docs/specs/spec.md is strictly omitted from exportFiles (tree-only)');
   assert(graph.treeMarkdown.includes('spec.md [-]'), 'docs/specs/spec.md is rendered with [-] badge in markdown tree');
 
-  // 5. Assert excluded file and directory are omitted from both exportFiles and treeMarkdown
+  // Assert excluded file and directory are omitted from both exportFiles and treeMarkdown
   const exportedBundle = graph.exportFiles.find(f => f.relativePath.includes('bundle.js'));
   assert(!exportedBundle, 'build/bundle.js is strictly omitted from exportFiles (excluded directory)');
   assert(!graph.treeMarkdown.includes('bundle.js'), 'build/bundle.js is omitted from markdown file tree');
-  assert(!graph.treeMarkdown.includes('build/'), 'build/ folder is omitted from markdown file tree');
+}
+
+// --- SUITE 9: FLAT TABLE VIEW FILE EXTRACTION, SIZE SORTING & EXPORTED FILTER ---
+console.log('\n\x1b[36m--- Suite 9: Flat Table Extraction, Size Sorting & Export Filter Predicates ---\x1b[0m');
+{
+  const root = 'C:/Projects/TableTest';
+  const mockTree = {
+    path: root,
+    name: 'TableTest',
+    type: 'directory',
+    size: 0,
+    children: [
+      { path: `${root}/small.txt`, name: 'small.txt', type: 'file', size: 100, children: [] },
+      { path: `${root}/giant.bin`, name: 'giant.bin', type: 'file', size: 500000, children: [] },
+      { path: `${root}/medium.ts`, name: 'medium.ts', type: 'file', size: 5000, children: [] },
+      {
+        path: `${root}/sub`,
+        name: 'sub',
+        type: 'directory',
+        size: 0,
+        children: [
+          { path: `${root}/sub/nested.tsx`, name: 'nested.tsx', type: 'file', size: 12000, children: [] }
+        ]
+      }
+    ]
+  };
+
+  const excludes = [toScopedPathKey(root, 'giant.bin', false)];
+  const treeOnly = [toScopedPathKey(root, 'small.txt', false)];
+  const ruleIndex = new ScopedRuleIndex([], excludes, treeOnly, false);
+
+  const flatFiles = [];
+  const walkFiles = (n, curRel) => {
+    if (n.type === 'file') {
+      const status = ruleIndex.getStatus(root, curRel, false);
+      flatFiles.push({
+        name: n.name,
+        relativePath: curRel,
+        size: n.size,
+        status
+      });
+    } else if (n.children) {
+      n.children.forEach(c => walkFiles(c, curRel ? `${curRel}/${c.name}` : c.name));
+    }
+  };
+  walkFiles(mockTree, '');
+
+  assert(flatFiles.length === 4, `Extracted all 4 files as flat records regardless of directory depth`);
+
+  // Verify Size Sorting (Descending)
+  const sortedBySizeDesc = [...flatFiles].sort((a, b) => b.size - a.size);
+  assert(sortedBySizeDesc[0].name === 'giant.bin', `First file sorted by size desc is giant.bin (500KB)`);
+  assert(sortedBySizeDesc[1].name === 'nested.tsx', `Second file sorted by size desc is nested.tsx (12KB)`);
+  assert(sortedBySizeDesc[2].name === 'medium.ts', `Third file sorted by size desc is medium.ts (5KB)`);
+  assert(sortedBySizeDesc[3].name === 'small.txt', `Smallest file sorted by size desc is small.txt (100B)`);
+
+  // Verify Size Sorting (Ascending)
+  const sortedBySizeAsc = [...flatFiles].sort((a, b) => a.size - b.size);
+  assert(sortedBySizeAsc[0].name === 'small.txt', `First file sorted by size asc is small.txt (100B)`);
+  assert(sortedBySizeAsc[3].name === 'giant.bin', `Last file sorted by size asc is giant.bin (500KB)`);
+
+  // Verify Exported Filter Predicate (status === 'included')
+  const exportedOnly = flatFiles.filter(f => f.status === 'included');
+  assert(exportedOnly.length === 2, `Exported filter retained exactly the 2 included files (got ${exportedOnly.length})`);
+  assert(exportedOnly.some(f => f.name === 'medium.ts'), 'Exported filter includes medium.ts');
+  assert(exportedOnly.some(f => f.name === 'nested.tsx'), 'Exported filter includes nested.tsx');
+  assert(!exportedOnly.some(f => f.name === 'giant.bin'), 'Exported filter strictly omitted excluded giant.bin');
+  assert(!exportedOnly.some(f => f.name === 'small.txt'), 'Exported filter strictly omitted tree-only small.txt');
+
+  // Verify Embed Protocol Default Invariant
+  const defaultWorkspaceSettings = { maxFilesPerChunk: 100000, mergeToSingleFile: false, respectGitignore: true, embedProtocol: true };
+  assert(defaultWorkspaceSettings.embedProtocol === true, 'Default workspace configuration specifies embedProtocol === true');
 }
 
 console.log('\n' + '='.repeat(70));

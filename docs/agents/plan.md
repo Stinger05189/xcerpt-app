@@ -16,40 +16,43 @@
 
 ---
 
-## Active Queue: Version 2.2.0 (Session 029 Focus)
+## Active Queue: Version 2.3.0 (Session 030 Focus)
 
-- [ ] **WP-01: In-Line Partial Hunk Merging in Monaco Diff Editor**
-  - _Details:_ Upgrade Monaco Diff Editor in `SessionDiffEditor.tsx` to render inline clickable hunk accept/reject glyphs or custom CodeLens actions directly adjacent to modified blocks, allowing granular hunk-by-hunk application to the working buffer.
-- [ ] **WP-02: LLM Streaming Token Pipeline & Live Telemetry**
-  - _Details:_ Upgrade the main process `llm:complete` handler to support Server-Sent Events (SSE) streaming (`stream: true`), streaming tokens live into `IngestionTriageStudio.tsx` and the commit message generator with live token speed (tok/sec) indicators.
-- [ ] **WP-03: Multi-Provider Model Auto-Discovery & Balance Checker**
-  - _Details:_ Add an OpenRouter key balance and credit querying routine (`/api/v1/auth/key`), displaying live credit usage in `SettingsModal.tsx` and warning developers if account balance is low.
-- [ ] **WP-04: Session Export to PR Description & Markdown Changelog**
-  - _Details:_ Provide a one-click `[Export Pull Request Markdown]` action in the completed session banner, synthesizing a clean GitHub/GitLab PR summary with change breakdowns, intent, and commit references.
+- None Yet
+
+---
+
+## Completed in Version 2.2.0 (Session 029)
+
+- [x] **WP-01: Dual-Width State Architecture & Left Pane Infrastructure**
+  - Extended `paneWidths` in `ipc.d.ts` and `workspaceStore.ts` to `{ sidebar: 320, tree: 400, table: 680 }`.
+  - Added `leftPaneMode: 'tree' | 'table'` to workspace state and persistence in `Bootstrapper.tsx`.
+  - Updated `MainStage.tsx` left pane container and drag-resizer to dynamically adapt between `paneWidths.tree` and `paneWidths.table`.
+- [x] **WP-02: Export Settings Modal & Editor Viewport De-clutter**
+  - Built `ExportConfigModal.tsx` dialog for low-frequency export configuration (`mergeToSingleFile`, `maxFilesPerChunk`, `respectGitignore`, `embedProtocol`, live manifest viewer, OS cache folder opener).
+  - Replaced full-screen `ExportStage` takeover with modal trigger in `MainStage.tsx` header, ensuring `ContextEditor` and file tabs remain permanently visible.
+- [x] **WP-03: Ultra-High-Performance Flat File & Folder Table View (`FileTableView.tsx`)**
+  - Implemented flat virtualized table supporting Files Mode and Folders Mode with `@tanstack/react-virtual`.
+  - Added multi-column sorting for File Size (bytes/KB), Tokens, Skips, Path/Name, Type, and Status.
+  - Added filter suite: **Exported (Included)**, **Tree-Only**, **Excluded**, **Has Skips**, and file extension filter.
+  - Added 1D mathematical marquee selection brush, range selection, selection stats bar, and ephemeral drag packaging.
+  - Added header toggle button to switch between Tree View and Table View.
+- [x] **WP-04: Keyboard Focus Management & Context Menu Dismissal Hardening**
+  - Implemented explicit input blurring on row pointer-down and container clicks in `FileTree.tsx` and `FileTableView.tsx` so `A`, `S`, `D` hotkeys work immediately.
+  - Hoisted context menu state to container level and guaranteed dismissal on pointer down, selection change, or keypress.
+- [x] **WP-05: Session Parser Hyphen Regex Fix & Multi-Root Disk Diffing Resolution**
+  - Fixed hyphen truncation bug (`scripts/run-diagnostics.mjs` $\to$ `scripts/run`) by removing hyphen negation from `extractActionAndPath`.
+  - Hardened multi-root disk querying in `initSessionFromMarkdown` and `sessionParser.ts`, ensuring non-null content takes precedence and root folder prefixes are stripped.
+  - Expanded `CODE_GENERATION_PROTOCOL_INSTRUCTION` in `exportEngine.ts` and `Xcerpt_Manifest_xcerpt-app.md` with explicit `[MODIFIED]` vs `[PARTIAL_DIFF]` guidelines.
+  - Extended test suites in `run-diagnostics.mjs` and `test-session-parser.mjs` (all 13 suites passing).
 
 ---
 
 ## Completed in Version 2.1.0 (Session 028)
 
-- [x] **WP-01: Provider-Agnostic LLM Client Architecture & Secure Key Management**
-  - Built typed LLM client contracts in `src/features/llm/types/llm.ts`. Implemented `llm:complete` and `llm:testConnection` IPC handlers in `main.cjs` using native `fetch`. Configured OpenRouter as the default provider (`google/gemini-3.5-flash-lite`), with adapters for Google Gemini, OpenAI, and Anthropic.
-- [x] **WP-02: Structured Outputs & Function Calling Tool Engine**
-  - Implemented `LLMService.ts` for structured JSON execution and markdown fence stripping. Defined JSON schemas for Session Identity (`title`, `description`) and Commit Synthesis (`subject`, `body`) in `sessionCopilotSchemas.ts`.
-- [x] **WP-03: Session Creation Copilot (AI Name & Intent Assistant)**
-  - Added an `[AI Copilot]` action in `IngestionTriageStudio.tsx`. Formulated zero-code payloads containing strictly preamble reasoning traces and target file paths, enforcing privacy and minimal token consumption.
-- [x] **WP-04: Session Completion Commit Synthesizer with Developer Guidance**
-  - Added `git:getDiff` and `git:getLog` IPC handlers. Built `commitContextEngine.ts` to aggregate architectural intent, file actions, physical diffs, recent commit logs, and developer guidance notes. Upgraded commit dialog in `DevStudioModal.tsx`.
-- [x] **WP-05: Diagnostic & Test Suite**
-  - Built `scripts/test-llm-provider.mjs` verifying schema validation, zero-code token discipline, and payload contracts. Registered `test:llm` npm script.
-- [x] **WP-06: Settings Stacking Context Resolution & Master-Detail Redesign**
-  - Resolved Dev Studio occlusion bug by moving `<SettingsModal />` after `<DevStudioModal />` in `App.tsx` and elevating to `z-50`. Overhauled `SettingsModal.tsx` into a categorized two-column desktop IDE suite.
-
----
-
-## Completed in Version 2.0.0 (Session 027)
-
-- [x] **Workspace-Scoped Dev Studio & TitleBar Preservation Architecture**
-- [x] **Interactive Ingestion Triage Studio with File Boundary Maps**
-- [x] **Multi-Location Reasoning Association & Nested Markdown Shielding**
-- [x] **Non-Invasive Git Integration & Master-Detail Session Management Suite**
-- [x] **IPC Persistence Parity & Regex Range Hazard Fix**
+- [x] **Provider-Agnostic LLM Client Architecture & Secure Key Management**
+- [x] **Structured Outputs & Function Calling Tool Engine**
+- [x] **Session Creation Copilot (AI Name & Intent Assistant)**
+- [x] **Session Completion Commit Synthesizer with Developer Guidance**
+- [x] **Diagnostic & Test Suite (`test-llm-provider.mjs`)**
+- [x] **Settings Stacking Context Resolution & Master-Detail Redesign**

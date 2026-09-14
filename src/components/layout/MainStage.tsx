@@ -3,13 +3,14 @@ import { useEffect, useState, useRef } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useSessionStore } from '../../features/session/store/sessionStore';
 import { FileTree } from '../tree/FileTree';
+import { FileTableView } from '../tree/FileTableView';
 import { ContextEditor } from '../editor/ContextEditor';
-import { ExportStage } from '../export/ExportStage';
+import { ExportConfigModal } from '../export/ExportConfigModal';
 import { 
   Plus, 
   FolderOpen, 
   X, 
-  Settings2, 
+  Sliders, 
   Loader2, 
   FolderSearch, 
   AlertTriangle,
@@ -28,8 +29,6 @@ export function MainStage() {
     missingRoots,
     activeTab, 
     activeFile, 
-    isExportStaging, 
-    setExportStaging, 
     addRootPath, 
     removeRootPath,
     relocateRootPath,
@@ -42,6 +41,8 @@ export function MainStage() {
     chunkPaths,
     paneWidths,
     setPaneWidth,
+    leftPaneMode,
+    setLeftPaneMode,
     fetchGitStatus,
     incrementStat,
     editorTabs,
@@ -63,6 +64,7 @@ export function MainStage() {
 
   const [draggedRootPath, setDraggedRootPath] = useState<string | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [isExportConfigModalOpen, setIsExportConfigModalOpen] = useState(false);
 
   const rootTabsRef = useRef<HTMLDivElement>(null);
   const editorTabsRef = useRef<HTMLDivElement>(null);
@@ -170,14 +172,26 @@ export function MainStage() {
     };
   }, []);
 
-  const handleTreeDragResize = (e: React.PointerEvent) => {
+  const currentLeftPaneWidth = leftPaneMode === 'table' 
+    ? (paneWidths.table || 680) 
+    : paneWidths.tree;
+
+  const handleLeftPaneDragResize = (e: React.PointerEvent) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startWidth = paneWidths.tree;
+    const startWidth = currentLeftPaneWidth;
+    const mode = useWorkspaceStore.getState().leftPaneMode;
 
     const onMove = (moveEvent: PointerEvent) => {
-      const newWidth = Math.max(200, Math.min(800, startWidth + (moveEvent.clientX - startX)));
-      setPaneWidth('tree', newWidth);
+      const minWidth = mode === 'table' ? 420 : 200;
+      const maxWidth = mode === 'table' ? 1200 : 800;
+      const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + (moveEvent.clientX - startX)));
+      
+      if (mode === 'table') {
+        setPaneWidth('table', newWidth);
+      } else {
+        setPaneWidth('tree', newWidth);
+      }
     };
 
     const onUp = () => {
@@ -339,12 +353,13 @@ export function MainStage() {
               )}
             </button>
 
+            {/* Modal-Driven Export Settings Trigger */}
             <button 
-              onClick={() => setExportStaging(!isExportStaging)}
-              className={`px-3 py-1.5 rounded text-sm font-medium flex items-center gap-2 transition-colors
-                ${isExportStaging ? 'bg-bg-hover text-text-primary border border-border-subtle' : 'text-text-muted hover:text-text-primary hover:bg-bg-hover'}`}
+              onClick={() => setIsExportConfigModalOpen(true)}
+              className="px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1.5 bg-bg-base border border-border-subtle text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
+              title="Configure export chunking, manifest, and protocol"
             >
-              <Settings2 size={14} /> {isExportStaging ? 'Close Config' : 'Configure'}
+              <Sliders size={14} /> <span>Export Settings</span>
             </button>
           </div>
         )}
@@ -367,21 +382,37 @@ export function MainStage() {
           </div>
         ) : activeTree ? (
           <>
+            {/* Left Curation Pane: Tree View vs Flat Table View */}
             <div 
-              className="h-full overflow-y-auto p-4 bg-bg-base/60 backdrop-blur-md border-r border-border-subtle shrink-0 relative"
-              style={{ width: paneWidths.tree }}
+              className="h-full p-3 bg-bg-base/60 backdrop-blur-md border-r border-border-subtle shrink-0 relative flex flex-col overflow-hidden"
+              style={{ width: currentLeftPaneWidth }}
             >
-              <FileTree node={activeTree} rootPath={activeTab!} relativePath="" />
+              {leftPaneMode === 'table' ? (
+                <FileTableView
+                  node={activeTree}
+                  rootPath={activeTab!}
+                  onToggleView={() => setLeftPaneMode('tree')}
+                />
+              ) : (
+                <FileTree 
+                  node={activeTree} 
+                  rootPath={activeTab!} 
+                  relativePath="" 
+                  onToggleView={() => setLeftPaneMode('table')}
+                />
+              )}
+
               <div 
-                className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-10 group flex justify-end"
-                onPointerDown={handleTreeDragResize}
+                className="absolute top-0 bottom-0 right-0 w-2 cursor-col-resize z-20 group flex justify-end"
+                onPointerDown={handleLeftPaneDragResize}
               >
                 <div className="w-px h-full bg-border-subtle group-hover:bg-accent transition-colors" />
               </div>
             </div>
 
+            {/* Permanent Code Editor & Diff Stage */}
             <div className="flex-1 h-full bg-bg-panel/40 backdrop-blur-md overflow-hidden relative flex flex-col">
-              {editorTabs.length > 0 && !isExportStaging && (
+              {editorTabs.length > 0 && (
                 <div 
                   ref={editorTabsRef}
                   onWheel={handleHorizontalWheel}
@@ -427,9 +458,7 @@ export function MainStage() {
               )}
 
               <div className="flex-1 overflow-hidden relative">
-                {isExportStaging ? (
-                  <ExportStage />
-                ) : activeFile && activeTab ? (
+                {activeFile && activeTab ? (
                   <ContextEditor key={`${activeTab}::${activeFile}`} rootPath={activeTab} relativePath={activeFile} />
                 ) : (
                   <div className="flex h-full items-center justify-center text-text-muted text-sm bg-transparent">
@@ -449,6 +478,7 @@ export function MainStage() {
         )}
       </div>
 
+      {/* Tab Context Menu */}
       {tabContextMenu && createPortal(
         <div 
           ref={tabMenuRef}
@@ -505,6 +535,12 @@ export function MainStage() {
         </div>,
         document.body
       )}
+
+      {/* Export Settings Modal */}
+      <ExportConfigModal
+        isOpen={isExportConfigModalOpen}
+        onClose={() => setIsExportConfigModalOpen(false)}
+      />
     </main>
   );
 }

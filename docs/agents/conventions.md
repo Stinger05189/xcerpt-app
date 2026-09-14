@@ -27,7 +27,7 @@
 - **IPC Bridge (`preload.cjs`):** Strict separation. React handles UI; Node handles `fs`/OS. React communicates via typed `ipcRenderer.invoke` (`window.api`). Assign global `mainWindow` in Node to prevent variable shadowing in IPC broadcasts.
 - **Dual-Store & Hydration:** `AppStore` (Global IDE) vs `WorkspaceStore` (Active Project). Xcerpt uses a _Single Re-hydrating Store_. On tab switch: synchronously save outgoing state to disk, wipe memory to prevent V8 crashes, inject incoming JSON payload, and trigger background `chokidar` rescan.
 - **State Identifiers:** React `key` props and Zustand IDs (selected/expanded/excluded) MUST use the file's Stable Relative Path or canonical Scoped Key (`${rootId}::${relativePath}`). Never use UI indexes.
-- **Setting Persistence Parity:** Every configuration property stored in `WorkspaceStore` (e.g., `embedProtocol`, `mergeToSingleFile`, `respectGitignore`) MUST be explicitly mapped in `Bootstrapper.tsx`'s `getWorkspacePayload` and initialized in `generateFreshWorkspace`. If omitted from `getWorkspacePayload`, background disk flushes will overwrite settings with defaults.
+- **Setting Persistence Parity:** Every configuration property stored in `WorkspaceStore` (e.g., `embedProtocol`, `mergeToSingleFile`, `respectGitignore`, `paneWidths`, `leftPaneMode`) MUST be explicitly mapped in `Bootstrapper.tsx`'s `getWorkspacePayload` and initialized in `generateFreshWorkspace`. If omitted from `getWorkspacePayload`, background disk flushes will overwrite settings with defaults.
 - **Performance Constraints:**
   - **Granular Boolean Selectors in Virtual Lists:** In virtualized lists where pointer sweeps update global coordinates, row components must NEVER subscribe to monolithic state maps. Use granular boolean selectors (`useStore(s => s.selectedFiles.has(key))`).
   - **Decoupling Non-Interactive Panes during Dragging:** Components not participating in high-frequency pointer interactions (e.g., `Sidebar`) must NEVER use monolithic store destructuring. Use atomic property selectors to ensure 60fps marquee selection performance.
@@ -47,10 +47,22 @@
 
 ## 4. UI & Shell
 
+- **Dual-Width Left Pane Layout Invariant (`paneWidths.tree` vs `paneWidths.table`):**
+  - Table views require wider viewports for multi-column metrics (path, size, tokens, skips, actions, types), whereas hierarchical tree views are compact.
+  - Persist both dimensions in `WorkspacePayload.uiState.paneWidths` (`tree: 400`, `table: 680`) alongside `leftPaneMode`. Drag resizing must write to the active mode's key without polluting the other.
+- **Modal-Driven Export Configuration Rule:**
+  - Avoid full-screen view replacement of the central Monaco code editor for low-frequency export settings.
+  - The central stage remains permanently dedicated to active code/diff tabs; export serialization parameters (`mergeToSingleFile`, `maxFilesPerChunk`, `respectGitignore`, `embedProtocol`) must be encapsulated inside clean modal dialogs (`ExportConfigModal.tsx`).
+- **Search Input Keyboard Focus Blurring (`pointerdown` vs `blur`):**
+  - Calling `e.preventDefault()` inside mouse/pointer drag handlers prevents the Chromium engine from blurring active `<input>` elements.
+  - Always programmatically execute `document.activeElement.blur()` on row pointer-down or container clicks in virtualized selection panes to prevent search inputs from intercepting single-key shortcuts (`A`, `S`, `D`, `Esc`).
+- **Hoisted Context Menu State Invariant:**
+  - Never store right-click context menu positioning inside child row components in virtualized lists. Rows are recycled and unmounted during scroll, causing menus to orphan or persist during drag selection.
+  - Hoist menu state to the parent list/container and register dismissals on pointer sweeps, selection changes, or hotkey executions.
 - **Visual Filtering:** Excluded items are NOT removed from the DOM. Apply an "excluded" status flag for `opacity: 0.4` and a disabled state.
 - **Frameless Window (`frame: false`):** Apply `WebkitAppRegion: 'drag'` to the layout container. Apply `'no-drag'` ONLY to interactive leaf nodes (buttons/tabs) and use padding on the parent to expose the drag region.
 - **Modal Overlays & Frameless Windows:** When implementing full-screen overlays (like the Workspace Browser or Settings), do not unmount or obscure the `TitleBar`. Apply `opacity-30 pointer-events-none` to the background UI, ensuring OS window controls remain functional.
-- **Overlay Stacking Hierarchy (`z-50` vs `z-40`):** Modal dialogs (such as `SettingsModal`) that must be accessible globally—including while inside an active workspace Dev Studio—MUST mount after `<DevStudioModal />` in DOM tree order and use `fixed top-10 inset-x-0 bottom-0 z-50` with a dark translucent backdrop (`bg-black/60 backdrop-blur-sm`), allowing the TitleBar (`z-50`) to remain active while covering the studio (`z-40`).
+- **Overlay Stacking Hierarchy (`z-50` vs `z-40`):** Modal dialogs (such as `SettingsModal` and `ExportConfigModal`) that must be accessible globally—including while inside an active workspace Dev Studio—MUST mount after `<DevStudioModal />` in DOM tree order and use `fixed top-10 inset-x-0 bottom-0 z-50` with a dark translucent backdrop (`bg-black/60 backdrop-blur-sm`), allowing the TitleBar (`z-50`) to remain active while covering the studio (`z-40`).
 - **Virtualization & Fixed Positioning (CSS Transforms):** Virtualization relies on `transform: translateY(px)` to move rows. In CSS, `transform` creates a new containing block, breaking `position: fixed`. Any context menu or fixed overlay triggered from inside a virtualized list MUST use `createPortal(..., document.body)`.
 - **Scale Inputs & Cursor Drift:** Bind `<input type="range">` scale sliders strictly to local React `useState` while dragging, and commit to the global Zustand store only on `onMouseUp`, `onTouchEnd`, or `onKeyUp`.
 
@@ -78,6 +90,12 @@
 
 - **Subsystem Enclave Decoupling:** All dev session studio logic MUST reside within `src/features/session/`. `sessionStore.ts` must maintain zero-state bleed with `workspaceStore.ts`—it receives only `workspaceId` and `rootPaths` as operational parameters.
 - **Workspace-Scoped Studio Viewport:** Dev studio views MUST live under the active workspace context below the application TitleBar (`top-10 inset-x-0 bottom-0 z-40`), NEVER as a blind window overlay covering TitleBar tabs. The TitleBar tabs must remain visible, draggable, and interactive so users can switch workspaces without losing studio session state.
+- **Parser Hyphen Character Negation Hazard:**
+  - In regex character classes `[^...]`, never place hyphens `-` inside negated sets (e.g. `[^\s\->]`), as they can inadvertently match and exclude hyphens from paths, truncating names like `scripts/run-diagnostics.mjs` to `scripts/run`.
+  - Always use `/[^\s]+/` and strip trailing HTML comment tags (`-->`) via post-match string replacements.
+- **Multi-Root Disk Content Precedence & Root Leaf Disambiguation:**
+  - When mapping parsed actions to disk files, query all workspace roots and give strict precedence to roots where file content is non-null.
+  - Handle model-prepended root directory names (e.g. `xcerpt-app/scripts/...`) by testing candidate paths with the leaf directory stripped.
 - **Line 1 Action Prefix Pruning Rule:**
   - `stripProtocolScaffolding` must strip ONLY the action tag prefix (`[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)]\s*`) from the first non-empty comment line.
   - The commented relative path (`// path/to/file.ext`, `# path/to/file.ext`, `<!-- path/to/file.ext -->`, `-- path/to/file.ext`) MUST be preserved for developer clarity and downstream model context.
@@ -91,7 +109,7 @@
 
 ## 8. Hard-Learned Gotchas & Defensive Patterns (Session 027+)
 
-- **Regex Character Class Hyphen Range Hazard:** Never leave an unescaped hyphen inside a character class adjacent to other characters (e.g. `[^\s->]`). In JavaScript regex, `->` represents an ASCII character range from `-` (45) to `>` (62), which inadvertently matches and excludes both `.` (46) and `/` (47), breaking path and filename extraction. Always escape hyphens: `[^\s\->]`.
+- **Regex Character Class Hyphen Range Hazard:** Never leave an unescaped hyphen inside a character class adjacent to other characters (e.g. `[^\s->]`). In JavaScript regex, `->` represents an ASCII character range from `-` (45) to `>` (62), which inadvertently matches and excludes both `.` (46) and `/` (47), breaking path and filename extraction. Always place hyphens at the extreme beginning or end of classes (`[-a-z]` or `[a-z-]`), or avoid `-` inside negated sets entirely.
 - **IPC Persistence Projection Parity:** Whenever new domain metadata fields are added to entities (e.g. `status`, `description`, `completedAt` on `DevSession`), the main process IPC handlers (such as `main.cjs` `session:list`) MUST explicitly project and return those fields. Omitting them will silently drop the properties across the IPC bridge, leaving client UI components in broken default fallback states.
 - **Mutually Exclusive Viewport Modals:** Never stack multiple full-height modal views inside a single flex-column layout (e.g. mounting `IngestionTriageStudio` while `isStudioOpen` is true). Viewport states (`isIngestionModalOpen`, `isBrowserModalOpen`, `isStudioOpen`) must be strictly mutually exclusive in render hierarchy to prevent vertical window-splitting bugs.
 - **Strict JavaScript Test Syntax (.mjs):** Never use TypeScript syntax (such as non-null assertion `!`) in `.mjs` test runner files. Node.js executes `.mjs` as standard ECMAScript modules and will throw fatal `SyntaxError: Unexpected token !`.
@@ -104,3 +122,11 @@
 - **Zero-Code Token Discipline:** Copilots that assist in session naming or intent classification MUST NEVER transmit raw file bodies in prompt payloads. Prompt payloads are strictly constrained to parsed reasoning traces (preamble/summary) and file action metadata (`[NEW] path.ext`, `[MOD] path.ext`), keeping prompt sizes below ~300 tokens and protecting developer source confidentiality.
 - **Developer-Guided Commit Context Pipeline:** The commit synthesizer must allow developers to inject optional guidance/trajectory notes alongside physical Git diffs (`git:getDiff`), recent Git log formatting conventions (`git:getLog`), and the session architectural intent. The LLM prompt must enforce structured JSON output (`{ "subject": "...", "body": "..." }`).
 - **Non-Destructive API Failures:** If an LLM API call fails due to authentication (`401`), insufficient credits (`402`), or rate limits (`429`), the Dev Studio must present non-blocking actionable UI notices (with direct links to Settings and provider key consoles) without freezing the review session or blocking manual merging.
+
+## 10. Manifest Protocol & Extraction Contracts (v2.2+)
+
+- **Default Protocol Invariant (`embedProtocol: true`):** Workspaces must default `embedProtocol` to `true` on creation and serialization to guarantee outbound payloads instruct models on deterministic action tagging.
+- **Structured Scope Taxonomy (`[MODIFIED]` vs `[PARTIAL_DIFF]`):**
+  - Outbound manifest instructions must explicitly guide models on output volume.
+  - `[MODIFIED]` is designated for small files (<300 lines) or comprehensive architectural rewrites.
+  - `[PARTIAL_DIFF]` with natural structural anchors and standardized skip comments (`// ... [Skipped: Unchanged logic] ...`) is strictly required for large files with localized changes, preventing token exhaustion and 5,000+ line outputs.

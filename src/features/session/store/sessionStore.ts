@@ -152,26 +152,41 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   initSessionFromMarkdown: async (rawMarkdown, workspaceId, rootPaths, customTitle, customDescription) => {
     set({ error: null });
     try {
+      // Step 1: Preliminary pass through parser to extract all exact candidate relative paths
+      const preliminarySession = parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, {});
       const existingFilesMap: Record<string, string | null> = {};
-      const preliminaryActions = rawMarkdown.match(/(\/\/|#|<!--|--)\s*(?:\[(NEW|MODIFIED|DELETED)\]\s+)?([^\r\n]+)/gi) || [];
 
-      for (const line of preliminaryActions) {
-        const pathPart = line
-          .replace(/(\/\/|#|<!--|--)\s*/, '')
-          .replace(/\[(NEW|MODIFIED|DELETED)\]\s*/, '')
-          .replace(/[->]+$/, '')
-          .trim();
+      // Step 2: Query physical disk files across all root paths
+      for (const action of preliminarySession.actions) {
+        const relPath = action.targetRelativePath;
         for (const root of rootPaths) {
-          const abs = `${root}/${pathPart}`.replace(/\\/g, '/');
+          const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+          const rootBase = cleanRoot.split('/').pop() || '';
+
+          // 2a. Direct path check
+          const directAbs = `${cleanRoot}/${relPath}`.replace(/\\/g, '/');
           try {
-            const text = await window.api.readFile(abs);
-            existingFilesMap[abs] = text;
+            const text = await window.api.readFile(directAbs);
+            existingFilesMap[directAbs] = text;
           } catch {
-            existingFilesMap[abs] = null;
+            existingFilesMap[directAbs] = null;
+          }
+
+          // 2b. Root folder name prepended by LLM check
+          if (rootBase && relPath.startsWith(`${rootBase}/`)) {
+            const strippedRel = relPath.slice(rootBase.length + 1);
+            const strippedAbs = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
+            try {
+              const text = await window.api.readFile(strippedAbs);
+              existingFilesMap[strippedAbs] = text;
+            } catch {
+              existingFilesMap[strippedAbs] = null;
+            }
           }
         }
       }
 
+      // Step 3: Final deterministic parse with resolved file contents
       const session = parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFilesMap);
       if (customTitle && customTitle.trim()) {
         session.name = customTitle.trim();

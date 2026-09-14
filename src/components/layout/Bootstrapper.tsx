@@ -28,11 +28,18 @@ const generateFreshWorkspace = async (id: string) => {
       rootPaths: [],
       stats: { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} }
     },
-    settings: { maxFilesPerChunk: 100000, mergeToSingleFile: false, respectGitignore: true, embedProtocol: false },
+    settings: { maxFilesPerChunk: 100000, mergeToSingleFile: false, respectGitignore: true, embedProtocol: true },
     rules: { hardBlacklist: useWorkspaceStore.getState().hardBlacklist },
     activePresetId: defaultPreset.id,
     presets: [defaultPreset],
-    uiState: { expandedFolders: [], activeTab: null, paneWidths: { sidebar: 320, tree: 400 }, hideExcluded: true, hideTreeOnly: true }
+    uiState: { 
+      expandedFolders: [], 
+      activeTab: null, 
+      paneWidths: { sidebar: 320, tree: 400, table: 680 }, 
+      leftPaneMode: 'tree',
+      hideExcluded: true, 
+      hideTreeOnly: true 
+    }
   };
   await window.api.saveSession(id, freshPayload);
 };
@@ -63,8 +70,11 @@ const getWorkspacePayload = (state: ReturnType<typeof useWorkspaceStore.getState
     expandedFolders: Array.from(state.expandedFolders), 
     activeTab: state.activeTab,
     paneWidths: state.paneWidths,
+    leftPaneMode: state.leftPaneMode,
     hideExcluded: state.hideExcluded,
-    hideTreeOnly: state.hideTreeOnly
+    hideTreeOnly: state.hideTreeOnly,
+    openEditorTabs: state.editorTabs,
+    activeEditorTabId: state.activeEditorTabId
   }
 });
 

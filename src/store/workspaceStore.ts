@@ -56,7 +56,8 @@ interface WorkspaceState {
     ephemeralExports: number;
     fileFrequencies: Record<string, number>;
   };
-  paneWidths: { sidebar: number; tree: number };
+  paneWidths: { sidebar: number; tree: number; table: number };
+  leftPaneMode: 'tree' | 'table';
   gitStatus: Record<string, string>;
 
   rootPaths: string[];
@@ -122,7 +123,8 @@ interface WorkspaceState {
   setRespectGitignore: (val: boolean) => Promise<void>;
   setEmbedProtocol: (val: boolean) => void;
   setIsWhitelistMode: (val: boolean) => void;
-  setPaneWidth: (pane: 'sidebar' | 'tree', width: number) => void;
+  setLeftPaneMode: (mode: 'tree' | 'table') => void;
+  setPaneWidth: (pane: 'sidebar' | 'tree' | 'table', width: number) => void;
   incrementStat: (type: 'totalExports' | 'ephemeralExports', files?: string[]) => void;
   fetchGitStatus: () => Promise<void>;
 
@@ -193,7 +195,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   createdAt: null,
 
   stats: { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} },
-  paneWidths: { sidebar: 320, tree: 400 },
+  paneWidths: { sidebar: 320, tree: 400, table: 680 },
+  leftPaneMode: 'tree',
   gitStatus: {},
 
   rootPaths: [],
@@ -217,7 +220,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   maxFilesPerChunk: 100000,
   mergeToSingleFile: false,
   respectGitignore: true,
-  embedProtocol: false,
+  embedProtocol: true,
 
   stagingStatus: 'VIRTUAL_READY',
   virtualGraph: null,
@@ -255,6 +258,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ isWhitelistMode: val, stagingStatus: 'VIRTUAL_READY', isStale: true });
     get().refreshVirtualGraph();
   },
+
+  setLeftPaneMode: (mode: 'tree' | 'table') => set({ leftPaneMode: mode }),
 
   refreshVirtualGraph: () => {
     const s = get();
@@ -419,7 +424,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       workspaceName: payload.metadata.name,
       createdAt: payload.metadata.createdAt,
       stats: payload.metadata.stats || { totalExports: 0, ephemeralExports: 0, fileFrequencies: {} },
-      paneWidths: payload.uiState.paneWidths || { sidebar: 320, tree: 400 },
+      paneWidths: {
+        sidebar: payload.uiState.paneWidths?.sidebar || 320,
+        tree: payload.uiState.paneWidths?.tree || 400,
+        table: payload.uiState.paneWidths?.table || 680
+      },
+      leftPaneMode: payload.uiState.leftPaneMode || 'tree',
       gitStatus: {},
       rootPaths: roots,
       missingRoots: new Set<string>(),
@@ -440,7 +450,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       maxFilesPerChunk: payload.settings.maxFilesPerChunk,
       mergeToSingleFile: payload.settings.mergeToSingleFile ?? false,
       respectGitignore: payload.settings.respectGitignore ?? true,
-      embedProtocol: payload.settings.embedProtocol ?? false,
+      embedProtocol: payload.settings.embedProtocol ?? true,
       stagingStatus: 'VIRTUAL_READY',
       virtualGraph: null,
 

@@ -24,7 +24,8 @@ import {
   ChevronUp,
   LayoutTemplate,
   Loader2,
-  Settings
+  Settings,
+  GitPullRequest
 } from 'lucide-react';
 
 interface IngestionTriageStudioProps {
@@ -53,6 +54,8 @@ export function IngestionTriageStudio({
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [diskCache, setDiskCache] = useState<Record<string, string | null>>({});
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const boundaryScrollRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,15 +63,68 @@ export function IngestionTriageStudio({
   const setSettingsOpen = useAppStore(s => s.setSettingsOpen);
   const activeLlmConfig = useAppStore(s => s.config.llm);
 
-  // Parse actions reactively
+  // Debounced background disk querying for real-time diff status & no-op identification
+  useEffect(() => {
+    if (!rawText.trim() || rootPaths.length === 0) {
+      setDiskCache({});
+      return;
+    }
+
+    let isMounted = true;
+    const timer = setTimeout(async () => {
+      try {
+        const preview = parseSessionMarkdown(rawText, workspaceId, rootPaths, {});
+        const map: Record<string, string | null> = {};
+
+        for (const act of preview.actions) {
+          const rel = act.targetRelativePath;
+          for (const root of rootPaths) {
+            const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+            const rootBase = cleanRoot.split('/').pop() || '';
+            const direct = `${cleanRoot}/${rel}`.replace(/\\/g, '/');
+
+            try {
+              const text = await window.api.readFile(direct);
+              map[direct] = text;
+            } catch {
+              map[direct] = null;
+            }
+
+            if (rootBase && rel.startsWith(`${rootBase}/`)) {
+              const stripped = `${cleanRoot}/${rel.slice(rootBase.length + 1)}`.replace(/\\/g, '/');
+              try {
+                const text = await window.api.readFile(stripped);
+                map[stripped] = text;
+              } catch {
+                map[stripped] = null;
+              }
+            }
+          }
+        }
+
+        if (isMounted) {
+          setDiskCache(map);
+        }
+      } catch {
+        // Fallback
+      }
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [rawText, workspaceId, rootPaths]);
+
+  // Parse actions reactively with live disk content cache
   const parsedPreview = useMemo(() => {
     if (!rawText.trim()) return null;
     try {
-      return parseSessionMarkdown(rawText, workspaceId, rootPaths);
+      return parseSessionMarkdown(rawText, workspaceId, rootPaths, diskCache);
     } catch {
       return null;
     }
-  }, [rawText, workspaceId, rootPaths]);
+  }, [rawText, workspaceId, rootPaths, diskCache]);
 
   const actions = useMemo(() => parsedPreview?.actions || [], [parsedPreview]);
   const explanations = useMemo(() => parsedPreview?.explanations || [], [parsedPreview]);
@@ -178,6 +234,7 @@ export function IngestionTriageStudio({
   const newCount = actions.filter(a => a.actionType === 'NEW').length;
   const modCount = actions.filter(a => a.actionType === 'MODIFIED').length;
   const delCount = actions.filter(a => a.actionType === 'DELETED').length;
+  const diffCount = actions.filter(a => a.actionType === 'PARTIAL_DIFF').length;
   const allWarnings = actions.flatMap(a => a.parseWarnings);
 
   const jumpToLineInEditor = (targetLine?: number) => {
@@ -400,6 +457,11 @@ export function IngestionTriageStudio({
                             <Edit3 size={9} /> MOD
                           </span>
                         )}
+                        {action.actionType === 'PARTIAL_DIFF' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center gap-1 shrink-0">
+                            <GitPullRequest size={9} /> DIFF
+                          </span>
+                        )}
                         {action.actionType === 'DELETED' && (
                           <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-1 shrink-0">
                             <Trash2 size={9} /> DEL
@@ -420,6 +482,11 @@ export function IngestionTriageStudio({
 
                     <div className="flex items-center justify-between text-[10px] font-mono text-text-muted pt-0.5">
                       <span>{lang} • {lines} L</span>
+                      {action.isIdenticalToDisk && (
+                        <span className="text-blue-400 bg-blue-500/10 px-1 rounded border border-blue-500/20">
+                          Identical (No-Op)
+                        </span>
+                      )}
                       {action.hasSkipBlocks && (
                         <span className="text-amber-400 bg-amber-400/10 px-1 rounded">
                           {action.skipBlockCount} Skips
@@ -446,6 +513,7 @@ export function IngestionTriageStudio({
               <span className="text-text-primary">
                 {newCount > 0 && <span className="text-green-400 mr-2">+{newCount} New</span>}
                 {modCount > 0 && <span className="text-orange-400 mr-2">~{modCount} Mod</span>}
+                {diffCount > 0 && <span className="text-purple-400 mr-2">≈{diffCount} Diff</span>}
                 {delCount > 0 && <span className="text-red-400">-{delCount} Del</span>}
               </span>
             </div>
@@ -586,6 +654,7 @@ export function IngestionTriageStudio({
                           <span className="text-accent font-bold">╭── BOUNDARY {index + 1}:</span>
                           {act.actionType === 'NEW' && <span className="text-green-400 font-bold">[NEW]</span>}
                           {act.actionType === 'MODIFIED' && <span className="text-orange-400 font-bold">[MODIFIED]</span>}
+                          {act.actionType === 'PARTIAL_DIFF' && <span className="text-purple-400 font-bold">[PARTIAL_DIFF]</span>}
                           {act.actionType === 'DELETED' && <span className="text-red-400 font-bold">[DELETED]</span>}
                           <span className="text-text-primary font-semibold">{act.targetRelativePath}</span>
                         </div>

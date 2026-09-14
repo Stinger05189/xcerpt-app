@@ -1,11 +1,10 @@
 // src/components/tree/TreeNode.tsx
-import { useState, memo } from 'react';
+import { memo } from 'react';
 import { ChevronRight, ChevronDown, File, Folder, Edit3 } from 'lucide-react';
 import type { FileNode } from '../../types/ipc';
 import type { FileStatus } from '../../utils/filterEngine';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { toScopedPathKey } from '../../utils/filterEngine';
-import { ContextMenu } from './ContextMenu';
 
 interface TreeNodeProps {
   node: FileNode;
@@ -15,11 +14,19 @@ interface TreeNodeProps {
   status: FileStatus;
   style?: React.CSSProperties;
   onPointerDown?: (e: React.PointerEvent) => void;
+  onContextMenu?: (e: React.MouseEvent, relativePath: string) => void;
 }
 
-const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, style, onPointerDown }: TreeNodeProps) => {
-  const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
-
+const TreeNodeComponent = ({ 
+  node, 
+  rootPath, 
+  relativePath, 
+  depth = 0, 
+  status, 
+  style, 
+  onPointerDown,
+  onContextMenu 
+}: TreeNodeProps) => {
   const isDirectory = node.type === 'directory';
   const pattern = isDirectory ? `${relativePath}/` : relativePath;
   const scopedPattern = toScopedPathKey(rootPath, pattern, isDirectory);
@@ -59,7 +66,7 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, st
     }
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => {
+  const handleContextMenuLocal = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -67,7 +74,9 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, st
     if (!store.selectedFiles.has(scopedPattern) && !store.selectedFiles.has(pattern)) {
       store.setSelectedFiles(new Set([scopedPattern]));
     }
-    setContextMenuPos({ x: e.clientX, y: e.clientY });
+    if (onContextMenu) {
+      onContextMenu(e, relativePath);
+    }
   };
 
   return (
@@ -81,7 +90,7 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, st
         `}
         onPointerDown={onPointerDown}
         onDoubleClick={handleDoubleClick}
-        onContextMenu={handleContextMenu}
+        onContextMenu={handleContextMenuLocal}
         style={{ paddingLeft: `${(depth - 1) * 16 + 32}px` }}
       >
         <div 
@@ -117,16 +126,6 @@ const TreeNodeComponent = ({ node, rootPath, relativePath, depth = 0, status, st
           </span>
         )}
       </div>
-    
-      {contextMenuPos && (
-        <ContextMenu 
-          x={contextMenuPos.x} 
-          y={contextMenuPos.y} 
-          targetRelativePath={relativePath}
-          rootPath={rootPath}
-          onClose={() => setContextMenuPos(null)} 
-        />
-      )}
     </div>
   );
 };

@@ -183,7 +183,8 @@ export interface WorkspacePayload {
   uiState: {
     expandedFolders: string[];
     activeTab: string | null;
-    paneWidths?: { sidebar: number; tree: number };
+    paneWidths?: { sidebar: number; tree: number; table?: number };
+    leftPaneMode?: 'tree' | 'table';
     hideExcluded?: boolean;
     hideTreeOnly?: boolean;
     openEditorTabs?: EditorTab[];
