@@ -11,6 +11,7 @@ import { FullPlanViewer } from './drawer/FullPlanViewer';
 import { SessionBrowserModal } from './SessionBrowserModal';
 import { IngestionTriageStudio } from './triage/IngestionTriageStudio';
 import { getLanguageFromFilename, formatLanguageName } from './diff/languageHelper';
+import { buildAndSynthesizeCommit } from '../engine/commitContextEngine';
 import { 
   X, 
   Check, 
@@ -29,7 +30,9 @@ import {
   GitBranch,
   GitCommit,
   CheckCircle2,
-  LogOut
+  LogOut,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 
 export function DevStudioModal() {
@@ -65,13 +68,14 @@ export function DevStudioModal() {
   const [renderSideBySide, setRenderSideBySide] = useState(true);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
 
-  // Commit Modal State
+  // Commit Modal State & Developer Guidance Context
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState('');
+  const [developerGuidance, setDeveloperGuidance] = useState('');
+  const [isSynthesizingCommit, setIsSynthesizingCommit] = useState(false);
   const [isCommittingGit, setIsCommittingGit] = useState(false);
   const [commitResult, setCommitResult] = useState<{ success: boolean; hash?: string; error?: string } | null>(null);
 
-  // Fetch Git branch for active root
   useEffect(() => {
     const fetchBranch = async () => {
       const activeRoot = rootPaths[0];
@@ -89,7 +93,6 @@ export function DevStudioModal() {
     }
   }, [isStudioOpen, rootPaths]);
 
-  // Global Keyboard listener: Ctrl+Enter to apply active action, Esc to exit view
   useEffect(() => {
     if (!isStudioOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -105,8 +108,40 @@ export function DevStudioModal() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isStudioOpen, isIngestionModalOpen, isCommitModalOpen, isBrowserModalOpen, applyCurrentAction, setStudioOpen]);
 
-  // Strict Mutual Exclusivity: if neither is active, render nothing
   if (!isIngestionModalOpen && !isStudioOpen && !isBrowserModalOpen) return null;
+
+  const handleOpenCommitModal = () => {
+    if (!activeSession) return;
+    setCommitMessage(activeSession.summary.architecturalIntent || activeSession.name);
+    setDeveloperGuidance('');
+    setCommitResult(null);
+    setIsCommitModalOpen(true);
+  };
+
+  const handleSynthesizeCommitAi = async () => {
+    if (!activeSession) return;
+    const activeRoot = rootPaths[0] || '';
+    setIsSynthesizingCommit(true);
+    setCommitResult(null);
+
+    try {
+      const { subject, body } = await buildAndSynthesizeCommit(
+        activeSession,
+        activeRoot,
+        developerGuidance
+      );
+
+      const formatted = body ? `${subject}\n\n${body}` : subject;
+      setCommitMessage(formatted);
+    } catch (err: unknown) {
+      setCommitResult({
+        success: false,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    } finally {
+      setIsSynthesizingCommit(false);
+    }
+  };
 
   const handleCommitGit = async () => {
     const activeRoot = rootPaths[0];
@@ -160,7 +195,7 @@ export function DevStudioModal() {
         />
       )}
 
-      {/* Active Dev Studio Review View (Exclusively rendered when ingestion and browser are closed) */}
+      {/* Active Dev Studio Review View */}
       {isStudioOpen && !isIngestionModalOpen && !isBrowserModalOpen && activeSession && (
         <div className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Frameless Studio Sub-Header */}
@@ -216,10 +251,7 @@ export function DevStudioModal() {
               <div className="w-px h-4 bg-border-subtle mx-1" />
 
               <button
-                onClick={() => {
-                  setCommitMessage(activeSession.summary.architecturalIntent || activeSession.name);
-                  setIsCommitModalOpen(true);
-                }}
+                onClick={handleOpenCommitModal}
                 className="flex items-center gap-1 px-2.5 py-1 bg-accent/10 hover:bg-accent/20 text-accent border border-accent/30 rounded-md text-xs font-medium transition-all"
                 title="Create Git commit from merged session"
               >
@@ -273,10 +305,7 @@ export function DevStudioModal() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    setCommitMessage(activeSession.summary.architecturalIntent || activeSession.name);
-                    setIsCommitModalOpen(true);
-                  }}
+                  onClick={handleOpenCommitModal}
                   className="flex items-center gap-1 px-2.5 py-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 rounded border border-green-500/40 text-[11px] font-semibold transition-colors"
                 >
                   <GitCommit size={12} /> Create Git Commit
@@ -484,10 +513,10 @@ export function DevStudioModal() {
         </div>
       )}
 
-      {/* Post-Session Git Commit Dialog */}
+      {/* Post-Session Git Commit Dialog with Developer Guidance Synthesizer */}
       {isCommitModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-8">
-          <div className="bg-bg-panel border border-border-subtle rounded-2xl w-full max-w-lg shadow-2xl p-5 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-bg-panel border border-border-subtle rounded-2xl w-full max-w-xl shadow-2xl p-5 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between border-b border-border-subtle pb-3">
               <div className="flex items-center gap-2 text-text-primary font-semibold text-sm">
                 <GitCommit size={16} className="text-accent" />
@@ -501,15 +530,50 @@ export function DevStudioModal() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-xs text-text-muted font-medium">Commit Message:</label>
+            {/* Developer Guidance / Trajectory Field */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-text-muted font-medium">
+                  Additional Guidance / Developer Context (Optional):
+                </label>
+                <button
+                  type="button"
+                  onClick={handleSynthesizeCommitAi}
+                  disabled={isSynthesizingCommit}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-accent hover:text-accent/80 transition-colors disabled:opacity-40"
+                >
+                  {isSynthesizingCommit ? (
+                    <>
+                      <Loader2 size={11} className="animate-spin" />
+                      <span>Synthesizing Commit...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={11} />
+                      <span>AI Synthesize Message</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <textarea
+                value={developerGuidance}
+                onChange={(e) => setDeveloperGuidance(e.target.value)}
+                rows={2}
+                className="w-full bg-bg-base border border-border-subtle rounded-xl p-2.5 text-xs text-text-primary outline-none focus:border-accent resize-none leading-relaxed placeholder:text-text-muted/60"
+                placeholder="e.g. Focus on breaking changes to auth token lifecycle, mention issue #42, or specify chore/feat style..."
+              />
+            </div>
+
+            {/* Commit Message Box */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-text-muted font-medium">Commit Message (Subject & Body):</label>
               <textarea
                 autoFocus
                 value={commitMessage}
                 onChange={(e) => setCommitMessage(e.target.value)}
-                rows={4}
+                rows={5}
                 className="w-full bg-bg-base border border-border-subtle rounded-xl p-3 text-xs font-mono text-text-primary outline-none focus:border-accent resize-none leading-relaxed"
-                placeholder="Commit message..."
+                placeholder="feat(core): conventional commit subject..."
               />
             </div>
 
@@ -519,21 +583,26 @@ export function DevStudioModal() {
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-subtle">
-              <button
-                onClick={() => setIsCommitModalOpen(false)}
-                className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCommitGit}
-                disabled={!commitMessage.trim() || isCommittingGit}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-40"
-              >
-                <GitCommit size={14} />
-                <span>{isCommittingGit ? 'Committing...' : 'Commit Changes'}</span>
-              </button>
+            <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
+              <span className="text-[10px] text-text-muted">
+                Synthesizer analyzes intent, file actions, physical Git diff, and your guidance.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsCommitModalOpen(false)}
+                  className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCommitGit}
+                  disabled={!commitMessage.trim() || isCommittingGit || isSynthesizingCommit}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-40"
+                >
+                  <GitCommit size={14} />
+                  <span>{isCommittingGit ? 'Committing...' : 'Commit Changes'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

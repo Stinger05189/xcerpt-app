@@ -2,6 +2,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { parseSessionMarkdown, inferSessionTitle, inferSessionDescription } from '../../engine/sessionParser';
 import { getLanguageFromFilename, formatLanguageName } from '../diff/languageHelper';
+import { LLMService } from '../../../llm/engine/llmService';
+import { useAppStore } from '../../../../store/appStore';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { 
@@ -20,7 +22,9 @@ import {
   Code2,
   ChevronDown,
   ChevronUp,
-  LayoutTemplate
+  LayoutTemplate,
+  Loader2,
+  Settings
 } from 'lucide-react';
 
 interface IngestionTriageStudioProps {
@@ -46,11 +50,15 @@ export function IngestionTriageStudio({
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(0);
   const [isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const boundaryScrollRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setSettingsOpen = useAppStore(s => s.setSettingsOpen);
+  const activeLlmConfig = useAppStore(s => s.config.llm);
 
   // Parse actions reactively
   const parsedPreview = useMemo(() => {
@@ -75,14 +83,12 @@ export function IngestionTriageStudio({
     return inferSessionDescription(rawText, explanations);
   }, [rawText, parsedPreview, explanations]);
 
-  // Ensure textarea receives autofocus without focus traps
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [viewMode]);
 
-  // Derived in-text search matches
   const searchMatches = useMemo(() => {
     if (!searchQuery.trim() || !rawText) return [];
     const q = searchQuery.toLowerCase();
@@ -124,6 +130,34 @@ export function IngestionTriageStudio({
     setTimeout(() => {
       setIsParsing(false);
     }, 100);
+  };
+
+  const handleGenerateAiMetadata = async () => {
+    if (actions.length === 0 || isGeneratingAi) return;
+    setIsGeneratingAi(true);
+    setErrorMessage(null);
+
+    try {
+      // Strict Zero-Code Rule: Send only parsed reasoning traces and target paths
+      const intentContext = inferredDesc || parsedPreview?.summary?.architecturalIntent || 'Batch work packet';
+      const actionManifest = actions.map(a => ({
+        type: a.actionType,
+        path: a.targetRelativePath
+      }));
+
+      const generated = await LLMService.generateSessionIdentity({
+        intent: intentContext,
+        actions: actionManifest
+      });
+
+      if (generated.title) setCustomTitle(generated.title);
+      if (generated.description) setCustomDescription(generated.description);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg);
+    } finally {
+      setIsGeneratingAi(false);
+    }
   };
 
   const handleCommit = async () => {
@@ -259,10 +293,35 @@ export function IngestionTriageStudio({
       <div className="flex-1 flex overflow-hidden">
         {/* Left Pane: Action Manifest & Custom Metadata */}
         <aside className="w-96 bg-bg-panel border-r border-border-subtle flex flex-col shrink-0 select-none">
-          {/* Custom Identification Inputs */}
-          <div className="p-3 border-b border-border-subtle bg-bg-base/60 space-y-2">
+          {/* Custom Identification Inputs + AI Copilot */}
+          <div className="p-3 border-b border-border-subtle bg-bg-base/60 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-text-muted tracking-wider">
+                Session Metadata
+              </span>
+              <button
+                type="button"
+                onClick={handleGenerateAiMetadata}
+                disabled={actions.length === 0 || isGeneratingAi}
+                className="flex items-center gap-1 text-[11px] font-semibold text-accent hover:text-accent/80 transition-colors disabled:opacity-40"
+                title="Use configured LLM to generate concise Title and Description from intent & file targets"
+              >
+                {isGeneratingAi ? (
+                  <>
+                    <Loader2 size={11} className="animate-spin" />
+                    <span>Analyzing Intent...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={11} />
+                    <span>AI Copilot ({activeLlmConfig?.providers[activeLlmConfig.activeProvider]?.name || 'Gemini'})</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <div>
-              <label className="text-[10px] uppercase font-bold text-text-muted tracking-wider block mb-1">
+              <label className="text-[10px] uppercase font-medium text-text-muted block mb-1">
                 Session Title (Optional)
               </label>
               <input
@@ -274,7 +333,7 @@ export function IngestionTriageStudio({
               />
             </div>
             <div>
-              <label className="text-[10px] uppercase font-bold text-text-muted tracking-wider block mb-1">
+              <label className="text-[10px] uppercase font-medium text-text-muted block mb-1">
                 Description / Intent (Optional)
               </label>
               <input
@@ -392,8 +451,17 @@ export function IngestionTriageStudio({
             </div>
 
             {errorMessage && (
-              <div className="p-2 bg-red-500/10 border border-red-500/30 rounded text-[11px] text-red-400">
-                {errorMessage}
+              <div className="p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-[11px] text-red-400 flex flex-col gap-1.5">
+                <span>{errorMessage}</span>
+                {errorMessage.toLowerCase().includes('api key') && (
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(true)}
+                    className="self-start flex items-center gap-1 text-[10px] font-semibold text-accent hover:underline"
+                  >
+                    <Settings size={11} /> Open Settings to add API Key
+                  </button>
+                )}
               </div>
             )}
 

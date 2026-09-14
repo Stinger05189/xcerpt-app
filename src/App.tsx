@@ -89,8 +89,8 @@ function App() {
             <MainStage />
           </div>
           {isBrowserOpen && <WorkspaceBrowser />}
-          {isSettingsOpen && <SettingsModal />}
           <DevStudioModal />
+          {isSettingsOpen && <SettingsModal />}
           <ToastContainer />
         </Bootstrapper>
       </div>

@@ -1,4 +1,6 @@
 // src/types/ipc.d.ts
+import type { LLMCompletionOptions, LLMCompletionResult, LLMSettingsConfig, LLMProviderId } from '../features/llm/types/llm';
+
 export type ScopedPathKey = `${string}::${string}`;
 export type StagingStatus = 'VIRTUAL_READY' | 'STAGING_LOCK' | 'DISK_READY';
 
@@ -118,6 +120,7 @@ export interface AppConfig {
   };
   shortcuts: Record<string, string>;
   extensionOverrides: Record<string, string>;
+  llm: LLMSettingsConfig;
 }
 
 // --- Persistence Schemas ---
@@ -203,6 +206,8 @@ export interface ElectronAPI {
   getVersion: () => Promise<string>;
   getGitStatus: (targetPath: string) => Promise<Record<string, string>>;
   getGitBranch: (targetPath: string) => Promise<string | null>;
+  getGitDiff: (dirPath: string, files?: string[]) => Promise<string>;
+  getGitLog: (dirPath: string, count?: number) => Promise<string>;
   commitGit: (dirPath: string, message: string, files?: string[]) => Promise<{ success: boolean; hash?: string; error?: string }>;
 
   stageExport: (payload: ExportPayload) => Promise<string[]>;
@@ -238,6 +243,10 @@ export interface ElectronAPI {
   deleteDevSession: (workspaceId: string, sessionId: string) => Promise<void>;
   applyFileAction: (absolutePath: string, content: string | null, actionType: 'NEW' | 'MODIFIED' | 'DELETED' | 'PARTIAL_DIFF') => Promise<void>;
   revertCheckpointFiles: (snapshotFiles: Record<string, string | null>) => Promise<void>;
+
+  // Native LLM Integrations
+  llmComplete: (options: LLMCompletionOptions) => Promise<LLMCompletionResult>;
+  llmTestConnection: (providerId: LLMProviderId, apiKey: string, model: string, baseUrl?: string) => Promise<{ success: boolean; message?: string }>;
 
   onUpdateStatus: (callback: (status: 'update-available' | 'update-downloaded') => void) => () => void;
   onUpdateProgress: (callback: (percent: number) => void) => () => void;

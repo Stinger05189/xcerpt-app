@@ -526,6 +526,39 @@ ipcMain.handle('git:getBranch', async (_, dirPath) => {
   });
 });
 
+ipcMain.handle('git:getDiff', async (_, dirPath, files) => {
+  return new Promise((resolve) => {
+    const fileArgs = files && files.length > 0
+      ? `-- ${files.map(f => `"${f.replace(/"/g, '\\"')}"`).join(' ')}`
+      : '';
+    exec(`git diff --staged ${fileArgs}`, { cwd: dirPath, maxBuffer: 10 * 1024 * 1024 }, (errStaged, outStaged) => {
+      if (!errStaged && outStaged && outStaged.trim().length > 0) {
+        resolve(outStaged.slice(0, 25000));
+        return;
+      }
+      exec(`git diff HEAD ${fileArgs}`, { cwd: dirPath, maxBuffer: 10 * 1024 * 1024 }, (errHead, outHead) => {
+        if (!errHead && outHead && outHead.trim().length > 0) {
+          resolve(outHead.slice(0, 25000));
+          return;
+        }
+        exec(`git diff ${fileArgs}`, { cwd: dirPath, maxBuffer: 10 * 1024 * 1024 }, (errWorking, outWorking) => {
+          if (errWorking) resolve('');
+          else resolve((outWorking || '').slice(0, 25000));
+        });
+      });
+    });
+  });
+});
+
+ipcMain.handle('git:getLog', async (_, dirPath, count = 5) => {
+  return new Promise((resolve) => {
+    exec(`git log -${Math.max(1, Math.min(20, count))} --oneline`, { cwd: dirPath }, (error, stdout) => {
+      if (error) resolve('');
+      else resolve(stdout ? stdout.trim() : '');
+    });
+  });
+});
+
 ipcMain.handle('git:commit', async (_, dirPath, message, files) => {
   return new Promise((resolve) => {
     if (!dirPath || !message) {
@@ -560,6 +593,136 @@ ipcMain.on('drag:start', (e, filePaths) => {
     : path.join(__dirname, 'public', 'drag-package.png');
   const icon = nativeImage.createFromPath(iconPath);
   e.sender.startDrag({ files: filePaths, icon: icon });
+});
+
+// --- Native LLM IPC Handlers ---
+async function executeLLMComplete(options) {
+  const {
+    providerId = 'openrouter',
+    apiKey,
+    baseUrl,
+    model = 'google/gemini-3.5-flash-lite',
+    messages = [],
+    temperature = 0.2,
+    maxTokens = 800,
+    responseFormat,
+    tools,
+    toolChoice
+  } = options || {};
+
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error(`API key is missing for provider "${providerId}". Please configure your API key in Global Preferences.`);
+  }
+
+  let endpoint = baseUrl || 'https://openrouter.ai/api/v1/chat/completions';
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+
+  const payload = {
+    model,
+    messages,
+    temperature,
+    max_tokens: maxTokens
+  };
+
+  if (responseFormat) {
+    payload.response_format = responseFormat;
+  }
+  if (tools && tools.length > 0) {
+    payload.tools = tools;
+    if (toolChoice) payload.tool_choice = toolChoice;
+  }
+
+  if (providerId === 'openrouter') {
+    if (!endpoint.endsWith('/chat/completions')) {
+      endpoint = `${endpoint.replace(/\/+$/, '')}/chat/completions`;
+    }
+    headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    headers['HTTP-Referer'] = 'https://github.com/Stinger05189/xcerpt-app';
+    headers['X-Title'] = 'Xcerpt Dev Studio';
+  } else if (providerId === 'openai') {
+    if (!endpoint.endsWith('/chat/completions')) {
+      endpoint = `${endpoint.replace(/\/+$/, '')}/chat/completions`;
+    }
+    headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+  } else if (providerId === 'anthropic') {
+    if (!endpoint.endsWith('/messages')) {
+      endpoint = `${endpoint.replace(/\/+$/, '')}/messages`;
+    }
+    headers['x-api-key'] = apiKey.trim();
+    headers['anthropic-version'] = '2023-06-01';
+  } else if (providerId === 'gemini') {
+    if (!endpoint.includes('googleapis.com')) {
+      headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    } else {
+      endpoint = `${endpoint.replace(/\/+$/, '')}/models/${model}:generateContent?key=${apiKey.trim()}`;
+    }
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    let errorDetail = errorBody;
+    try {
+      const parsed = JSON.parse(errorBody);
+      errorDetail = parsed.error?.message || parsed.message || errorBody;
+    } catch (e) {}
+
+    if (response.status === 401) {
+      throw new Error(`Authentication failed (${response.status}): Invalid API key for ${providerId}.`);
+    }
+    if (response.status === 402) {
+      throw new Error(`Payment required (${response.status}): Insufficient credits on ${providerId}.`);
+    }
+    if (response.status === 429) {
+      throw new Error(`Rate limited (${response.status}) by ${providerId}. Please wait a moment.`);
+    }
+    throw new Error(`LLM API error (${response.status}): ${errorDetail}`);
+  }
+
+  const data = await response.json();
+  const choice = data.choices && data.choices[0];
+  const message = choice?.message || {};
+
+  return {
+    content: message.content || '',
+    toolCalls: message.tool_calls ? message.tool_calls.map(tc => ({
+      id: tc.id,
+      name: tc.function?.name,
+      arguments: JSON.parse(tc.function?.arguments || '{}')
+    })) : undefined,
+    usage: data.usage ? {
+      promptTokens: data.usage.prompt_tokens || 0,
+      completionTokens: data.usage.completion_tokens || 0,
+      totalTokens: data.usage.total_tokens || 0
+    } : undefined
+  };
+}
+
+ipcMain.handle('llm:complete', async (_, options) => {
+  return await executeLLMComplete(options);
+});
+
+ipcMain.handle('llm:testConnection', async (_, providerId, apiKey, model, baseUrl) => {
+  try {
+    const res = await executeLLMComplete({
+      providerId,
+      apiKey,
+      model,
+      baseUrl,
+      messages: [{ role: 'user', content: 'ping' }],
+      maxTokens: 5
+    });
+    return { success: true, message: `Connected successfully. Response: "${(res.content || '').trim().slice(0, 30)}"` };
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : String(error) };
+  }
 });
 
 // --- Persistence IPC Handlers ---

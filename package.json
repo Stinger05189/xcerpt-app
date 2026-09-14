@@ -36,7 +36,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:diagnostics": "node scripts/run-diagnostics.mjs",
-    "test:session": "node scripts/test-session-parser.mjs"
+    "test:session": "node scripts/test-session-parser.mjs",
+    "test:llm": "node scripts/test-llm-provider.mjs"
   },
   "build": {
     "appId": "com.xcerpt.app",

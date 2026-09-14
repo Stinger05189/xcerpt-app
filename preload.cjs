@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getGitStatus: (targetPath) => ipcRenderer.invoke('git:getStatus', targetPath),
   getGitBranch: (targetPath) => ipcRenderer.invoke('git:getBranch', targetPath),
+  getGitDiff: (dirPath, files) => ipcRenderer.invoke('git:getDiff', dirPath, files),
+  getGitLog: (dirPath, count) => ipcRenderer.invoke('git:getLog', dirPath, count),
   commitGit: (dirPath, message, files) => ipcRenderer.invoke('git:commit', dirPath, message, files),
 
   // Export Engine & Native OS
@@ -47,6 +49,10 @@ contextBridge.exposeInMainWorld('api', {
   deleteDevSession: (workspaceId, sessionId) => ipcRenderer.invoke('session:delete', workspaceId, sessionId),
   applyFileAction: (absolutePath, content, actionType) => ipcRenderer.invoke('session:applyAction', absolutePath, content, actionType),
   revertCheckpointFiles: (snapshotFiles) => ipcRenderer.invoke('session:revertCheckpoint', snapshotFiles),
+
+  // Native LLM Integrations
+  llmComplete: (options) => ipcRenderer.invoke('llm:complete', options),
+  llmTestConnection: (providerId, apiKey, model, baseUrl) => ipcRenderer.invoke('llm:testConnection', providerId, apiKey, model, baseUrl),
 
   // Auto-Updater
   onUpdateStatus: (callback) => {

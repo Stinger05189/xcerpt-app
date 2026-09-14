@@ -2,11 +2,68 @@
 import { create } from 'zustand';
 import type { AppConfig } from '../types/ipc';
 import { useHistoryStore } from './historyStore';
+import type { LLMSettingsConfig } from '../features/llm/types/llm';
 
 export interface TabData {
   id: string;
   title: string;
 }
+
+export const DEFAULT_LLM_CONFIG: LLMSettingsConfig = {
+  activeProvider: 'openrouter',
+  providers: {
+    openrouter: {
+      id: 'openrouter',
+      name: 'OpenRouter',
+      apiKey: '',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      defaultModel: 'google/gemini-3.5-flash-lite',
+      availableModels: [
+        'google/gemini-3.5-flash-lite',
+        'anthropic/claude-3.7-sonnet',
+        'openai/gpt-4o-mini',
+        'deepseek/deepseek-chat'
+      ],
+      customModels: []
+    },
+    gemini: {
+      id: 'gemini',
+      name: 'Google Gemini API',
+      apiKey: '',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      defaultModel: 'gemini-2.5-flash',
+      availableModels: [
+        'gemini-2.5-flash',
+        'gemini-2.5-pro'
+      ],
+      customModels: []
+    },
+    openai: {
+      id: 'openai',
+      name: 'OpenAI',
+      apiKey: '',
+      baseUrl: 'https://api.openai.com/v1',
+      defaultModel: 'gpt-4o-mini',
+      availableModels: [
+        'gpt-4o-mini',
+        'gpt-4o'
+      ],
+      customModels: []
+    },
+    anthropic: {
+      id: 'anthropic',
+      name: 'Anthropic',
+      apiKey: '',
+      baseUrl: 'https://api.anthropic.com/v1',
+      defaultModel: 'claude-3-7-sonnet-20250219',
+      availableModels: [
+        'claude-3-7-sonnet-20250219',
+        'claude-3-5-haiku-20241022'
+      ],
+      customModels: []
+    }
+  }
+};
 
 export const DEFAULT_CONFIG: AppConfig = {
   theme: {
@@ -26,7 +83,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     }
   },
   shortcuts: {},
-  extensionOverrides: {}
+  extensionOverrides: {},
+  llm: DEFAULT_LLM_CONFIG
 };
 
 interface AppState {
@@ -73,10 +131,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     const version = await window.api.getVersion().catch(() => null);
     
     if (loaded) {
-      // Deep merge to ensure missing keys from legacy configs are populated with defaults
       set({ 
         appVersion: version,
-        config: { ...DEFAULT_CONFIG, ...loaded, theme: { ...DEFAULT_CONFIG.theme, ...loaded.theme, colors: { ...DEFAULT_CONFIG.theme.colors, ...(loaded.theme?.colors || {}) } } } 
+        config: { 
+          ...DEFAULT_CONFIG, 
+          ...loaded, 
+          theme: { 
+            ...DEFAULT_CONFIG.theme, 
+            ...loaded.theme, 
+            colors: { ...DEFAULT_CONFIG.theme.colors, ...(loaded.theme?.colors || {}) } 
+          },
+          llm: {
+            ...DEFAULT_LLM_CONFIG,
+            ...(loaded.llm || {}),
+            providers: {
+              ...DEFAULT_LLM_CONFIG.providers,
+              ...(loaded.llm?.providers || {})
+            }
+          }
+        } 
       });
     } else {
       set({ appVersion: version });
@@ -104,7 +177,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     const nextTabs = get().openTabs;
     
-    // Only log if a change actually occurred
     if (prevTabs.length !== nextTabs.length) {
       useHistoryStore.getState().push(`Open Tab '${title}'`, 
         () => set({ openTabs: prevTabs }),
