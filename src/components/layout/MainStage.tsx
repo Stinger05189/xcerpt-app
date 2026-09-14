@@ -23,6 +23,7 @@ import { createPortal } from 'react-dom';
 
 export function MainStage() {
   const { 
+    workspaceId,
     rootPaths, 
     missingRoots,
     activeTab, 
@@ -55,8 +56,10 @@ export function MainStage() {
   } = useWorkspaceStore();
 
   const activeSession = useSessionStore(s => s.activeSession);
+  const syncWorkspaceContext = useSessionStore(s => s.syncWorkspaceContext);
   const setStudioOpen = useSessionStore(s => s.setStudioOpen);
   const setIngestionModalOpen = useSessionStore(s => s.setIngestionModalOpen);
+  const setBrowserModalOpen = useSessionStore(s => s.setBrowserModalOpen);
 
   const [draggedRootPath, setDraggedRootPath] = useState<string | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -67,6 +70,13 @@ export function MainStage() {
   const isRightDragRef = useRef(false);
   const dragStartXRef = useRef(0);
   const scrollStartLeftRef = useRef(0);
+
+  // Sync session store to the active workspace
+  useEffect(() => {
+    if (workspaceId) {
+      syncWorkspaceContext(workspaceId);
+    }
+  }, [workspaceId, syncWorkspaceContext]);
 
   const handleAddRoot = async () => {
     const path = await window.api.selectDirectory();
@@ -179,6 +189,23 @@ export function MainStage() {
     document.body.style.cursor = 'col-resize';
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
+  };
+
+  const handleDevStudioEntry = async () => {
+    if (activeSession) {
+      setStudioOpen(true);
+      return;
+    }
+    if (workspaceId) {
+      const list = await window.api.listDevSessions(workspaceId);
+      if (list && list.length > 0) {
+        setBrowserModalOpen(true);
+      } else {
+        setIngestionModalOpen(true);
+      }
+    } else {
+      setIngestionModalOpen(true);
+    }
   };
 
   const activeTree = activeTab ? rawTrees[activeTab] : null;
@@ -295,16 +322,13 @@ export function MainStage() {
 
             {/* Inbound Dev Studio Trigger */}
             <button
-              onClick={() => {
-                if (activeSession) setStudioOpen(true);
-                else setIngestionModalOpen(true);
-              }}
+              onClick={handleDevStudioEntry}
               className={`px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1.5 transition-all border ${
                 activeSession && pendingSessionActions > 0
                   ? 'bg-accent/20 text-accent border-accent/40 shadow-sm'
                   : 'bg-bg-base border-border-subtle text-text-muted hover:text-text-primary hover:bg-bg-hover'
               }`}
-              title={activeSession ? `Resume Active Session (${pendingSessionActions} files pending)` : 'Import LLM Work Packet'}
+              title={activeSession ? `Resume Dev Session (${pendingSessionActions} files pending)` : 'Open Dev Studio (Catalog / Ingest)'}
             >
               <GitPullRequest size={14} className={activeSession && pendingSessionActions > 0 ? 'text-accent animate-pulse' : ''} />
               <span>Dev Studio</span>

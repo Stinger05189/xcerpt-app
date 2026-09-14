@@ -9,14 +9,11 @@ import { SettingsModal } from './components/layout/SettingsModal';
 import { ToastContainer } from './components/layout/ToastContainer';
 import { DevStudioModal } from './features/session/components/DevStudioModal';
 import { useAppStore } from './store/appStore';
-import { useSessionStore } from './features/session/store/sessionStore';
 import { useHistoryStore } from './store/historyStore';
 
 function App() {
   const isBrowserOpen = useAppStore(s => s.isBrowserOpen);
   const isSettingsOpen = useAppStore(s => s.isSettingsOpen);
-  const isStudioOpen = useSessionStore(s => s.isStudioOpen);
-  const isIngestionModalOpen = useSessionStore(s => s.isIngestionModalOpen);
   const config = useAppStore(s => s.config);
 
   // Dynamic Theme Engine: Inject CSS Variables to :root
@@ -44,7 +41,6 @@ function App() {
   // Global Undo/Redo Keyboard Listeners
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Guard: Do not intercept typing inside inputs or Monaco editors
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     
@@ -88,7 +84,7 @@ function App() {
       <div className="relative z-10 flex flex-col h-full w-full">
         <TitleBar />
         <Bootstrapper>
-          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen || isStudioOpen || isIngestionModalOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
+          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
             <Sidebar />
             <MainStage />
           </div>

@@ -9,16 +9,15 @@ import { DeletedFileBanner } from './diff/DeletedFileBanner';
 import { ReasoningDrawer } from './drawer/ReasoningDrawer';
 import { FullPlanViewer } from './drawer/FullPlanViewer';
 import { SessionBrowserModal } from './SessionBrowserModal';
+import { IngestionTriageStudio } from './triage/IngestionTriageStudio';
 import { getLanguageFromFilename, formatLanguageName } from './diff/languageHelper';
 import { 
   X, 
-  Sparkles, 
   Check, 
   RotateCcw, 
   ArrowRight, 
   FileText, 
   CheckCheck, 
-  AlertCircle,
   Columns,
   SquareSplitHorizontal,
   FileCode2,
@@ -26,7 +25,11 @@ import {
   FolderArchive,
   Save,
   GitPullRequest,
-  Edit3
+  Edit3,
+  GitBranch,
+  GitCommit,
+  CheckCircle2,
+  LogOut
 } from 'lucide-react';
 
 export function DevStudioModal() {
@@ -35,8 +38,8 @@ export function DevStudioModal() {
     activeActionId, 
     isStudioOpen, 
     isIngestionModalOpen,
+    isBrowserModalOpen,
     isApplying,
-    error,
     setIngestionModalOpen, 
     setStudioOpen, 
     setBrowserModalOpen,
@@ -50,16 +53,41 @@ export function DevStudioModal() {
     rejectCurrentAction,
     restoreActionToPending,
     applyAllPendingActions,
-    revertCurrentSession
+    revertCurrentSession,
+    completeCurrentSession,
+    exitCurrentSession
   } = useSessionStore();
 
   const workspaceId = useWorkspaceStore(s => s.workspaceId);
   const rootPaths = useWorkspaceStore(s => s.rootPaths);
 
-  const [rawText, setRawText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [studioViewMode, setStudioViewMode] = useState<'diff' | 'plan'>('diff');
   const [renderSideBySide, setRenderSideBySide] = useState(true);
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+
+  // Commit Modal State
+  const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [isCommittingGit, setIsCommittingGit] = useState(false);
+  const [commitResult, setCommitResult] = useState<{ success: boolean; hash?: string; error?: string } | null>(null);
+
+  // Fetch Git branch for active root
+  useEffect(() => {
+    const fetchBranch = async () => {
+      const activeRoot = rootPaths[0];
+      if (activeRoot && window.api?.getGitBranch) {
+        try {
+          const branch = await window.api.getGitBranch(activeRoot);
+          setGitBranch(branch);
+        } catch {
+          setGitBranch(null);
+        }
+      }
+    };
+    if (isStudioOpen) {
+      fetchBranch();
+    }
+  }, [isStudioOpen, rootPaths]);
 
   // Global Keyboard listener: Ctrl+Enter to apply active action, Esc to exit view
   useEffect(() => {
@@ -69,26 +97,36 @@ export function DevStudioModal() {
         e.preventDefault();
         applyCurrentAction();
       }
-      if (e.key === 'Escape' && !isIngestionModalOpen) {
+      if (e.key === 'Escape' && !isIngestionModalOpen && !isCommitModalOpen && !isBrowserModalOpen) {
         setStudioOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isStudioOpen, isIngestionModalOpen, applyCurrentAction, setStudioOpen]);
+  }, [isStudioOpen, isIngestionModalOpen, isCommitModalOpen, isBrowserModalOpen, applyCurrentAction, setStudioOpen]);
 
-  if (!isIngestionModalOpen && !isStudioOpen) return null;
+  // Strict Mutual Exclusivity: if neither is active, render nothing
+  if (!isIngestionModalOpen && !isStudioOpen && !isBrowserModalOpen) return null;
 
-  const handleIngest = async () => {
-    if (!rawText.trim() || !workspaceId) return;
-    setIsSubmitting(true);
+  const handleCommitGit = async () => {
+    const activeRoot = rootPaths[0];
+    if (!activeRoot || !commitMessage.trim()) return;
+    setIsCommittingGit(true);
+    setCommitResult(null);
+
     try {
-      await initSessionFromMarkdown(rawText, workspaceId, rootPaths);
-      setRawText('');
-    } catch (e) {
-      console.error(e);
+      const result = await window.api.commitGit(activeRoot, commitMessage.trim());
+      setCommitResult(result);
+      if (result.success) {
+        setTimeout(() => {
+          setIsCommitModalOpen(false);
+          setCommitResult(null);
+        }, 1800);
+      }
+    } catch (e: unknown) {
+      setCommitResult({ success: false, error: e instanceof Error ? e.message : String(e) });
     } finally {
-      setIsSubmitting(false);
+      setIsCommittingGit(false);
     }
   };
 
@@ -101,105 +139,62 @@ export function DevStudioModal() {
   const sizeKb = activeAction ? (new Blob([activeAction.workingContent]).size / 1024).toFixed(1) : '0.0';
   const isDiffAction = activeAction?.actionType === 'MODIFIED' || activeAction?.actionType === 'PARTIAL_DIFF';
 
+  const allActionsReviewed = activeSession
+    ? activeSession.actions.length > 0 && activeSession.actions.every(a => a.reviewStatus === 'MERGED' || a.reviewStatus === 'REJECTED')
+    : false;
+
   return (
-    <div className="fixed inset-0 z-50 bg-bg-base/90 backdrop-blur-md flex flex-col animate-in fade-in duration-200">
-      <SessionBrowserModal />
+    <div className="fixed top-10 inset-x-0 bottom-0 z-40 bg-bg-base/95 backdrop-blur-md flex flex-col animate-in fade-in duration-150">
+      {/* Session Browser Management Suite (Full Viewport) */}
+      {isBrowserModalOpen && <SessionBrowserModal />}
 
-      {isIngestionModalOpen && (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="bg-bg-panel border border-border-subtle rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
-            <div className="p-5 border-b border-border-subtle flex items-center justify-between bg-bg-base">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-accent/10 text-accent rounded-lg">
-                  <Sparkles size={18} />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold text-text-primary">Inbound LLM Dev Session</h2>
-                  <p className="text-xs text-text-muted">Paste your LLM Work Packet response to extract file diffs and review changes.</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIngestionModalOpen(false)}
-                className="p-2 text-text-muted hover:text-text-primary rounded-lg hover:bg-bg-hover transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 flex-1 flex flex-col gap-3 overflow-hidden">
-              <textarea
-                autoFocus
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                placeholder="Paste LLM Markdown response here (including ### Pre-Code Summary and code blocks)..."
-                className="flex-1 w-full bg-bg-base border border-border-subtle rounded-xl p-4 text-xs font-mono text-text-primary outline-none focus:border-accent resize-none leading-relaxed"
-                rows={16}
-              />
-
-              {error && (
-                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
-                  <AlertCircle size={14} className="shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-border-subtle bg-bg-base flex items-center justify-between">
-              <span className="text-[11px] text-text-muted">
-                Adheres to <strong className="text-text-primary">Skill_code_generation_protocol</strong> & standard Markdown code blocks.
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIngestionModalOpen(false)}
-                  className="px-4 py-2 text-xs text-text-muted hover:text-text-primary transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleIngest}
-                  disabled={!rawText.trim() || isSubmitting}
-                  className="flex items-center gap-2 px-5 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg text-xs font-semibold shadow-md transition-all disabled:opacity-40"
-                >
-                  <Sparkles size={14} />
-                  {isSubmitting ? 'Parsing Packets...' : 'Initialize Dev Session'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Inbound Interactive Ingestion Triage Studio (Full Viewport) */}
+      {isIngestionModalOpen && !isBrowserModalOpen && workspaceId && (
+        <IngestionTriageStudio
+          workspaceId={workspaceId}
+          rootPaths={rootPaths}
+          onCommitSession={async (rawMarkdown, title, description) => {
+            await initSessionFromMarkdown(rawMarkdown, workspaceId, rootPaths, title, description);
+          }}
+          onClose={() => setIngestionModalOpen(false)}
+        />
       )}
 
-      {isStudioOpen && activeSession && (
+      {/* Active Dev Studio Review View (Exclusively rendered when ingestion and browser are closed) */}
+      {isStudioOpen && !isIngestionModalOpen && !isBrowserModalOpen && activeSession && (
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          {/* Frameless Window Header with Native Drag Support */}
-          <header 
-            className="h-12 bg-bg-panel border-b border-border-subtle px-4 flex items-center justify-between shrink-0 select-none"
-            style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-          >
-            <div className="flex items-center gap-2.5" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-              <div className="p-1.5 bg-accent/20 text-accent rounded-md">
-                <GitPullRequest size={15} />
+          {/* Frameless Studio Sub-Header */}
+          <header className="h-11 bg-bg-panel border-b border-border-subtle px-4 flex items-center justify-between shrink-0 select-none">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1 bg-accent/20 text-accent rounded">
+                <GitPullRequest size={14} />
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-text-primary tracking-wide">
-                  Dev Studio • Inbound Review
+                  Dev Studio
                 </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-accent/10 text-accent border border-accent/20 max-w-xs truncate" title={activeSession.name}>
                   {activeSession.name}
                 </span>
+                {gitBranch && (
+                  <span className="text-[10px] font-mono text-text-muted flex items-center gap-1 bg-bg-base px-2 py-0.5 rounded border border-border-subtle">
+                    <GitBranch size={10} className="text-accent" />
+                    <span>{gitBranch}</span>
+                  </span>
+                )}
                 <span className="text-[10px] font-mono text-text-muted">
                   ({activeSession.summary.totalFiles} Files)
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setBrowserModalOpen(true)}
                 className="flex items-center gap-1 px-2.5 py-1 text-xs text-text-muted hover:text-text-primary hover:bg-bg-hover rounded-md transition-colors border border-border-subtle"
                 title="Browse and Switch Dev Sessions"
               >
-                <FolderArchive size={13} />
+                <FolderArchive size={12} />
                 <span>Sessions</span>
               </button>
 
@@ -208,17 +203,28 @@ export function DevStudioModal() {
                   onClick={() => setStudioViewMode('diff')}
                   className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-colors ${studioViewMode === 'diff' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'}`}
                 >
-                  <FileCode2 size={13} /> Diff Studio
+                  <FileCode2 size={12} /> Diff Studio
                 </button>
                 <button
                   onClick={() => setStudioViewMode('plan')}
                   className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-colors ${studioViewMode === 'plan' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'}`}
                 >
-                  <BookOpen size={13} /> Full Plan
+                  <BookOpen size={12} /> Full Plan
                 </button>
               </div>
 
               <div className="w-px h-4 bg-border-subtle mx-1" />
+
+              <button
+                onClick={() => {
+                  setCommitMessage(activeSession.summary.architecturalIntent || activeSession.name);
+                  setIsCommitModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-2.5 py-1 bg-accent/10 hover:bg-accent/20 text-accent border border-accent/30 rounded-md text-xs font-medium transition-all"
+                title="Create Git commit from merged session"
+              >
+                <GitCommit size={12} /> Commit Git
+              </button>
 
               <button
                 onClick={() => revertCurrentSession()}
@@ -226,7 +232,7 @@ export function DevStudioModal() {
                 className="flex items-center gap-1 px-2.5 py-1 bg-bg-hover hover:bg-red-500/10 text-text-muted hover:text-red-400 rounded-md text-xs font-medium border border-border-subtle transition-all"
                 title="Rollback all files on disk to pre-session state"
               >
-                <RotateCcw size={12} /> Revert Session
+                <RotateCcw size={11} /> Revert All
               </button>
 
               <button
@@ -234,20 +240,56 @@ export function DevStudioModal() {
                 disabled={isApplying}
                 className="flex items-center gap-1 px-3 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-md text-xs font-medium transition-all"
               >
-                <CheckCheck size={13} /> Merge All
+                <CheckCheck size={12} /> Merge All
               </button>
 
               <div className="w-px h-4 bg-border-subtle mx-1" />
 
               <button
+                onClick={exitCurrentSession}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs text-text-muted hover:text-text-primary hover:bg-bg-hover rounded-md transition-colors"
+                title="Exit and unload active session to catalog"
+              >
+                <LogOut size={12} />
+                <span>Exit Session</span>
+              </button>
+
+              <button
                 onClick={() => setStudioOpen(false)}
                 className="p-1.5 text-text-muted hover:text-text-primary rounded-md hover:bg-bg-hover transition-colors"
-                title="Close Studio (Esc) - Session remains active"
+                title="Close Studio (Esc)"
               >
                 <X size={16} />
               </button>
             </div>
           </header>
+
+          {/* Session Complete Banner */}
+          {allActionsReviewed && (
+            <div className="h-10 px-4 bg-green-500/15 border-b border-green-500/30 flex items-center justify-between shrink-0 text-xs text-green-300 animate-in fade-in select-none">
+              <div className="flex items-center gap-2 font-medium">
+                <CheckCircle2 size={15} className="text-green-400 shrink-0" />
+                <span>All file actions have been reviewed and merged!</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setCommitMessage(activeSession.summary.architecturalIntent || activeSession.name);
+                    setIsCommitModalOpen(true);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-green-500/20 hover:bg-green-500/30 text-green-300 rounded border border-green-500/40 text-[11px] font-semibold transition-colors"
+                >
+                  <GitCommit size={12} /> Create Git Commit
+                </button>
+                <button
+                  onClick={completeCurrentSession}
+                  className="flex items-center gap-1 px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-[11px] font-semibold shadow-sm transition-all"
+                >
+                  <Check size={12} /> Complete & Archive Session
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 flex overflow-hidden">
             {studioViewMode === 'diff' ? (
@@ -268,9 +310,9 @@ export function DevStudioModal() {
                   {activeAction ? (
                     <div className="flex-1 flex flex-col h-full overflow-hidden">
                       {/* Unified Single Action Toolbar */}
-                      <div className="h-11 px-4 bg-bg-panel border-b border-border-subtle flex items-center justify-between shrink-0 text-xs select-none">
+                      <div className="h-10 px-4 bg-bg-panel border-b border-border-subtle flex items-center justify-between shrink-0 text-xs select-none">
                         <div className="flex items-center gap-2.5 truncate pr-3">
-                          <FileText size={15} className="text-accent shrink-0" />
+                          <FileText size={14} className="text-accent shrink-0" />
                           <span className="font-mono text-text-primary truncate font-medium text-xs">
                             {activeAction.targetRelativePath}
                           </span>
@@ -314,18 +356,17 @@ export function DevStudioModal() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          {/* Inline Diff Toggle (Only rendered for diff actions) */}
                           {isDiffAction && (
                             <button
                               onClick={() => setRenderSideBySide(!renderSideBySide)}
-                              className={`flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+                              className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
                                 renderSideBySide 
                                   ? 'bg-bg-hover text-accent border-border-subtle' 
                                   : 'bg-bg-base text-text-muted border-border-subtle hover:text-text-primary'
                               }`}
                               title={renderSideBySide ? "Switch to Inline Unified Diff" : "Switch to Side-by-Side Diff"}
                             >
-                              {renderSideBySide ? <Columns size={13} /> : <SquareSplitHorizontal size={13} />}
+                              {renderSideBySide ? <Columns size={12} /> : <SquareSplitHorizontal size={12} />}
                               <span>{renderSideBySide ? 'Side-by-Side' : 'Inline'}</span>
                             </button>
                           )}
@@ -333,10 +374,10 @@ export function DevStudioModal() {
                           {isDirty && (
                             <button
                               onClick={() => resetActionWorkingContent(activeAction.id)}
-                              className="flex items-center gap-1 px-2.5 py-1 bg-bg-hover hover:bg-bg-hover/80 text-text-muted hover:text-text-primary rounded text-[11px] font-medium transition-colors"
+                              className="flex items-center gap-1 px-2 py-1 bg-bg-hover hover:bg-bg-hover/80 text-text-muted hover:text-text-primary rounded text-[11px] font-medium transition-colors"
                               title="Discard unsaved manual edits and reset to incoming proposal"
                             >
-                              <RotateCcw size={11} /> Reset to Incoming
+                              <RotateCcw size={11} /> Reset Edits
                             </button>
                           )}
 
@@ -345,17 +386,17 @@ export function DevStudioModal() {
                               <button
                                 onClick={() => revertAction(activeAction.id)}
                                 disabled={isApplying}
-                                className="flex items-center gap-1 px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded text-xs font-medium transition-colors"
+                                className="flex items-center gap-1 px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded text-xs font-medium transition-colors"
                                 title="Revert physical file on disk to pre-session state"
                               >
-                                <RotateCcw size={12} /> Revert Action to Disk
+                                <RotateCcw size={11} /> Revert File
                               </button>
 
                               {isDirty && (
                                 <button
                                   onClick={() => saveActionEdits(activeAction.id)}
                                   disabled={isApplying}
-                                  className="flex items-center gap-1.5 px-3.5 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-semibold shadow-sm transition-all"
+                                  className="flex items-center gap-1.5 px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-semibold shadow-sm transition-all"
                                   title="Write manual studio modifications to disk"
                                 >
                                   <Save size={12} /> Save Additional Edits
@@ -367,13 +408,13 @@ export function DevStudioModal() {
                               onClick={() => restoreActionToPending(activeAction.id)}
                               className="flex items-center gap-1 px-3 py-1 bg-bg-hover hover:bg-bg-hover/80 text-text-primary rounded text-xs font-medium transition-colors"
                             >
-                              <RotateCcw size={12} /> Restore to Pending
+                              <RotateCcw size={12} /> Restore
                             </button>
                           ) : (
                             <>
                               <button
                                 onClick={rejectCurrentAction}
-                                className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-xs font-medium transition-colors"
+                                className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-xs font-medium transition-colors"
                               >
                                 Reject
                               </button>
@@ -381,12 +422,12 @@ export function DevStudioModal() {
                               <button
                                 onClick={applyCurrentAction}
                                 disabled={isApplying}
-                                className="flex items-center gap-1.5 px-4 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-semibold shadow-sm transition-all"
+                                className="flex items-center gap-1.5 px-3.5 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-xs font-semibold shadow-sm transition-all"
                                 title="Accept changes, write to disk, and advance (Ctrl+Enter)"
                               >
                                 <Check size={13} />
                                 {activeAction.actionType === 'NEW' 
-                                  ? 'Create File on Disk' 
+                                  ? 'Create File' 
                                   : activeAction.actionType === 'DELETED' 
                                   ? 'Confirm Deletion' 
                                   : 'Accept & Next'}
@@ -439,6 +480,61 @@ export function DevStudioModal() {
             ) : (
               <FullPlanViewer rawMarkdown={activeSession.rawMarkdown} />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Post-Session Git Commit Dialog */}
+      {isCommitModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-8">
+          <div className="bg-bg-panel border border-border-subtle rounded-2xl w-full max-w-lg shadow-2xl p-5 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+              <div className="flex items-center gap-2 text-text-primary font-semibold text-sm">
+                <GitCommit size={16} className="text-accent" />
+                <span>Create Git Commit</span>
+              </div>
+              <button 
+                onClick={() => setIsCommitModalOpen(false)}
+                className="p-1 text-text-muted hover:text-text-primary rounded hover:bg-bg-hover"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-text-muted font-medium">Commit Message:</label>
+              <textarea
+                autoFocus
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                rows={4}
+                className="w-full bg-bg-base border border-border-subtle rounded-xl p-3 text-xs font-mono text-text-primary outline-none focus:border-accent resize-none leading-relaxed"
+                placeholder="Commit message..."
+              />
+            </div>
+
+            {commitResult && (
+              <div className={`p-2.5 rounded-lg text-xs font-mono ${commitResult.success ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'}`}>
+                {commitResult.success ? `✓ Committed successfully (${commitResult.hash || 'HEAD'})` : `Error: ${commitResult.error}`}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border-subtle">
+              <button
+                onClick={() => setIsCommitModalOpen(false)}
+                className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCommitGit}
+                disabled={!commitMessage.trim() || isCommittingGit}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-accent hover:bg-accent/90 text-white rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-40"
+              >
+                <GitCommit size={14} />
+                <span>{isCommittingGit ? 'Committing...' : 'Commit Changes'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

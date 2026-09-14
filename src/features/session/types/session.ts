@@ -1,6 +1,8 @@
 // src/features/session/types/session.ts
 export type FileActionType = 'NEW' | 'MODIFIED' | 'DELETED' | 'PARTIAL_DIFF';
 export type ActionReviewStatus = 'PENDING' | 'REVIEWED' | 'MERGED' | 'REJECTED';
+export type SectionKind = 'preamble' | 'interstitial' | 'epilogue';
+export type DevSessionStatus = 'IN_PROGRESS' | 'COMPLETED';
 
 export interface DiffHunk {
   id: string;
@@ -28,6 +30,8 @@ export interface ParsedFileAction {
   isIdenticalToDisk?: boolean;
   parseWarnings: string[];
   orderIndex: number;
+  fenceLineStart?: number;
+  fenceLineEnd?: number;
 }
 
 export interface MarkdownExplanationSection {
@@ -36,12 +40,14 @@ export interface MarkdownExplanationSection {
   level: number;
   content: string;
   associatedActionIds: string[];
+  kind?: SectionKind;
 }
 
 export interface DevSessionSummary {
   architecturalIntent: string;
   totalFiles: number;
   actionsCount: Record<FileActionType, number>;
+  filePaths?: string[];
 }
 
 export interface SessionCheckpoint {
@@ -56,8 +62,11 @@ export interface DevSession {
   id: string;
   workspaceId: string;
   name: string;
+  description?: string;
+  status: DevSessionStatus;
   createdAt: string;
   updatedAt: string;
+  completedAt?: string;
   rawMarkdown: string;
   summary: DevSessionSummary;
   actions: ParsedFileAction[];

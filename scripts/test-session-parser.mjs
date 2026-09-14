@@ -60,10 +60,10 @@ function extractActionAndPath(firstLine, fenceInfo) {
   let targetPath = null;
 
   const line = firstLine.trim();
-  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s->]+)/i);
+  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s\->]+)/i);
   if (protocolMatch) {
     actionType = protocolMatch[1].toUpperCase();
-    targetPath = protocolMatch[2].replace(/[->]+$/, '').trim();
+    targetPath = protocolMatch[2].replace(/-->$/, '').replace(/[->]+$/, '').trim();
     return { actionType, targetPath };
   }
 
@@ -88,6 +88,56 @@ function extractActionAndPath(firstLine, fenceInfo) {
   return { actionType, targetPath };
 }
 
+function inferSessionTitle(rawMarkdown, actions, explanations) {
+  const wpMatch = rawMarkdown.match(/^#+\s*\[?WORK PACKET(?:\s*\d+)?\]?:?\s*(.*)$/im);
+  if (wpMatch && wpMatch[1].trim().length > 0) {
+    const clean = wpMatch[1].replace(/[*_#`[\]]/g, '').trim();
+    if (clean.length > 0) return clean;
+  }
+
+  const headerMatch = rawMarkdown.match(/^#+\s+(.+)$/m);
+  if (headerMatch) {
+    const cleanHeader = headerMatch[1].replace(/[*_#`[\]]/g, '').trim();
+    if (cleanHeader.length > 0 && !cleanHeader.toLowerCase().includes('pre-code summary')) {
+      return cleanHeader;
+    }
+  }
+
+  if (explanations && explanations.length > 0) {
+    const namedSec = explanations.find(e => e.title && !e.title.toLowerCase().includes('intent') && !e.title.toLowerCase().includes('context'));
+    if (namedSec) return namedSec.title;
+  }
+
+  if (actions.length > 0) {
+    const firstTwo = actions.slice(0, 2).map(a => `${a.actionType} ${a.targetRelativePath.split('/').pop()}`);
+    const suffix = actions.length > 2 ? ` (+${actions.length - 2} more)` : '';
+    return `${firstTwo.join(', ')}${suffix}`;
+  }
+
+  return `Dev Session ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function inferSessionDescription(rawMarkdown, explanations) {
+  const intentMatch = rawMarkdown.match(/(?:Architectural Intent|Intent|Objective):\s*(.*)/i);
+  if (intentMatch && intentMatch[1].trim()) {
+    return intentMatch[1].replace(/[*_#`[\]-]/g, '').trim();
+  }
+
+  const preambleSec = explanations.find(e => e.kind === 'preamble' || e.title.toLowerCase().includes('intent'));
+  if (preambleSec && preambleSec.content.trim()) {
+    const firstParagraph = preambleSec.content
+      .split('\n\n')[0]
+      .replace(/[*_#`[\]-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (firstParagraph.length > 0) {
+      return firstParagraph.length > 200 ? `${firstParagraph.slice(0, 200)}...` : firstParagraph;
+    }
+  }
+
+  return 'LLM Batch Work Packet Integration';
+}
+
 function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFilesMap = {}) {
   const normalized = rawMarkdown.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
@@ -99,19 +149,22 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
   let currentSectionTitle = 'Architectural Intent';
   let currentSectionLevel = 2;
   let currentSectionLines = [];
+  let currentSectionKind = 'preamble';
 
   let inCodeBlock = false;
   let codeFenceChar = '';
   let codeFenceLength = 0;
   let codeFenceInfo = '';
   let codeBuffer = [];
+  let codeStartLineIdx = 0;
+  let innerFenceDepth = 0;
 
   const flushCurrentSection = (nextActionId) => {
     if (currentSectionLines.length > 0) {
       const sectionText = currentSectionLines.join('\n').trim();
       if (sectionText) {
         const lastSec = explanations[explanations.length - 1];
-        if (lastSec && lastSec.title === currentSectionTitle && lastSec.level === currentSectionLevel) {
+        if (lastSec && lastSec.title === currentSectionTitle && lastSec.level === currentSectionLevel && lastSec.kind === currentSectionKind) {
           lastSec.content += `\n\n${sectionText}`;
           if (nextActionId && !lastSec.associatedActionIds.includes(nextActionId)) {
             lastSec.associatedActionIds.push(nextActionId);
@@ -122,7 +175,8 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
             title: currentSectionTitle,
             level: currentSectionLevel,
             content: sectionText,
-            associatedActionIds: nextActionId ? [nextActionId] : []
+            associatedActionIds: nextActionId ? [nextActionId] : [],
+            kind: currentSectionKind
           });
         }
       }
@@ -130,7 +184,7 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     }
   };
 
-  const processCompletedCodeBlock = (rawLines, fenceInfo, warning) => {
+  const processCompletedCodeBlock = (rawLines, fenceInfo, startLine, endLine, warning) => {
     const rawPayloadContent = rawLines.join('\n');
     const firstNonEmpty = rawLines.find(l => l.trim().length > 0) || '';
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
@@ -204,8 +258,14 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
       skipBlockCount,
       isIdenticalToDisk,
       parseWarnings: warnings,
-      orderIndex: actions.length
+      orderIndex: actions.length,
+      fenceLineStart: startLine,
+      fenceLineEnd: endLine
     });
+
+    currentSectionKind = 'interstitial';
+    currentSectionTitle = `Context for Action ${actions.length + 1}`;
+    currentSectionLevel = 3;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -219,28 +279,54 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
         codeFenceLength = fenceMatch[1].length;
         codeFenceInfo = fenceMatch[2].trim();
         codeBuffer = [];
+        codeStartLineIdx = i;
+        innerFenceDepth = 0;
       } else {
         const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
         if (headerMatch) {
           flushCurrentSection();
           currentSectionLevel = headerMatch[1].length;
           currentSectionTitle = headerMatch[2].trim();
+          currentSectionKind = actions.length === 0 ? 'preamble' : 'interstitial';
         } else {
           currentSectionLines.push(line);
         }
       }
     } else {
+      const isTargetMarkdown = Boolean(
+        codeFenceInfo.toLowerCase().includes('markdown') ||
+        codeFenceInfo.toLowerCase().includes('md') ||
+        codeBuffer.some(l => /\.(md|mdx)-->?$/i.test(l.trim()))
+      );
+
+      if (isTargetMarkdown && codeFenceLength === 3 && fenceMatch && fenceMatch[1].length === 3) {
+        const hasInfo = fenceMatch[2].trim().length > 0;
+        if (hasInfo && innerFenceDepth === 0) {
+          innerFenceDepth = 1;
+          codeBuffer.push(line);
+          continue;
+        } else if (!hasInfo && innerFenceDepth > 0) {
+          innerFenceDepth = 0;
+          codeBuffer.push(line);
+          continue;
+        }
+      }
+
       const meetsLengthInvariant = Boolean(fenceMatch && fenceMatch[1].length >= codeFenceLength);
 
       const isClosingFence = Boolean(
+        fenceMatch &&
         meetsLengthInvariant && 
         fenceMatch[1][0] === codeFenceChar && 
-        fenceMatch[2].trim().length === 0
+        fenceMatch[2].trim().length === 0 &&
+        innerFenceDepth === 0
       );
 
       const isNewOpeningFenceWhileUnclosed = Boolean(
+        fenceMatch &&
         meetsLengthInvariant &&
-        fenceMatch[2].trim().length > 0
+        fenceMatch[2].trim().length > 0 &&
+        innerFenceDepth === 0
       );
 
       const isHeaderBoundary = Boolean(
@@ -251,22 +337,25 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
 
       if (isClosingFence) {
         inCodeBlock = false;
-        processCompletedCodeBlock(codeBuffer, codeFenceInfo);
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i);
         codeBuffer = [];
-      } else if (isNewOpeningFenceWhileUnclosed) {
-        processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at new fence boundary.');
+      } else if (isNewOpeningFenceWhileUnclosed && fenceMatch) {
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i - 1, 'Auto-closed unterminated code fence at new fence boundary.');
         codeFenceChar = fenceMatch[1][0];
         codeFenceLength = fenceMatch[1].length;
         codeFenceInfo = fenceMatch[2].trim();
         codeBuffer = [];
+        codeStartLineIdx = i;
+        innerFenceDepth = 0;
         inCodeBlock = true;
       } else if (isHeaderBoundary) {
         inCodeBlock = false;
-        processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at primary header boundary.');
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i - 1, 'Auto-closed unterminated code fence at primary header boundary.');
         codeBuffer = [];
         const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
         currentSectionLevel = headerMatch ? headerMatch[1].length : 2;
         currentSectionTitle = headerMatch ? headerMatch[2].trim() : 'Pre-Code Summary';
+        currentSectionKind = actions.length === 0 ? 'preamble' : 'interstitial';
       } else {
         codeBuffer.push(line);
       }
@@ -274,9 +363,15 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
   }
 
   if (inCodeBlock && codeBuffer.length > 0) {
-    processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at End of Output.');
+    processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, lines.length - 1, 'Auto-closed unterminated code fence at End of Output.');
   }
 
+  if (actions.length > 0 && currentSectionLines.length > 0) {
+    currentSectionKind = 'epilogue';
+    if (currentSectionTitle.startsWith('Context for Action')) {
+      currentSectionTitle = 'Post-Code Instructions & Next Steps';
+    }
+  }
   flushCurrentSection();
 
   const actionsCount = {
@@ -286,21 +381,14 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     PARTIAL_DIFF: actions.filter(a => a.actionType === 'PARTIAL_DIFF').length,
   };
 
-  const intentSection = explanations.find(e => 
-    e.title.toLowerCase().includes('intent') || 
-    e.title.toLowerCase().includes('summary') || 
-    e.content.toLowerCase().includes('architectural intent')
-  );
-
-  let architecturalIntent = intentSection?.content || 'LLM Batch Work Packet Integration';
-  if (architecturalIntent.length > 300) {
-    architecturalIntent = architecturalIntent.slice(0, 300).trim() + '...';
-  }
+  const architecturalIntent = inferSessionDescription(rawMarkdown, explanations);
+  const sessionName = inferSessionTitle(rawMarkdown, actions, explanations);
 
   const summary = {
     architecturalIntent,
     totalFiles: actions.length,
-    actionsCount
+    actionsCount,
+    filePaths: actions.map(a => a.targetRelativePath)
   };
 
   const sessionId = `session-${Date.now()}`;
@@ -313,7 +401,12 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
   return {
     id: sessionId,
     workspaceId,
-    name: intentSection?.title || 'Dev Session',
+    name: sessionName,
+    description: architecturalIntent,
+    status: 'IN_PROGRESS',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    rawMarkdown,
     summary,
     actions,
     explanations,
@@ -490,8 +583,90 @@ console.log('\n\x1b[36m--- Suite 7: No-Op Identical File Auto-Completion ---\x1b
   assert(action.parseWarnings.some(w => w.includes('Identical to file on disk')), 'Captured no-op auto-completed warning');
 }
 
+// --- SUITE 8: MULTI-LOCATION REASONING (PREAMBLE, INTERSTITIAL, EPILOGUE) ---
+console.log('\n\x1b[36m--- Suite 8: Multi-Location Reasoning (Preamble, Interstitial, Epilogue) ---\x1b[0m');
+{
+  const multiLocationMarkdown = [
+    '# [WORK PACKET]: Full Pipeline Refactor',
+    '',
+    'Preamble: We begin by introducing the core database migration schema.',
+    '',
+    B3 + 'sql',
+    '-- [NEW] db/schema.sql',
+    'CREATE TABLE users (id INT PRIMARY KEY);',
+    B3,
+    '',
+    'Next, we update the data access layer to interact with this new table:',
+    '',
+    B3 + 'typescript',
+    '// [NEW] src/db/client.ts',
+    'export const db = {};',
+    B3,
+    '',
+    'Epilogue: Run `npm run migrate` and verify the test suite passes.',
+  ].join('\n');
+
+  const session = parseSessionMarkdown(multiLocationMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 2, 'Parsed 2 actions from multi-location packet');
+  
+  const preambleSec = session.explanations.find(e => e.kind === 'preamble');
+  assert(Boolean(preambleSec), 'Captured preamble explanation section');
+  
+  const interstitialSec = session.explanations.find(e => e.kind === 'interstitial');
+  assert(Boolean(interstitialSec), 'Captured interstitial explanation section between file blocks');
+  
+  const epilogueSec = session.explanations.find(e => e.kind === 'epilogue');
+  assert(Boolean(epilogueSec), 'Captured epilogue explanation section following the final file');
+  assert(epilogueSec.content.includes('npm run migrate'), 'Epilogue section contains post-code execution instructions');
+}
+
+// --- SUITE 9: 3-BACKTICK NESTED MARKDOWN FILE RECOVERY ---
+console.log('\n\x1b[36m--- Suite 9: 3-Backtick Nested Markdown Code Block Shielding ---\x1b[0m');
+{
+  const nested3BacktickMarkdown = [
+    '# [WORK PACKET]: Update Readme Guide',
+    '',
+    B3 + 'markdown',
+    '<!-- [NEW] docs/guide.md -->',
+    '# Developer Guide',
+    '',
+    'Here is how you execute the build:',
+    B3 + 'bash',
+    'npm install',
+    'npm test',
+    B3,
+    '',
+    'This is the end of the guide.',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(nested3BacktickMarkdown, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, `Shielded inner 3-backtick block inside 3-backtick markdown fence (actions: ${session.actions.length})`);
+  const act = session.actions[0];
+  assert(act.targetRelativePath === 'docs/guide.md', `Target path accurately identified: ${act.targetRelativePath}`);
+  assert(act.proposedContent.includes('npm install'), 'Retained inner bash script commands intact');
+  assert(act.proposedContent.includes('This is the end of the guide.'), 'Preserved code block trailing markdown text');
+}
+
+// --- SUITE 10: AUTO-INFERRED TITLE, DESCRIPTION & BOUNDARY PARSING ---
+console.log('\n\x1b[36m--- Suite 10: Multi-Segment Paths & Path Separation Invariant ---\x1b[0m');
+{
+  const multiSegmentPacket = [
+    B3 + 'lua',
+    '-- [NEW] src/plugins/renderer_svg/templates.lua',
+    'local Templates = {}',
+    'return Templates',
+    B3
+  ].join('\n');
+
+  const session = parseSessionMarkdown(multiSegmentPacket, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, 'Parsed multi-segment Lua action');
+  assert(session.actions[0].targetRelativePath === 'src/plugins/renderer_svg/templates.lua', `Extracted full path without stopping at slash: "${session.actions[0].targetRelativePath}"`);
+  assert(session.actions[0].actionType === 'NEW', 'Accurately recognized action as NEW');
+}
+
 console.log('\n' + '='.repeat(70));
-console.log(`  PARSER DIAGNOSTIC SUMMARY: \x1b[32${passCount} PASSED\x1b[0m, \x1b[${failCount > 0 ? '31' : '32'}m${failCount} FAILED\x1b[0m`);
+console.log(`  PARSER DIAGNOSTIC SUMMARY: \x1b[32m${passCount} PASSED\x1b[0m, \x1b[${failCount > 0 ? '31' : '32'}m${failCount} FAILED\x1b[0m`);
 console.log('='.repeat(70) + '\n');
 
 if (failCount > 0) process.exit(1);

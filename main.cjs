@@ -517,6 +517,43 @@ ipcMain.handle('git:getStatus', async (_, dirPath) => {
   });
 });
 
+ipcMain.handle('git:getBranch', async (_, dirPath) => {
+  return new Promise((resolve) => {
+    exec('git branch --show-current', { cwd: dirPath }, (error, stdout) => {
+      if (error) resolve(null);
+      else resolve(stdout.trim() || null);
+    });
+  });
+});
+
+ipcMain.handle('git:commit', async (_, dirPath, message, files) => {
+  return new Promise((resolve) => {
+    if (!dirPath || !message) {
+      resolve({ success: false, error: 'Directory path and commit message are required.' });
+      return;
+    }
+    const addCmd = files && files.length > 0
+      ? `git add ${files.map(f => `"${f.replace(/"/g, '\\"')}"`).join(' ')}`
+      : 'git add -A';
+
+    exec(addCmd, { cwd: dirPath }, (addErr) => {
+      if (addErr) {
+        resolve({ success: false, error: `git add failed: ${addErr.message}` });
+        return;
+      }
+      const safeMessage = message.replace(/"/g, '\\"');
+      exec(`git commit -m "${safeMessage}"`, { cwd: dirPath }, (commitErr, stdout) => {
+        if (commitErr) {
+          resolve({ success: false, error: `git commit failed: ${commitErr.message}` });
+          return;
+        }
+        const hashMatch = stdout.match(/\[(?:[^\s]+)\s+([a-f0-9]+)\]/);
+        resolve({ success: true, hash: hashMatch ? hashMatch[1] : undefined });
+      });
+    });
+  });
+});
+
 ipcMain.on('drag:start', (e, filePaths) => {
   const iconPath = app.isPackaged 
     ? path.join(__dirname, 'dist', 'drag-package.png')
@@ -625,11 +662,24 @@ ipcMain.handle('session:list', async (_, workspaceId) => {
       if (!file.endsWith('.json')) continue;
       try {
         const data = JSON.parse(await fs.readFile(path.join(wsDir, file), 'utf-8'));
+        
+        let sessionStatus = data.status;
+        if (!sessionStatus) {
+          if (data.actions && data.actions.length > 0 && data.actions.every(a => a.reviewStatus === 'MERGED' || a.reviewStatus === 'REJECTED')) {
+            sessionStatus = 'COMPLETED';
+          } else {
+            sessionStatus = 'IN_PROGRESS';
+          }
+        }
+
         results.push({
           id: data.id,
           name: data.name,
+          description: data.description || data.summary?.architecturalIntent,
+          status: sessionStatus,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
+          completedAt: data.completedAt,
           summary: data.summary
         });
       } catch (e) {}

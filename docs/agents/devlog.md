@@ -18,6 +18,31 @@
 
 ## Active Epoch: 05 - Bidirectional LLM Dev Studio (v2.0.0)
 
+### Session 027
+
+- **Focus Area:** Workspace-Scoped Dev Studio Containment, Interactive Ingestion Triage Studio, Multi-Location Reasoning Association, Post-Session Commit Generation, and Session Lifecycle Management Suite.
+- **Key Decisions:**
+  - **Workspace-Scoped Studio Viewport:** Refactored `DevStudioModal.tsx` from a window-covering overlay (`fixed inset-0`) to mount strictly below the application TitleBar (`top-10 inset-x-0 bottom-0 z-40`). Removed the redundant global Dev Studio button from `TitleBar.tsx`, cementing the `MainStage.tsx` button as the sole workspace-scoped entry point. Bound all session state in `sessionStore.ts` by `workspaceId` (`sessionsByWorkspace`, `activeActionIdsByWorkspace`, `openStudioByWorkspace`), allowing developers to switch workspace tabs in the TitleBar without losing in-flight studio diff review state.
+  - **Interactive Ingestion Triage Studio (`IngestionTriageStudio.tsx`):** Eliminated the blind textarea modal and focus traps by building a two-pane visual triage environment:
+    - Dedicated `[Paste from Clipboard]` reading `navigator.clipboard.readText()`.
+    - Left pane: Real-time action manifest displaying action badges (`[NEW]`, `[MOD]`, `[DEL]`), languages, line metrics, skip counts, heuristic warnings, and click-to-boundary jumping.
+    - Right pane: Dual view modes (**Annotated Boundary Map** with distinct visual decorator cards for reasoning traces and code block boundaries vs **Raw Editor View** for direct markdown editing) paired with search match highlighting and live re-parsing.
+    - Custom Metadata: Ingestion inputs for optional Session Title and Description with intelligent auto-inference defaults.
+  - **Multi-Location Reasoning Association & Markdown Invariant:** Enhanced `sessionParser.ts` to categorize markdown commentary into `preamble` (architectural intent), `interstitial` (file-specific rationale linked to the succeeding code action), and `epilogue` (post-code execution steps). Implemented inner fence depth tracking to shield target `.md` / `.mdx` files wrapped in 3-backtick code fences from premature closing on nested backticks.
+  - **Non-Invasive Git Integration & Commit Creator:** Added `git:commit` and `git:getBranch` IPC handlers in `main.cjs` / `preload.cjs`. Surfaced active Git branch tracking in the Dev Studio header and provided an inline commit modal pre-populated with `architecturalIntent`.
+  - **Session Lifecycle & Split-Window Resolution:** Resolved the layout glitch where existing sessions split the screen upon entering triage by enforcing strict mutual exclusivity between Ingestion, Session Browser, and the Diff Studio. Added an explicit `[Exit Session]` action to cleanly unload sessions to the archive, and a `SessionCompleteBanner` that triggers when all actions are reviewed.
+  - **Master-Detail Session Management Suite:** Overhauled `SessionBrowserModal.tsx` from a cramped modal into a full-screen management suite with quick search, status filtering (`All`, `In Progress`, `Completed`), sortable table columns, multi-selection batch deletion, and a detailed session inspector sidebar.
+  - **IPC Persistence Parity & Regex Range Bug Resolution:** Diagnosed and fixed the bug where completed sessions permanently displayed as `Open` by projecting `status`, `description`, and `completedAt` inside `main.cjs`'s `session:list` handler with an automated fallback for legacy sessions. Fixed an unescaped hyphen in `[^\s\->]+` in `sessionParser.ts` that had inadvertently created an ASCII range 45–62, prematurely truncating file paths at forward slashes.
+- **Core Files Modified:**
+  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+  - `src/features/session/types/session.ts`, `src/features/session/engine/sessionParser.ts`
+  - `src/features/session/store/sessionStore.ts`, `src/features/session/components/DevStudioModal.tsx`
+  - `src/features/session/components/triage/IngestionTriageStudio.tsx`, `src/features/session/components/SessionBrowserModal.tsx`
+  - `src/features/session/components/drawer/ReasoningDrawer.tsx`, `src/components/layout/MainStage.tsx`
+  - `src/components/layout/TitleBar.tsx`, `src/App.tsx`, `scripts/test-session-parser.mjs`
+
+---
+
 ### Session 026
 
 - **Focus Area:** Line 1 Path Scaffolding Preservation, Monaco Model Isolation, Single Action Toolbar Streamlining, Comprehensive Language Syntax Engine, and Interactive Full Plan Viewer.
@@ -29,18 +54,6 @@
   - **Comprehensive Syntax Highlighting:** Expanded `languageHelper.ts` to support game development languages (Lua, HLSL/GLSL shaders, C#, C++, GDScript), web technologies, system languages, JSON, SQL, and dotfiles. Explicitly bound model languages on mount via `monaco.editor.setModelLanguage`.
   - **Interactive Buffer Editing & Rollback:** Enabled `readOnly: false` on the modified pane of `SessionDiffEditor` and `NewFilePreview`. Added `workingContent` buffer tracking in `sessionStore.ts`, allowing users to make manual adjustments prior to or following a merge. Added `revertAction` to restore individual files to pre-session snapshots on disk and reset action status to `PENDING`.
   - **Dedicated Full Plan View & Syntactic Reasoning:** Replaced unformatted plan text with an interactive two-pane architecture in `FullPlanViewer.tsx` featuring categorized navigation (Intent, Work Packets, Extracted Code Artifacts), collapsible artifact cards with popout Monaco inspectors, persistent scroll offsets (`planScrollTop`), and styled inline code pills across `ReasoningDrawer.tsx`.
-  - **Identified Roadblocks for Session 027:**
-    - _Workspace-Scoped Dev Studio Containment:_ Dev studio currently mounts as a full-screen window overlay covering the main TitleBar. It needs to be refactored to mount below the TitleBar (`top-10`) so users can switch workspace tabs without losing studio context. The entry button in the top-left TitleBar must be removed, leaving the MainStage button as the sole workspace-scoped entry point.
-    - _Ingestion Focus Trap & Interactive Triage:_ Fix the bug where empty sessions prevent typing or pasting into the raw input. Overhaul the ingestion modal into an Interactive Triage Studio with one-click clipboard paste, split-pane action previews with file boundary rulers, direct raw text editing, and live re-parsing.
-    - _Multi-Location Reasoning Trace Association:_ Extend parser to bind preamble, interstitial, and epilogue markdown commentary to their corresponding file actions.
-- **Core Files Modified:**
-  - `src/features/session/types/session.ts`, `src/features/session/engine/sessionParser.ts`
-  - `src/features/session/store/sessionStore.ts`, `src/features/session/components/diff/SessionDiffEditor.tsx`
-  - `src/features/session/components/diff/NewFilePreview.tsx`, `src/features/session/components/diff/languageHelper.ts`
-  - `src/features/session/components/DevStudioModal.tsx`, `src/features/session/components/ActionChecklist.tsx`
-  - `src/features/session/components/drawer/FullPlanViewer.tsx`, `src/features/session/components/drawer/ReasoningDrawer.tsx`
-  - `src/features/session/components/SessionBrowserModal.tsx`, `src/components/layout/MainStage.tsx`
-  - `scripts/test-session-parser.mjs`, `src/index.css`
 
 ---
 

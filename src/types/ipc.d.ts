@@ -202,6 +202,8 @@ export interface ElectronAPI {
 
   getVersion: () => Promise<string>;
   getGitStatus: (targetPath: string) => Promise<Record<string, string>>;
+  getGitBranch: (targetPath: string) => Promise<string | null>;
+  commitGit: (dirPath: string, message: string, files?: string[]) => Promise<{ success: boolean; hash?: string; error?: string }>;
 
   stageExport: (payload: ExportPayload) => Promise<string[]>;
   stageEphemeralExport: (payload: EphemeralPayload) => Promise<string[]>;
@@ -223,7 +225,16 @@ export interface ElectronAPI {
   // Dev Session Studio
   saveDevSession: (workspaceId: string, session: import('../features/session/types/session').DevSession) => Promise<void>;
   loadDevSession: (workspaceId: string, sessionId: string) => Promise<import('../features/session/types/session').DevSession | null>;
-  listDevSessions: (workspaceId: string) => Promise<Array<{ id: string; name: string; createdAt: string; updatedAt: string; summary: import('../features/session/types/session').DevSessionSummary }>>;
+  listDevSessions: (workspaceId: string) => Promise<Array<{ 
+    id: string; 
+    name: string; 
+    description?: string;
+    status?: import('../features/session/types/session').DevSessionStatus;
+    createdAt: string; 
+    updatedAt: string; 
+    completedAt?: string;
+    summary: import('../features/session/types/session').DevSessionSummary 
+  }>>;
   deleteDevSession: (workspaceId: string, sessionId: string) => Promise<void>;
   applyFileAction: (absolutePath: string, content: string | null, actionType: 'NEW' | 'MODIFIED' | 'DELETED' | 'PARTIAL_DIFF') => Promise<void>;
   revertCheckpointFiles: (snapshotFiles: Record<string, string | null>) => Promise<void>;

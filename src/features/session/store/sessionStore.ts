@@ -5,6 +5,12 @@ import { parseSessionMarkdown } from '../engine/sessionParser';
 import { rollbackCheckpoint } from '../engine/checkpointEngine';
 
 interface SessionState {
+  currentWorkspaceId: string | null;
+  sessionsByWorkspace: Record<string, DevSession | null>;
+  activeActionIdsByWorkspace: Record<string, string | null>;
+  openStudioByWorkspace: Record<string, boolean>;
+  openIngestionByWorkspace: Record<string, boolean>;
+
   activeSession: DevSession | null;
   activeActionId: string | null;
   isStudioOpen: boolean;
@@ -14,16 +20,19 @@ interface SessionState {
   error: string | null;
   planScrollTop: number;
 
-  setIngestionModalOpen: (open: boolean) => void;
-  setStudioOpen: (open: boolean) => void;
+  syncWorkspaceContext: (workspaceId: string) => void;
+  setIngestionModalOpen: (open: boolean, workspaceId?: string) => void;
+  setStudioOpen: (open: boolean, workspaceId?: string) => void;
   setBrowserModalOpen: (open: boolean) => void;
-  setActiveActionId: (id: string | null) => void;
+  setActiveActionId: (id: string | null, workspaceId?: string) => void;
   setPlanScrollTop: (scrollTop: number) => void;
 
   initSessionFromMarkdown: (
     rawMarkdown: string,
     workspaceId: string,
-    rootPaths: string[]
+    rootPaths: string[],
+    customTitle?: string,
+    customDescription?: string
   ) => Promise<DevSession>;
 
   updateWorkingContent: (actionId: string, newContent: string) => void;
@@ -37,12 +46,22 @@ interface SessionState {
 
   applyAllPendingActions: () => Promise<void>;
   revertCurrentSession: () => Promise<void>;
+  completeCurrentSession: () => Promise<void>;
+  exitCurrentSession: () => void;
+
   loadSession: (workspaceId: string, sessionId: string) => Promise<void>;
   deleteSession: (workspaceId: string, sessionId: string) => Promise<void>;
+  batchDeleteSessions: (workspaceId: string, sessionIds: string[]) => Promise<void>;
   discardCurrentSession: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
+  currentWorkspaceId: null,
+  sessionsByWorkspace: {},
+  activeActionIdsByWorkspace: {},
+  openStudioByWorkspace: {},
+  openIngestionByWorkspace: {},
+
   activeSession: null,
   activeActionId: null,
   isStudioOpen: false,
@@ -52,20 +71,96 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   error: null,
   planScrollTop: 0,
 
-  setIngestionModalOpen: (open) => set({ isIngestionModalOpen: open, error: null }),
-  setStudioOpen: (open) => set({ isStudioOpen: open }),
-  setBrowserModalOpen: (open) => set({ isBrowserModalOpen: open }),
-  setActiveActionId: (id) => set({ activeActionId: id }),
+  syncWorkspaceContext: (workspaceId: string) => {
+    const { sessionsByWorkspace, activeActionIdsByWorkspace, openStudioByWorkspace, openIngestionByWorkspace } = get();
+    const wsSession = sessionsByWorkspace[workspaceId] || null;
+    const wsActionId = activeActionIdsByWorkspace[workspaceId] || (wsSession?.actions[0]?.id || null);
+    const wsStudioOpen = openStudioByWorkspace[workspaceId] || false;
+    const wsIngestionOpen = openIngestionByWorkspace[workspaceId] || false;
+
+    set({
+      currentWorkspaceId: workspaceId,
+      activeSession: wsSession,
+      activeActionId: wsActionId,
+      isStudioOpen: wsStudioOpen,
+      isIngestionModalOpen: wsIngestionOpen,
+      error: null
+    });
+  },
+
+  setIngestionModalOpen: (open: boolean, workspaceId?: string) => {
+    const wsId = workspaceId || get().currentWorkspaceId;
+    if (wsId) {
+      set(state => ({
+        isIngestionModalOpen: open,
+        isStudioOpen: open ? false : state.isStudioOpen,
+        isBrowserModalOpen: false,
+        error: null,
+        openIngestionByWorkspace: { ...state.openIngestionByWorkspace, [wsId]: open },
+        openStudioByWorkspace: open ? { ...state.openStudioByWorkspace, [wsId]: false } : state.openStudioByWorkspace
+      }));
+    } else {
+      set(state => ({ 
+        isIngestionModalOpen: open, 
+        isStudioOpen: open ? false : state.isStudioOpen,
+        isBrowserModalOpen: false,
+        error: null 
+      }));
+    }
+  },
+
+  setStudioOpen: (open: boolean, workspaceId?: string) => {
+    const wsId = workspaceId || get().currentWorkspaceId;
+    if (wsId) {
+      set(state => ({
+        isStudioOpen: open,
+        isIngestionModalOpen: open ? false : state.isIngestionModalOpen,
+        isBrowserModalOpen: false,
+        openStudioByWorkspace: { ...state.openStudioByWorkspace, [wsId]: open },
+        openIngestionByWorkspace: open ? { ...state.openIngestionByWorkspace, [wsId]: false } : state.openIngestionByWorkspace
+      }));
+    } else {
+      set(state => ({ 
+        isStudioOpen: open,
+        isIngestionModalOpen: open ? false : state.isIngestionModalOpen,
+        isBrowserModalOpen: false
+      }));
+    }
+  },
+
+  setBrowserModalOpen: (open: boolean) => {
+    set(state => ({ 
+      isBrowserModalOpen: open,
+      isIngestionModalOpen: open ? false : state.isIngestionModalOpen
+    }));
+  },
+
+  setActiveActionId: (id: string | null, workspaceId?: string) => {
+    const wsId = workspaceId || get().currentWorkspaceId;
+    if (wsId) {
+      set(state => ({
+        activeActionId: id,
+        activeActionIdsByWorkspace: { ...state.activeActionIdsByWorkspace, [wsId]: id }
+      }));
+    } else {
+      set({ activeActionId: id });
+    }
+  },
+
   setPlanScrollTop: (scrollTop) => set({ planScrollTop: scrollTop }),
 
-  initSessionFromMarkdown: async (rawMarkdown, workspaceId, rootPaths) => {
+  initSessionFromMarkdown: async (rawMarkdown, workspaceId, rootPaths, customTitle, customDescription) => {
     set({ error: null });
     try {
       const existingFilesMap: Record<string, string | null> = {};
-      const preliminaryActions = rawMarkdown.match(/(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED)\]\s+([^\r\n]+)/gi) || [];
+      const preliminaryActions = rawMarkdown.match(/(\/\/|#|<!--|--)\s*(?:\[(NEW|MODIFIED|DELETED)\]\s+)?([^\r\n]+)/gi) || [];
 
       for (const line of preliminaryActions) {
-        const pathPart = line.replace(/(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED)\]\s+/, '').replace(/[->]+$/, '').trim();
+        const pathPart = line
+          .replace(/(\/\/|#|<!--|--)\s*/, '')
+          .replace(/\[(NEW|MODIFIED|DELETED)\]\s*/, '')
+          .replace(/[->]+$/, '')
+          .trim();
         for (const root of rootPaths) {
           const abs = `${root}/${pathPart}`.replace(/\\/g, '/');
           try {
@@ -78,17 +173,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
 
       const session = parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFilesMap);
+      if (customTitle && customTitle.trim()) {
+        session.name = customTitle.trim();
+      }
+      if (customDescription && customDescription.trim()) {
+        session.description = customDescription.trim();
+        session.summary.architecturalIntent = customDescription.trim();
+      }
+
       await window.api.saveDevSession(workspaceId, session);
 
       const firstPending = session.actions.find(a => a.reviewStatus === 'PENDING') || session.actions[0];
+      const targetActionId = firstPending?.id || null;
 
-      set({
+      set(state => ({
+        currentWorkspaceId: workspaceId,
         activeSession: session,
-        activeActionId: firstPending?.id || null,
+        activeActionId: targetActionId,
         isIngestionModalOpen: false,
+        isBrowserModalOpen: false,
         isStudioOpen: true,
-        planScrollTop: 0
-      });
+        planScrollTop: 0,
+        sessionsByWorkspace: { ...state.sessionsByWorkspace, [workspaceId]: session },
+        activeActionIdsByWorkspace: { ...state.activeActionIdsByWorkspace, [workspaceId]: targetActionId },
+        openStudioByWorkspace: { ...state.openStudioByWorkspace, [workspaceId]: true },
+        openIngestionByWorkspace: { ...state.openIngestionByWorkspace, [workspaceId]: false }
+      }));
 
       return session;
     } catch (err: unknown) {
@@ -99,39 +209,49 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   updateWorkingContent: (actionId: string, newContent: string) => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     const updatedActions = activeSession.actions.map(a => 
       a.id === actionId ? { ...a, workingContent: newContent } : a
     );
 
-    set({
-      activeSession: {
-        ...activeSession,
-        actions: updatedActions
-      }
-    });
+    const updatedSession: DevSession = {
+      ...activeSession,
+      actions: updatedActions
+    };
+
+    set(state => ({
+      activeSession: updatedSession,
+      sessionsByWorkspace: currentWorkspaceId 
+        ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+        : state.sessionsByWorkspace
+    }));
   },
 
   resetActionWorkingContent: (actionId: string) => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     const updatedActions = activeSession.actions.map(a => 
       a.id === actionId ? { ...a, workingContent: a.proposedContent } : a
     );
 
-    set({
-      activeSession: {
-        ...activeSession,
-        actions: updatedActions
-      }
-    });
+    const updatedSession: DevSession = {
+      ...activeSession,
+      actions: updatedActions
+    };
+
+    set(state => ({
+      activeSession: updatedSession,
+      sessionsByWorkspace: currentWorkspaceId 
+        ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+        : state.sessionsByWorkspace
+    }));
   },
 
   saveActionEdits: async (actionId: string) => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     const action = activeSession.actions.find(a => a.id === actionId);
@@ -158,14 +278,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
 
       await window.api.saveDevSession(activeSession.workspaceId, updatedSession);
-      set({ activeSession: updatedSession, isApplying: false });
+      set(state => ({
+        activeSession: updatedSession,
+        isApplying: false,
+        sessionsByWorkspace: currentWorkspaceId 
+          ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+          : state.sessionsByWorkspace
+      }));
     } catch (err: unknown) {
       set({ isApplying: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
   applyCurrentAction: async () => {
-    const { activeSession, activeActionId } = get();
+    const { activeSession, activeActionId, currentWorkspaceId } = get();
     if (!activeSession || !activeActionId) return;
 
     const action = activeSession.actions.find(a => a.id === activeActionId);
@@ -187,6 +313,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
 
       const nextPending = updatedActions.find(a => a.reviewStatus === 'PENDING');
+      const nextActionId = nextPending?.id || activeActionId;
+
       const updatedSession: DevSession = {
         ...activeSession,
         actions: updatedActions,
@@ -195,18 +323,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       await window.api.saveDevSession(activeSession.workspaceId, updatedSession);
 
-      set({
+      set(state => ({
         activeSession: updatedSession,
-        activeActionId: nextPending?.id || activeActionId,
-        isApplying: false
-      });
+        activeActionId: nextActionId,
+        isApplying: false,
+        sessionsByWorkspace: currentWorkspaceId 
+          ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+          : state.sessionsByWorkspace,
+        activeActionIdsByWorkspace: currentWorkspaceId 
+          ? { ...state.activeActionIdsByWorkspace, [currentWorkspaceId]: nextActionId }
+          : state.activeActionIdsByWorkspace
+      }));
     } catch (err: unknown) {
       set({ isApplying: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
   revertAction: async (actionId: string) => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     const action = activeSession.actions.find(a => a.id === actionId);
@@ -238,14 +372,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
 
       await window.api.saveDevSession(activeSession.workspaceId, updatedSession);
-      set({ activeSession: updatedSession, isApplying: false });
+      set(state => ({
+        activeSession: updatedSession,
+        isApplying: false,
+        sessionsByWorkspace: currentWorkspaceId 
+          ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+          : state.sessionsByWorkspace
+      }));
     } catch (err: unknown) {
       set({ isApplying: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
   rejectCurrentAction: () => {
-    const { activeSession, activeActionId } = get();
+    const { activeSession, activeActionId, currentWorkspaceId } = get();
     if (!activeSession || !activeActionId) return;
 
     const updatedActions = activeSession.actions.map(a => 
@@ -253,6 +393,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     );
 
     const nextPending = updatedActions.find(a => a.reviewStatus === 'PENDING');
+    const nextActionId = nextPending?.id || activeActionId;
+
     const updatedSession: DevSession = {
       ...activeSession,
       actions: updatedActions,
@@ -261,14 +403,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     window.api.saveDevSession(activeSession.workspaceId, updatedSession);
 
-    set({
+    set(state => ({
       activeSession: updatedSession,
-      activeActionId: nextPending?.id || activeActionId
-    });
+      activeActionId: nextActionId,
+      sessionsByWorkspace: currentWorkspaceId 
+        ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+        : state.sessionsByWorkspace,
+      activeActionIdsByWorkspace: currentWorkspaceId 
+        ? { ...state.activeActionIdsByWorkspace, [currentWorkspaceId]: nextActionId }
+        : state.activeActionIdsByWorkspace
+    }));
   },
 
   restoreActionToPending: (actionId: string) => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     const updatedActions = activeSession.actions.map(a => 
@@ -282,11 +430,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     };
 
     window.api.saveDevSession(activeSession.workspaceId, updatedSession);
-    set({ activeSession: updatedSession });
+    set(state => ({
+      activeSession: updatedSession,
+      sessionsByWorkspace: currentWorkspaceId 
+        ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+        : state.sessionsByWorkspace
+    }));
   },
 
   applyAllPendingActions: async () => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     set({ isApplying: true, error: null });
@@ -315,14 +468,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
 
       await window.api.saveDevSession(activeSession.workspaceId, updatedSession);
-      set({ activeSession: updatedSession, isApplying: false });
+      set(state => ({
+        activeSession: updatedSession,
+        isApplying: false,
+        sessionsByWorkspace: currentWorkspaceId 
+          ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+          : state.sessionsByWorkspace
+      }));
     } catch (err: unknown) {
       set({ isApplying: false, error: err instanceof Error ? err.message : String(err) });
     }
   },
 
   revertCurrentSession: async () => {
-    const { activeSession } = get();
+    const { activeSession, currentWorkspaceId } = get();
     if (!activeSession) return;
 
     set({ isApplying: true, error: null });
@@ -342,41 +501,133 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
 
       await window.api.saveDevSession(activeSession.workspaceId, updatedSession);
-      set({ activeSession: updatedSession, isApplying: false });
+      set(state => ({
+        activeSession: updatedSession,
+        isApplying: false,
+        sessionsByWorkspace: currentWorkspaceId 
+          ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: updatedSession }
+          : state.sessionsByWorkspace
+      }));
     } catch (err: unknown) {
       set({ isApplying: false, error: err instanceof Error ? err.message : String(err) });
     }
+  },
+
+  completeCurrentSession: async () => {
+    const { activeSession, currentWorkspaceId } = get();
+    if (!activeSession) return;
+
+    const completedSession: DevSession = {
+      ...activeSession,
+      status: 'COMPLETED',
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    await window.api.saveDevSession(activeSession.workspaceId, completedSession);
+
+    set(state => ({
+      activeSession: null,
+      activeActionId: null,
+      isStudioOpen: false,
+      isIngestionModalOpen: false,
+      isBrowserModalOpen: true,
+      sessionsByWorkspace: currentWorkspaceId 
+        ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: null }
+        : state.sessionsByWorkspace,
+      openStudioByWorkspace: currentWorkspaceId 
+        ? { ...state.openStudioByWorkspace, [currentWorkspaceId]: false }
+        : state.openStudioByWorkspace
+    }));
+  },
+
+  exitCurrentSession: () => {
+    const { currentWorkspaceId } = get();
+    set(state => ({
+      activeSession: null,
+      activeActionId: null,
+      isStudioOpen: false,
+      isIngestionModalOpen: false,
+      isBrowserModalOpen: true,
+      openStudioByWorkspace: currentWorkspaceId 
+        ? { ...state.openStudioByWorkspace, [currentWorkspaceId]: false }
+        : state.openStudioByWorkspace
+    }));
   },
 
   loadSession: async (workspaceId, sessionId) => {
     const session = await window.api.loadDevSession(workspaceId, sessionId);
     if (session) {
       const firstPending = session.actions.find(a => a.reviewStatus === 'PENDING') || session.actions[0];
-      set({
+      const targetActionId = firstPending?.id || null;
+
+      set(state => ({
+        currentWorkspaceId: workspaceId,
         activeSession: session,
-        activeActionId: firstPending?.id || null,
+        activeActionId: targetActionId,
         isStudioOpen: true,
         isBrowserModalOpen: false,
-        planScrollTop: 0
-      });
+        isIngestionModalOpen: false,
+        planScrollTop: 0,
+        sessionsByWorkspace: { ...state.sessionsByWorkspace, [workspaceId]: session },
+        activeActionIdsByWorkspace: { ...state.activeActionIdsByWorkspace, [workspaceId]: targetActionId },
+        openStudioByWorkspace: { ...state.openStudioByWorkspace, [workspaceId]: true },
+        openIngestionByWorkspace: { ...state.openIngestionByWorkspace, [workspaceId]: false }
+      }));
     }
   },
 
   deleteSession: async (workspaceId, sessionId) => {
     await window.api.deleteDevSession(workspaceId, sessionId);
-    const { activeSession } = get();
-    if (activeSession && activeSession.id === sessionId) {
-      set({ activeSession: null, activeActionId: null, isStudioOpen: false });
+    set(state => {
+      const nextSessions = { ...state.sessionsByWorkspace };
+      if (nextSessions[workspaceId]?.id === sessionId) {
+        nextSessions[workspaceId] = null;
+      }
+      return {
+        sessionsByWorkspace: nextSessions,
+        activeSession: state.activeSession?.id === sessionId ? null : state.activeSession,
+        activeActionId: state.activeSession?.id === sessionId ? null : state.activeActionId,
+        isStudioOpen: state.activeSession?.id === sessionId ? false : state.isStudioOpen
+      };
+    });
+  },
+
+  batchDeleteSessions: async (workspaceId, sessionIds) => {
+    for (const id of sessionIds) {
+      await window.api.deleteDevSession(workspaceId, id);
     }
+    set(state => {
+      const nextSessions = { ...state.sessionsByWorkspace };
+      if (nextSessions[workspaceId] && sessionIds.includes(nextSessions[workspaceId]!.id)) {
+        nextSessions[workspaceId] = null;
+      }
+      return {
+        sessionsByWorkspace: nextSessions,
+        activeSession: state.activeSession && sessionIds.includes(state.activeSession.id) ? null : state.activeSession,
+        activeActionId: state.activeSession && sessionIds.includes(state.activeSession.id) ? null : state.activeActionId,
+        isStudioOpen: state.activeSession && sessionIds.includes(state.activeSession.id) ? false : state.isStudioOpen
+      };
+    });
   },
 
   discardCurrentSession: () => {
-    set({
+    const { currentWorkspaceId } = get();
+    set(state => ({
       activeSession: null,
       activeActionId: null,
       isStudioOpen: false,
       isIngestionModalOpen: false,
-      planScrollTop: 0
-    });
+      planScrollTop: 0,
+      sessionsByWorkspace: currentWorkspaceId 
+        ? { ...state.sessionsByWorkspace, [currentWorkspaceId]: null }
+        : state.sessionsByWorkspace,
+      openStudioByWorkspace: currentWorkspaceId 
+        ? { ...state.openStudioByWorkspace, [currentWorkspaceId]: false }
+        : state.openStudioByWorkspace,
+      openIngestionByWorkspace: currentWorkspaceId 
+        ? { ...state.openIngestionByWorkspace, [currentWorkspaceId]: false }
+        : state.openIngestionByWorkspace
+    }));
   }
 }));

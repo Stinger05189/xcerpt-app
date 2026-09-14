@@ -41,7 +41,7 @@ export function ReasoningDrawer({ explanations, activeActionId }: ReasoningDrawe
           </span>
 
           <span className="text-[10px] bg-bg-base border border-border-subtle px-2 py-0.5 rounded text-text-muted font-mono flex items-center gap-1">
-            <Layers size={10} /> {totalSections} Section{totalSections > 1 ? 's' : ''} Captured
+            <Layers size={10} /> {totalSections} Section{totalSections > 1 ? 's' : ''}
           </span>
 
           {associatedSection && (
@@ -65,9 +65,14 @@ export function ReasoningDrawer({ explanations, activeActionId }: ReasoningDrawe
         <div className="border-t border-border-subtle bg-bg-base/90 p-4 max-h-72 flex flex-col gap-3 font-sans text-xs">
           {explanations.length > 1 && (
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-border-subtle shrink-0">
-              {explanations.map((sec, idx) => {
+              {explanations.map((sec) => {
                 const isSelected = (currentSection?.id === sec.id);
                 const isLinked = activeActionId && sec.associatedActionIds.includes(activeActionId);
+
+                let badgeKind = 'Section';
+                if (sec.kind === 'preamble') badgeKind = 'Preamble';
+                else if (sec.kind === 'epilogue') badgeKind = 'Epilogue';
+                else if (sec.kind === 'interstitial') badgeKind = 'File Note';
 
                 return (
                   <button
@@ -82,7 +87,7 @@ export function ReasoningDrawer({ explanations, activeActionId }: ReasoningDrawe
                     }`}
                   >
                     <BookOpen size={11} />
-                    <span>Section {idx + 1}: {sec.title}</span>
+                    <span>[{badgeKind}] {sec.title}</span>
                     {isLinked && <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />}
                   </button>
                 );
@@ -93,7 +98,14 @@ export function ReasoningDrawer({ explanations, activeActionId }: ReasoningDrawe
           <div className="flex-1 overflow-y-auto pr-2 prose prose-invert prose-xs max-w-none prose-pre:bg-bg-panel prose-pre:border prose-pre:border-border-subtle">
             {currentSection ? (
               <div>
-                <h4 className="text-xs font-semibold text-accent mb-2">{currentSection.title}</h4>
+                <div className="flex items-center gap-2 mb-2">
+                  <h4 className="text-xs font-semibold text-accent m-0">{currentSection.title}</h4>
+                  {currentSection.kind && (
+                    <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-accent/15 text-accent font-mono">
+                      {currentSection.kind}
+                    </span>
+                  )}
+                </div>
                 <Markdown
                   remarkPlugins={[remarkGfm]}
                   components={{

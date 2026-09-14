@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   // Git & App Version Info
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getGitStatus: (targetPath) => ipcRenderer.invoke('git:getStatus', targetPath),
+  getGitBranch: (targetPath) => ipcRenderer.invoke('git:getBranch', targetPath),
+  commitGit: (dirPath, message, files) => ipcRenderer.invoke('git:commit', dirPath, message, files),
 
   // Export Engine & Native OS
   stageExport: (payload) => ipcRenderer.invoke('fs:stageExport', payload),

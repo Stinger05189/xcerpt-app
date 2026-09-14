@@ -16,35 +16,39 @@
 
 ---
 
-## Active Queue: Version 2.0.0 (Session 027 Focus)
+## Active Queue: Version 2.1.0 (Session 028 Focus)
 
-- [ ] **WP-01: Workspace-Scoped Dev Studio & TitleBar Preservation Architecture**
-  - _Details:_ Remove the Dev Studio icon from the top-left TitleBar (`TitleBar.tsx`), making the MainStage header button (`Stage Context -> Dev Studio -> Configure`) the sole workspace-scoped entry point. Refactor `DevStudioModal.tsx` from a full-screen window overlay (`fixed inset-0`) to mount below the TitleBar (`top-10 inset-x-0 bottom-0` or embedded stage view) so the TitleBar workspace tabs remain visible, draggable, and clickable. Bind dev session store state strictly to the active `workspaceId`, allowing users to switch workspace tabs seamlessly without losing studio review state.
-- [ ] **WP-02: Fix Ingestion Focus Trap & Build Interactive Ingestion Triage Studio**
-  - _Details:_ Fix the focus/click bug in the ingestion modal that prevented pasting into the raw markdown textarea on fresh sessions. Overhaul the ingestion modal into a two-pane Interactive Triage Studio: provide a primary `[Paste from Clipboard]` action, a left pane showing live extracted actions/warnings, and a right pane with a searchable raw markdown editor with visual file boundary markers and a `[Re-Parse Response]` live recalculation button.
-- [ ] **WP-03: Multi-Location Reasoning Association & Markdown Action Resilience**
-  - _Details:_ Enhance `sessionParser.ts` to capture and correlate reasoning commentary located at the start of a packet, between files, and at the end of files. Ensure that target Markdown files (`.md`, `.mdx`) wrapped inside outer code fences are properly isolated and do not break parser fence boundaries.
-- [ ] **WP-04: Non-Invasive Git Integration & Post-Session Commit Generator**
-  - _Details:_ Implement pre-session git status inspection (`git status --porcelain`) and post-session commit creation offering a commit message pre-populated with the parsed architectural intent summary.
+- [ ] **WP-01: Provider-Agnostic LLM Client Architecture & Secure Key Management**
+  - _Details:_ Build a modular, extensible LLM client layer in `src/features/llm/` supporting OpenRouter, Google Gemini API, and OpenAI. Configure OpenRouter as the default provider with `google/gemini-3.5-flash-lite` as the default model. Implement secure API key storage via OS-safe local encryption / app config and expose model selection settings in `SettingsModal.tsx`.
+- [ ] **WP-02: Structured Outputs & Function Calling Tool Engine**
+  - _Details:_ Implement support for deterministic structured JSON responses (`response_format: { type: 'json_schema' }` / `json_object`) and tool calling (`tools`, `tool_choice`). Build schema validators for Session Naming, Description generation, and Commit Message synthesis.
+- [ ] **WP-03: Session Creation Copilot (AI Name & Intent Assistant)**
+  - _Details:_ Integrate a one-click `[Generate Name & Description]` copilot button in `IngestionTriageStudio.tsx`. Payload strictly includes parsed reasoning traces (preamble/summary) and target file actions (`[NEW] path.ext`, `[MOD] path.ext`) while strictly omitting raw file bodies to preserve minimal token overhead.
+- [ ] **WP-04: Session Completion Commit Synthesizer**
+  - _Details:_ In `DevStudioModal.tsx` and the `SessionCompleteBanner`, provide an `[AI Generate Commit Message]` action. Construct a targeted context payload containing session architectural intent, file action metadata, Git file diffs, and recent Git log history to synthesize conventional, high-fidelity commit messages.
+
+---
+
+## Completed in Version 2.0.0 (Session 027)
+
+- [x] **WP-01: Workspace-Scoped Dev Studio & TitleBar Preservation Architecture**
+  - Removed Dev Studio from TitleBar; anchored studio below TitleBar (`top-10 inset-x-0 bottom-0 z-40`). Bound session state per `workspaceId` in `sessionStore.ts` allowing tab switching without losing review state.
+- [x] **WP-02: Fix Ingestion Focus Trap & Interactive Triage Studio**
+  - Built `IngestionTriageStudio.tsx` with clipboard paste, real-time action checklist, warning indicators, and jump navigation. Fixed all focus traps.
+- [x] **WP-03: Multi-Location Reasoning Association & Markdown Resilience**
+  - Categorized reasoning into preamble, file-linked interstitial, and post-code epilogue sections. Added nested code fence depth tracking to prevent inner 3-backtick blocks from breaking outer markdown files.
+- [x] **WP-04: Non-Invasive Git Integration & Post-Session Commit Generator**
+  - Added `git:commit` and `git:getBranch` IPC handlers. Built commit generation dialog and header branch indicators.
+- [x] **WP-05: Session Completion Lifecycle & Master-Detail Management Suite**
+  - Added `completeCurrentSession()`, `exitCurrentSession()`, and `SessionCompleteBanner`. Overhauled `SessionBrowserModal.tsx` into a full-screen management suite with sortable tables, search, multi-selection batch deletion, and session inspector.
+- [x] **WP-06: IPC Persistence Parity & Regex Range Hazard Fix**
+  - Fixed `session:list` in `main.cjs` to project `status`, `description`, and `completedAt`. Escaped hyphens in `[^\s\->]+` in `sessionParser.ts`.
 
 ---
 
 ## Completed in Version 2.0.0 (Session 026)
 
-- [x] **WP-01: Line 1 Protocol Stripping Refinement & Parser Diagnostic Suite**
-  - Updated `stripProtocolScaffolding` to strip strictly the action tag prefix while preserving commented file paths on line 1. Diagnostic test suite expanded to 26/26 passing assertions.
-- [x] **WP-02: Monaco Model Isolation & Syntax Highlighting Engine**
-  - Mounted editors with `key={activeAction.id}` to eliminate model reuse and cross-action content bleed. Expanded `languageHelper.ts` with Lua, shaders (HLSL, GLSL), C#, C++, GDScript, JSON, and dotfiles, calling `monaco.editor.setModelLanguage` on mount.
-- [x] **WP-03: Unified Single Action Toolbar & Single-Accept Workflow**
-  - Merged dual headers into a single cohesive action toolbar in `DevStudioModal.tsx`. Moved the inline diff toggle into the file toolbar and implemented `revertAction` for disk restoration.
-- [x] **WP-04: Full Plan View Artifact Overhaul & Syntactic Reasoning**
-  - Built categorized sidebar navigation in `FullPlanViewer.tsx` (Intent, Work Packets, Code Artifacts), collapsible artifact cards with popout Monaco inspectors, persistent scroll offsets, and styled inline code pills.
-
----
-
-## Completed in Version 2.0.0 (Session 025)
-
-- [x] **Dev Session Domain Architecture & Store Foundation** (`sessionStore.ts`, `session.ts`)
-- [x] **Protocol Parser Engine** (`sessionParser.ts`, depth invariant, deduplication)
-- [x] **Monaco Diff Merge Engine** (`SessionDiffEditor.tsx`, `NewFilePreview.tsx`, `DeletedFileBanner.tsx`)
-- [x] **Reasoning Drawer & Checkpoint Persistence** (`ReasoningDrawer.tsx`, `checkpointEngine.ts`)
+- [x] **Line 1 Protocol Stripping Refinement & Parser Diagnostic Suite** (`sessionParser.ts`)
+- [x] **Monaco Model Isolation & Syntax Highlighting Engine** (`SessionDiffEditor.tsx`, `languageHelper.ts`)
+- [x] **Unified Single Action Toolbar & Single-Accept Workflow** (`DevStudioModal.tsx`)
+- [x] **Full Plan View Artifact Overhaul & Syntactic Reasoning** (`FullPlanViewer.tsx`)

@@ -5,7 +5,8 @@ import type {
   FileActionType, 
   ActionReviewStatus,
   MarkdownExplanationSection, 
-  DevSessionSummary 
+  DevSessionSummary,
+  SectionKind
 } from '../types/session';
 
 const PROTOCOL_TAG_REGEX = /^\s*(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*(.*)$/i;
@@ -24,23 +25,19 @@ export function stripProtocolScaffolding(rawCode: string, targetPath?: string): 
     const commentPrefix = tagMatch[1];
     let remainder = tagMatch[3].trim();
 
-    // Clean HTML comment closing tags if present on the single line
     if (commentPrefix === '<!--' && remainder.endsWith('-->')) {
       remainder = remainder.slice(0, -3).trim();
     }
 
     if (remainder.length > 0) {
-      // Retain the comment prefix with the path intact
       lines[firstNonEmptyIndex] = commentPrefix === '<!--'
         ? `<!-- ${remainder} -->`
         : `${commentPrefix} ${remainder}`;
     } else if (targetPath) {
-      // If action had no inline path, retain canonical commented relative path
       lines[firstNonEmptyIndex] = commentPrefix === '<!--'
         ? `<!-- ${targetPath} -->`
         : `${commentPrefix} ${targetPath}`;
     } else {
-      // Prune line if empty action tag with no path
       lines.splice(firstNonEmptyIndex, 1);
     }
   }
@@ -56,10 +53,10 @@ export function extractActionAndPath(
   let targetPath: string | null = null;
 
   const line = firstLine.trim();
-  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s->]+)/i);
+  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s\->]+)/i);
   if (protocolMatch) {
     actionType = protocolMatch[1].toUpperCase() as FileActionType;
-    targetPath = protocolMatch[2].replace(/[->]+$/, '').trim();
+    targetPath = protocolMatch[2].replace(/-->$/, '').replace(/[->]+$/, '').trim();
     return { actionType, targetPath };
   }
 
@@ -84,6 +81,63 @@ export function extractActionAndPath(
   return { actionType, targetPath };
 }
 
+export function inferSessionTitle(
+  rawMarkdown: string, 
+  actions: ParsedFileAction[], 
+  explanations?: MarkdownExplanationSection[]
+): string {
+  const wpMatch = rawMarkdown.match(/^#+\s*\[?WORK PACKET(?:\s*\d+)?\]?:?\s*(.*)$/im);
+  if (wpMatch && wpMatch[1].trim().length > 0) {
+    const clean = wpMatch[1].replace(/[*_#`[\]]/g, '').trim();
+    if (clean.length > 0) return clean;
+  }
+
+  const headerMatch = rawMarkdown.match(/^#+\s+(.+)$/m);
+  if (headerMatch) {
+    const cleanHeader = headerMatch[1].replace(/[*_#`[\]]/g, '').trim();
+    if (cleanHeader.length > 0 && !cleanHeader.toLowerCase().includes('pre-code summary')) {
+      return cleanHeader;
+    }
+  }
+
+  if (explanations && explanations.length > 0) {
+    const namedSec = explanations.find(e => e.title && !e.title.toLowerCase().includes('intent') && !e.title.toLowerCase().includes('context'));
+    if (namedSec) return namedSec.title;
+  }
+
+  if (actions.length > 0) {
+    const firstTwo = actions.slice(0, 2).map(a => `${a.actionType} ${a.targetRelativePath.split('/').pop()}`);
+    const suffix = actions.length > 2 ? ` (+${actions.length - 2} more)` : '';
+    return `${firstTwo.join(', ')}${suffix}`;
+  }
+
+  return `Dev Session ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+export function inferSessionDescription(
+  rawMarkdown: string, 
+  explanations: MarkdownExplanationSection[]
+): string {
+  const intentMatch = rawMarkdown.match(/(?:Architectural Intent|Intent|Objective):\s*(.*)/i);
+  if (intentMatch && intentMatch[1].trim()) {
+    return intentMatch[1].replace(/[*_#`[\]-]/g, '').trim();
+  }
+
+  const preambleSec = explanations.find(e => e.kind === 'preamble' || e.title.toLowerCase().includes('intent'));
+  if (preambleSec && preambleSec.content.trim()) {
+    const firstParagraph = preambleSec.content
+      .split('\n\n')[0]
+      .replace(/[*_#`[\]-]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (firstParagraph.length > 0) {
+      return firstParagraph.length > 200 ? `${firstParagraph.slice(0, 200)}...` : firstParagraph;
+    }
+  }
+
+  return 'LLM Batch Work Packet Integration';
+}
+
 export function parseSessionMarkdown(
   rawMarkdown: string,
   workspaceId: string,
@@ -100,19 +154,22 @@ export function parseSessionMarkdown(
   let currentSectionTitle = 'Architectural Intent';
   let currentSectionLevel = 2;
   let currentSectionLines: string[] = [];
+  let currentSectionKind: SectionKind = 'preamble';
 
   let inCodeBlock = false;
   let codeFenceChar = '';
   let codeFenceLength = 0;
   let codeFenceInfo = '';
   let codeBuffer: string[] = [];
+  let codeStartLineIdx = 0;
+  let innerFenceDepth = 0;
 
   const flushCurrentSection = (nextActionId?: string) => {
     if (currentSectionLines.length > 0) {
       const sectionText = currentSectionLines.join('\n').trim();
       if (sectionText) {
         const lastSec = explanations[explanations.length - 1];
-        if (lastSec && lastSec.title === currentSectionTitle && lastSec.level === currentSectionLevel) {
+        if (lastSec && lastSec.title === currentSectionTitle && lastSec.level === currentSectionLevel && lastSec.kind === currentSectionKind) {
           lastSec.content += `\n\n${sectionText}`;
           if (nextActionId && !lastSec.associatedActionIds.includes(nextActionId)) {
             lastSec.associatedActionIds.push(nextActionId);
@@ -123,7 +180,8 @@ export function parseSessionMarkdown(
             title: currentSectionTitle,
             level: currentSectionLevel,
             content: sectionText,
-            associatedActionIds: nextActionId ? [nextActionId] : []
+            associatedActionIds: nextActionId ? [nextActionId] : [],
+            kind: currentSectionKind
           });
         }
       }
@@ -131,7 +189,13 @@ export function parseSessionMarkdown(
     }
   };
 
-  const processCompletedCodeBlock = (rawLines: string[], fenceInfo: string, warning?: string) => {
+  const processCompletedCodeBlock = (
+    rawLines: string[], 
+    fenceInfo: string, 
+    startLine: number, 
+    endLine: number, 
+    warning?: string
+  ) => {
     const rawPayloadContent = rawLines.join('\n');
     const firstNonEmpty = rawLines.find(l => l.trim().length > 0) || '';
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
@@ -176,7 +240,6 @@ export function parseSessionMarkdown(
 
     const proposedContent = stripProtocolScaffolding(rawPayloadContent, targetRelativePath);
 
-    // No-Op Auto-Detection: Identical contents to disk are pre-marked as MERGED
     const isIdenticalToDisk = originalContent !== null && originalContent === proposedContent;
     let reviewStatus: ActionReviewStatus = 'PENDING';
     if (isIdenticalToDisk && actionType !== 'DELETED') {
@@ -206,8 +269,14 @@ export function parseSessionMarkdown(
       skipBlockCount,
       isIdenticalToDisk,
       parseWarnings: warnings,
-      orderIndex: actions.length
+      orderIndex: actions.length,
+      fenceLineStart: startLine,
+      fenceLineEnd: endLine
     });
+
+    currentSectionKind = 'interstitial';
+    currentSectionTitle = `Context for Action ${actions.length + 1}`;
+    currentSectionLevel = 3;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -221,28 +290,54 @@ export function parseSessionMarkdown(
         codeFenceLength = fenceMatch[1].length;
         codeFenceInfo = fenceMatch[2].trim();
         codeBuffer = [];
+        codeStartLineIdx = i;
+        innerFenceDepth = 0;
       } else {
         const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
         if (headerMatch) {
           flushCurrentSection();
           currentSectionLevel = headerMatch[1].length;
           currentSectionTitle = headerMatch[2].trim();
+          currentSectionKind = actions.length === 0 ? 'preamble' : 'interstitial';
         } else {
           currentSectionLines.push(line);
         }
       }
     } else {
+      const isTargetMarkdown = Boolean(
+        codeFenceInfo.toLowerCase().includes('markdown') ||
+        codeFenceInfo.toLowerCase().includes('md') ||
+        codeBuffer.some(l => /\.(md|mdx)-->?$/i.test(l.trim()))
+      );
+
+      if (isTargetMarkdown && codeFenceLength === 3 && fenceMatch && fenceMatch[1].length === 3) {
+        const hasInfo = fenceMatch[2].trim().length > 0;
+        if (hasInfo && innerFenceDepth === 0) {
+          innerFenceDepth = 1;
+          codeBuffer.push(line);
+          continue;
+        } else if (!hasInfo && innerFenceDepth > 0) {
+          innerFenceDepth = 0;
+          codeBuffer.push(line);
+          continue;
+        }
+      }
+
       const meetsLengthInvariant = Boolean(fenceMatch && fenceMatch[1].length >= codeFenceLength);
 
       const isClosingFence = Boolean(
+        fenceMatch &&
         meetsLengthInvariant && 
-        fenceMatch![1][0] === codeFenceChar && 
-        fenceMatch![2].trim().length === 0
+        fenceMatch[1][0] === codeFenceChar && 
+        fenceMatch[2].trim().length === 0 &&
+        innerFenceDepth === 0
       );
 
       const isNewOpeningFenceWhileUnclosed = Boolean(
+        fenceMatch &&
         meetsLengthInvariant &&
-        fenceMatch![2].trim().length > 0
+        fenceMatch[2].trim().length > 0 &&
+        innerFenceDepth === 0
       );
 
       const isHeaderBoundary = Boolean(
@@ -253,22 +348,25 @@ export function parseSessionMarkdown(
 
       if (isClosingFence) {
         inCodeBlock = false;
-        processCompletedCodeBlock(codeBuffer, codeFenceInfo);
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i);
         codeBuffer = [];
-      } else if (isNewOpeningFenceWhileUnclosed) {
-        processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at new fence boundary.');
-        codeFenceChar = fenceMatch![1][0];
-        codeFenceLength = fenceMatch![1].length;
-        codeFenceInfo = fenceMatch![2].trim();
+      } else if (isNewOpeningFenceWhileUnclosed && fenceMatch) {
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i - 1, 'Auto-closed unterminated code fence at new fence boundary.');
+        codeFenceChar = fenceMatch[1][0];
+        codeFenceLength = fenceMatch[1].length;
+        codeFenceInfo = fenceMatch[2].trim();
         codeBuffer = [];
+        codeStartLineIdx = i;
+        innerFenceDepth = 0;
         inCodeBlock = true;
       } else if (isHeaderBoundary) {
         inCodeBlock = false;
-        processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at primary header boundary.');
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i - 1, 'Auto-closed unterminated code fence at primary header boundary.');
         codeBuffer = [];
         const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
         currentSectionLevel = headerMatch ? headerMatch[1].length : 2;
         currentSectionTitle = headerMatch ? headerMatch[2].trim() : 'Pre-Code Summary';
+        currentSectionKind = actions.length === 0 ? 'preamble' : 'interstitial';
       } else {
         codeBuffer.push(line);
       }
@@ -276,9 +374,15 @@ export function parseSessionMarkdown(
   }
 
   if (inCodeBlock && codeBuffer.length > 0) {
-    processCompletedCodeBlock(codeBuffer, codeFenceInfo, 'Auto-closed unterminated code fence at End of Output.');
+    processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, lines.length - 1, 'Auto-closed unterminated code fence at End of Output.');
   }
 
+  if (actions.length > 0 && currentSectionLines.length > 0) {
+    currentSectionKind = 'epilogue';
+    if (currentSectionTitle.startsWith('Context for Action')) {
+      currentSectionTitle = 'Post-Code Instructions & Next Steps';
+    }
+  }
   flushCurrentSection();
 
   const actionsCount: Record<FileActionType, number> = {
@@ -288,21 +392,14 @@ export function parseSessionMarkdown(
     PARTIAL_DIFF: actions.filter(a => a.actionType === 'PARTIAL_DIFF').length,
   };
 
-  const intentSection = explanations.find(e => 
-    e.title.toLowerCase().includes('intent') || 
-    e.title.toLowerCase().includes('summary') || 
-    e.content.toLowerCase().includes('architectural intent')
-  );
-
-  let architecturalIntent = intentSection?.content || 'LLM Batch Work Packet Integration';
-  if (architecturalIntent.length > 300) {
-    architecturalIntent = architecturalIntent.slice(0, 300).trim() + '...';
-  }
+  const architecturalIntent = inferSessionDescription(rawMarkdown, explanations);
+  const sessionName = inferSessionTitle(rawMarkdown, actions, explanations);
 
   const summary: DevSessionSummary = {
     architecturalIntent,
     totalFiles: actions.length,
-    actionsCount
+    actionsCount,
+    filePaths: actions.map(a => a.targetRelativePath)
   };
 
   const sessionId = `session-${Date.now()}`;
@@ -315,7 +412,9 @@ export function parseSessionMarkdown(
   return {
     id: sessionId,
     workspaceId,
-    name: intentSection?.title || `Dev Session ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+    name: sessionName,
+    description: architecturalIntent,
+    status: 'IN_PROGRESS',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     rawMarkdown,
