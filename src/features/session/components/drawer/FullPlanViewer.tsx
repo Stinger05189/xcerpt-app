@@ -7,6 +7,12 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useAppStore } from '../../../../store/appStore';
 import { getLanguageFromFilename, formatLanguageName } from '../diff/languageHelper';
 import { 
+  FILE_START_TOKEN_REGEX, 
+  FILE_END_TOKEN_REGEX, 
+  stripOuterCodeFence, 
+  cleanRelativePath 
+} from '../../engine/sessionParser';
+import { 
   Copy, 
   Check, 
   FileCode2, 
@@ -42,7 +48,6 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Restore scroll position
   useEffect(() => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = planScrollTop;
@@ -61,17 +66,63 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Parse sections and code artifacts from the raw markdown
   const { sections, artifacts, stats } = useMemo(() => {
     const lines = rawMarkdown.replace(/\r\n/g, '\n').split('\n');
     const secList: Array<{ id: string; title: string; level: number; lineIndex: number }> = [];
     const artList: CodeArtifactItem[] = [];
+
+    let inTokenBlock = false;
+    let tokenArtifactPath = '';
+    let tokenArtifactBuffer: string[] = [];
 
     let inFence = false;
     let fenceLang = '';
     let currentFenceBuffer: string[] = [];
 
     lines.forEach((line, idx) => {
+      const startTokenMatch = line.match(FILE_START_TOKEN_REGEX);
+      const endTokenMatch = line.match(FILE_END_TOKEN_REGEX);
+
+      if (inTokenBlock) {
+        if (endTokenMatch) {
+          inTokenBlock = false;
+          const { lines: cleanLines, detectedFenceInfo } = stripOuterCodeFence(tokenArtifactBuffer);
+          const lang = detectedFenceInfo || getLanguageFromFilename(tokenArtifactPath);
+          artList.push({
+            id: `art-${artList.length + 1}`,
+            language: lang,
+            filename: tokenArtifactPath,
+            content: cleanLines.join('\n'),
+            lineCount: cleanLines.length
+          });
+          tokenArtifactBuffer = [];
+          return;
+        } else if (startTokenMatch) {
+          const { lines: cleanLines, detectedFenceInfo } = stripOuterCodeFence(tokenArtifactBuffer);
+          const lang = detectedFenceInfo || getLanguageFromFilename(tokenArtifactPath);
+          artList.push({
+            id: `art-${artList.length + 1}`,
+            language: lang,
+            filename: tokenArtifactPath,
+            content: cleanLines.join('\n'),
+            lineCount: cleanLines.length
+          });
+          tokenArtifactPath = cleanRelativePath(startTokenMatch[2]);
+          tokenArtifactBuffer = [];
+          return;
+        } else {
+          tokenArtifactBuffer.push(line);
+          return;
+        }
+      }
+
+      if (startTokenMatch) {
+        inTokenBlock = true;
+        tokenArtifactPath = cleanRelativePath(startTokenMatch[2]);
+        tokenArtifactBuffer = [];
+        return;
+      }
+
       const fenceMatch = line.match(/^([`~]{3,})(.*)$/);
       if (!inFence) {
         if (fenceMatch) {
@@ -115,6 +166,18 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
       }
     });
 
+    if (inTokenBlock && tokenArtifactBuffer.length > 0) {
+      const { lines: cleanLines, detectedFenceInfo } = stripOuterCodeFence(tokenArtifactBuffer);
+      const lang = detectedFenceInfo || getLanguageFromFilename(tokenArtifactPath);
+      artList.push({
+        id: `art-${artList.length + 1}`,
+        language: lang,
+        filename: tokenArtifactPath,
+        content: cleanLines.join('\n'),
+        lineCount: cleanLines.length
+      });
+    }
+
     const words = rawMarkdown.trim().split(/\s+/).length;
     const sizeKb = (new Blob([rawMarkdown]).size / 1024).toFixed(1);
     const estimatedTokens = Math.round(words * 1.3);
@@ -141,7 +204,6 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
 
   return (
     <div className="flex-1 flex h-full bg-bg-base overflow-hidden relative select-text">
-      {/* Categorized Plan Navigation Sidebar */}
       <aside className="w-72 bg-bg-panel border-r border-border-subtle flex flex-col shrink-0 select-none">
         <div className="p-3.5 border-b border-border-subtle bg-bg-base shrink-0 flex items-center justify-between">
           <div>
@@ -162,7 +224,6 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          {/* Outline Sections */}
           <div>
             <div className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-2 px-1">
               Document Outline ({sections.length})
@@ -190,7 +251,6 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
             </div>
           </div>
 
-          {/* Extracted Code Artifacts */}
           {artifacts.length > 0 && (
             <div className="pt-2 border-t border-border-subtle">
               <div className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-2 px-1 flex items-center justify-between">
@@ -234,7 +294,6 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
         </div>
       </aside>
 
-      {/* Main Rendered Plan Reading Stage */}
       <main 
         ref={scrollContainerRef}
         onScroll={handleScroll}
@@ -303,7 +362,6 @@ export function FullPlanViewer({ rawMarkdown }: FullPlanViewerProps) {
         </div>
       </main>
 
-      {/* Popout / Side Artifact Viewer */}
       {activeArtifact && (
         <div className="w-1/2 h-full bg-bg-panel border-l border-border-subtle flex flex-col shadow-2xl animate-in slide-in-from-right-4 duration-200 z-20">
           <div className="h-11 px-4 bg-bg-base border-b border-border-subtle flex items-center justify-between shrink-0">

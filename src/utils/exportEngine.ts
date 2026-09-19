@@ -14,26 +14,48 @@ import { ScopedRuleIndex, toScopedPathKey, normalizePath } from './filterEngine'
 export const CODE_GENERATION_PROTOCOL_INSTRUCTION = `
 ### System Instruction: Structured Batch Code Generation Protocol
 
-When generating code replacements, diffs, or new files, you MUST adhere to the deterministic extraction contract:
-1. **Zero Interstitial Chatter:** Once the first code block begins, emit NO conversational text or commentary between code blocks. Each code block must immediately follow the previous.
-2. **Deterministic Line 1 Action Header:** The first line inside EVERY code block must declare the target action tag followed by the relative path using standard language comment syntax:
+When generating code replacements, diffs, documentation, or new files, you MUST adhere to the deterministic extraction contract:
+
+1. **Explicit File Boundary Tokens (MANDATORY):**
+   Every individual file action MUST be bounded by unambiguous opening and closing tokens on their own standalone lines:
+   - Opening Token: \`<<<FILE_START: [ACTION] path/to/file.ext>>>\`
+   - Closing Token: \`<<<FILE_END>>>\` (or \`<<<FILE_END: path/to/file.ext>>>\`)
    - Valid Action Tags: \`[NEW]\`, \`[MODIFIED]\`, \`[DELETED]\`, or \`[PARTIAL_DIFF]\`
+   *Examples:*
+     \`<<<FILE_START: [MODIFIED] docs/architecture.md>>>\`
+     \`\`\`markdown
+     <!-- [MODIFIED] docs/architecture.md -->
+     # Architecture
+     ...
+     \`\`\`
+     \`<<<FILE_END>>>\`
+
+     \`<<<FILE_START: [DELETED] public/obsolete.html>>>\`
+     \`<<<FILE_END>>>\`
+
+2. **Complex Markdown Documentation & Internal Code Blocks Rule:**
+   When outputting Markdown documents (\`.md\`, \`.mdx\`, etc.) that contain internal code blocks (with or without language specifiers):
+   - The file MUST be wrapped in \`<<<FILE_START: [ACTION] path/to/file.md>>>\` and \`<<<FILE_END>>>\`.
+   - If using code fences to enclose the file, you MUST use at least 4 backticks (\`\`\`\`markdown ... \`\`\`\`) for the outer wrapper so that internal 3-backtick code blocks (\`\`\`ts, \`\`\`bash, or unadorned \`\`\`) do not break syntax highlighting or parsing.
+   - All internal code blocks inside the markdown document will be safely and completely captured without truncation.
+
+3. **Deterministic Line 1 Action Header:**
+   The first line inside EVERY code block should also declare the target action tag followed by the relative path using standard language comment syntax:
    - C-Style/TS/JS/Go/Rust: \`// [ACTION] path/to/file.ext\`
    - Python/Bash/YAML: \`# [ACTION] path/to/file.ext\`
    - SQL/Lua: \`-- [ACTION] path/to/file.ext\`
    - Markdown/HTML: \`<!-- [ACTION] path/to/file.ext -->\`
-   *Concrete Examples:*
-     - \`// [MODIFIED] src/utils/exportEngine.ts\`
-     - \`# [NEW] scripts/worker.py\`
-     - \`<!-- [DELETED] public/legacy.html -->\`
-     - \`// [PARTIAL_DIFF] src/features/session/engine/sessionParser.ts\`
-3. **Action Taxonomy & Scope Selection (\`[MODIFIED]\` vs \`[PARTIAL_DIFF]\`):**
+
+4. **Zero Interstitial Chatter:**
+   Once file generation begins, emit NO conversational filler or meta-commentary between files. Each file block must immediately follow the previous. Explanations should be provided in the Pre-Code Summary or Epilogue.
+
+5. **Action Taxonomy & Scope Selection (\`[MODIFIED]\` vs \`[PARTIAL_DIFF]\`):**
    - **\`[MODIFIED]\` (Full File Output):** Use for new files, small files under ~300 lines, or files where the majority of lines are being refactored. Provide the complete, unabridged file content.
-   - **\`[PARTIAL_DIFF]\` (Targeted Slices):** REQUIRED when modifying large files where large sections (>50 lines) remain unchanged. Do NOT emit thousands of lines of untouched code. Instead, use \`[PARTIAL_DIFF]\`, provide natural structural anchors (class/function headers and boundary lines), and replace unchanged regions with the standardized skip taxonomy. This keeps output fast, token-efficient, and under 1,000 lines instead of 5,000+ lines.
-   - **\`[NEW]\`:** For brand new files. Provide complete file content.
-   - **\`[DELETED]\`:** For files to be deleted from disk.
-4. **Natural Structural Anchors:** When providing partial modifications, include enclosing class/function headers and boundary lines rather than synthetic comments.
-5. **Standardized Skip Taxonomy:** Preserve unchanged regions using:
+   - **\`[PARTIAL_DIFF]\` (Targeted Slices):** REQUIRED when modifying large files where large sections (>50 lines) remain unchanged. Do NOT emit thousands of lines of untouched code. Use \`[PARTIAL_DIFF]\`, provide natural structural anchors, and replace unchanged regions with the standardized skip taxonomy.
+   - **\`[NEW]\`:** For brand new files.
+   - **\`[DELETED]\`:** For files to be deleted from disk (content can be empty between boundary tokens).
+
+6. **Standardized Skip Taxonomy:** Preserve unchanged regions using:
    \`// ... [Skipped: Unchanged logic] ...\`
 `;
 

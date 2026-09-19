@@ -99,11 +99,11 @@
 - **Line 1 Action Prefix Pruning Rule:**
   - `stripProtocolScaffolding` must strip ONLY the action tag prefix (`[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)]\s*`) from the first non-empty comment line.
   - The commented relative path (`// path/to/file.ext`, `# path/to/file.ext`, `<!-- path/to/file.ext -->`, `-- path/to/file.ext`) MUST be preserved for developer clarity and downstream model context.
-- **Nested Code Fence Depth Invariant:** When `inCodeBlock === true` with outer fence length $N$:
-  - A closing fence MUST have length $\ge N$ with zero trailing info string characters.
-  - Any candidate fence with length $< N$ (such as inner 3-backtick blocks ` ```bash ` inside 4-backtick markdown) MUST be treated strictly as code content.
-  - For target `.md` / `.mdx` files wrapped inside standard 3-backtick fences, track `innerFenceDepth` state to prevent inner code blocks from prematurely closing the outer file block.
-- **Unclosed Code Fence Boundary Auto-Recovery:** If a new primary markdown header or a new opening fence with an explicit info string of length $\ge N$ is encountered while `inCodeBlock === true`, the parser must auto-close the previous block with an informational warning and immediately begin the subsequent section.
+- **Explicit File Boundary Tokens (`<<<FILE_START>>>` and `<<<FILE_END>>>`):**
+  - Complex markdown documentation containing internal code blocks (with or without languages) must be bounded by top-level boundary tokens.
+  - `<<<FILE_START: [ACTION] path/to/file.ext>>>` ... `<<<FILE_END>>>` eliminates ambiguity over whether internal ``` fences close the file.
+  - Slicing helper `stripOuterCodeFence` removes matching outer code fences without altering internal code block integrity.
+- **Unclosed Code Fence Boundary Auto-Recovery:** If a new primary markdown header or a new opening boundary token is encountered while a block is open, the parser must auto-close the previous block with an informational warning and immediately begin the subsequent section.
 - **Skip Block Transparency Directive:** Xcerpt strictly prohibits synthesizing artificial code to hide skip blocks. If the model emits `// ... [Skipped: N lines] ...`, the skip marker is rendered directly in the diff stream with an amber decoration badge.
 - **Extension-Preserving Deduplication:** If an LLM restates a file in multiple parts without closing tags, subsequent occurrences append `.PartN` before the file extension (e.g. `src/App.Part2.tsx`), preserving syntax highlighting and language server features.
 
@@ -130,3 +130,4 @@
   - Outbound manifest instructions must explicitly guide models on output volume.
   - `[MODIFIED]` is designated for small files (<300 lines) or comprehensive architectural rewrites.
   - `[PARTIAL_DIFF]` with natural structural anchors and standardized skip comments (`// ... [Skipped: Unchanged logic] ...`) is strictly required for large files with localized changes, preventing token exhaustion and 5,000+ line outputs.
+- **Explicit Boundary Tokens Requirement:** Manifests instruct models to bound all files with `<<<FILE_START: [ACTION] path>>>` and `<<<FILE_END>>>` to ensure large markdown documentation containing internal code blocks (with or without language tags) can be extracted without syntax truncation.

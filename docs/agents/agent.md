@@ -1,3 +1,5 @@
+<!-- docs/agents/agent.md -->
+
 # [MASTER PROTOCOL] Hybrid Agentic Workflow
 
 ## 1. Roles & Collaboration Model
@@ -24,26 +26,38 @@ The User utilizes custom batch extraction tooling that parses Work Packets and f
   2. A concise markdown list of all target files and the specific structural changes (classes, functions, types, or sections added, modified, or removed).
 - **Strict Prohibition on Interstitial Chatter:** Once the code blocks for a Work Packet begin, there must be **zero** conversational text, meta-commentary, or file introductions between code blocks. You move directly from one code fence to the next until the packet is complete.
 
-### B. Line 1 Relative Path Requirement
+### B. Explicit File Boundary Tokens (MANDATORY)
 
-- The first line inside every code block must be the commented relative path to the file.
-  - C / C++ / C# / Java / JS / TS: `// path/to/file.ext`
-  - Python / Shell / Ruby / YAML: `# path/to/file.ext`
-  - HTML / XML / Markdown: `<!-- path/to/file.ext -->` or `// path/to/file.ext`
+- Every individual file action MUST be bounded by unambiguous opening and closing tokens on their own standalone lines:
+  - Opening Token: `<<<FILE_START: [ACTION] path/to/file.ext>>>`
+  - Closing Token: `<<<FILE_END>>>` (or `<<<FILE_END: path/to/file.ext>>>`)
+  - Valid Action Tags: `[NEW]`, `[MODIFIED]`, `[DELETED]`, or `[PARTIAL_DIFF]`
+- The first line inside every code block must also declare the target action tag followed by the relative path using standard language comment syntax:
+  - C / C++ / C# / Java / JS / TS: `// [ACTION] path/to/file.ext`
+  - Python / Shell / Ruby / YAML: `# [ACTION] path/to/file.ext`
+  - HTML / XML / Markdown: `<!-- [ACTION] path/to/file.ext -->`
+  - SQL / Lua: `-- [ACTION] path/to/file.ext`
 
-### C. Zero Instructional Comments Inside Code
+### C. Complex Markdown Documentation & Nested Code Blocks
+
+- When generating Markdown documentation (`.md`, `.mdx`) that includes internal code blocks (with or without languages like `bash, `json, or unadorned ```):
+  - Enclose the entire file within `<<<FILE_START: [ACTION] path/to/file.md>>>` and `<<<FILE_END>>>`.
+  - If code fences are used around the markdown file, use at least 4 backticks (`markdown ... `) for the outer wrapper so internal 3-backtick blocks do not break syntax fences.
+  - The boundary tokens guarantee that all internal code snippets are safely and completely captured without premature file truncation.
+
+### D. Zero Instructional Comments Inside Code
 
 - **Never** inject synthetic instructional comments inside code blocks (e.g., do NOT write `// Location: In class A under public:` or `// Delete this line before running`). Code blocks must contain only valid, functional code or permanent architectural comments.
 - All code blocks must be directly pasteable/compilable into the project without forcing the User to manually strip out AI instruction notes.
 
-### D. Natural Structural Anchors for Partial Edits
+### E. Natural Structural Anchors for Partial Edits
 
 - When outputting additions or splices to existing source or header files without outputting the full file, you must anchor the placement using **natural surrounding code syntax**:
   - In header/type definitions: include the enclosing type/class line, active visibility/scope specifiers, and 2–3 lines of existing preceding members.
   - In implementation/source files: include the preceding function signature, enclosing block braces, or neighboring unique lines.
 - This natural context allows both diff merge tools and human reviewers to align insertions unambiguously without synthetic comment tags.
 
-### E. Full Files vs. Large-Block Skip Taxonomy
+### F. Full Files vs. Large-Block Skip Taxonomy
 
 - **Full File Output:** Preferred for new files, files under ~300 lines, or files undergoing substantial refactoring. This guarantees zero line drift and preserves code integrity.
 - **Large-Block Skips:** When skipping large sections of untouched code in large files, use clean structural skip comments that do not disrupt surrounding indentation:
@@ -54,7 +68,7 @@ The User utilizes custom batch extraction tooling that parses Work Packets and f
 
 - Do not micro-skip every few lines. If a function or component is modified, output that entire function or component. Skip across large functional boundaries.
 
-### F. The Precision Ghost Rule (Removals and Replacements)
+### G. The Precision Ghost Rule (Removals and Replacements)
 
 - When code is removed or replaced, avoid dumping large bodies of commented-out dead code.
 - **Small Removals / Replacements:** If removing a few lines where adjacent syntax is ambiguous (e.g., consecutive closing braces or generic return statements), retain the removed lines commented out with their original syntax as an alignment aid.
@@ -64,7 +78,7 @@ The User utilizes custom batch extraction tooling that parses Work Packets and f
 // [Removed: Obsolete polling service implementation]
 ```
 
-### G. Zero Noise Policy
+### H. Zero Noise Policy
 
 - No conversational filler, pleasantries, or meta-commentary inside or around the code blocks. Output only the requested Work Packet header, Pre-Code Summary, and clean code blocks.
 
@@ -85,7 +99,7 @@ When the User provides a `[SESSION GOAL]`:
 Once greenlit:
 
 - Work through the declared Work Packets sequentially.
-- For each packet: output the packet header, provide the Pre-Code Summary, and immediately output the code blocks back-to-back with line 1 commented paths and zero interstitial chatter.
+- For each packet: output the packet header, provide the Pre-Code Summary, and immediately output the code blocks back-to-back with boundary tokens, line 1 commented paths, and zero interstitial chatter.
 - Consolidate all changes for a single file into one comprehensive code block per turn.
 
 ### Phase 3: Teardown (Triggered by "[END SESSION]")

@@ -9,11 +9,72 @@ import type {
   SectionKind
 } from '../types/session';
 
-const PROTOCOL_TAG_REGEX = /^\s*(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*(.*)$/i;
+export const PROTOCOL_TAG_REGEX = /^\s*(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*(.*)$/i;
+
+export const FILE_START_TOKEN_REGEX = /^\s*(?:<<<|<!--\s*<<<|\[)\s*(?:FILE_START|START_FILE)[:\s]+(?:\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*)?["'`]?([^"'`>\]\n]+?)["'`]?(?:\s+\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\])?\s*(?:>>>|>>>\s*-->|\])\s*$/i;
+
+export const FILE_END_TOKEN_REGEX = /^\s*(?:<<<|<!--\s*<<<|\[)\s*(?:FILE_END|END_FILE)(?:[:\s]+[^\s>\]\n]+)?\s*(?:>>>|>>>\s*-->|\])\s*$/i;
+
+export function cleanRelativePath(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/\\/g, '/')
+    .replace(/\s*-->.*$/, '')
+    .replace(/-->$/, '')
+    .replace(/^["'`]|["'`]$/g, '')
+    .replace(/^[./\\]+/, '')
+    .replace(/^\/+/, '')
+    .trim();
+}
+
+export function stripOuterCodeFence(lines: string[]): { lines: string[]; detectedFenceInfo: string } {
+  if (!lines || lines.length === 0) return { lines: [], detectedFenceInfo: '' };
+
+  const firstNonEmptyIdx = lines.findIndex(l => l.trim().length > 0);
+  if (firstNonEmptyIdx === -1) return { lines, detectedFenceInfo: '' };
+
+  const firstLine = lines[firstNonEmptyIdx].trim();
+  const openFenceMatch = firstLine.match(/^([`~]{3,})(.*)$/);
+
+  if (!openFenceMatch) {
+    return { lines, detectedFenceInfo: '' };
+  }
+
+  const fenceChar = openFenceMatch[1][0];
+  const fenceLen = openFenceMatch[1].length;
+  const detectedFenceInfo = openFenceMatch[2].trim();
+
+  let lastNonEmptyIdx = -1;
+  for (let i = lines.length - 1; i > firstNonEmptyIdx; i--) {
+    if (lines[i].trim().length > 0) {
+      lastNonEmptyIdx = i;
+      break;
+    }
+  }
+
+  if (lastNonEmptyIdx !== -1) {
+    const lastLine = lines[lastNonEmptyIdx].trim();
+    const closeFenceMatch = lastLine.match(/^([`~]{3,})$/);
+    if (closeFenceMatch && closeFenceMatch[1][0] === fenceChar && closeFenceMatch[1].length >= fenceLen) {
+      const sliced = lines.slice(firstNonEmptyIdx + 1, lastNonEmptyIdx);
+      return { lines: sliced, detectedFenceInfo };
+    }
+  }
+
+  if (detectedFenceInfo.length > 0) {
+    const sliced = lines.slice(firstNonEmptyIdx + 1);
+    return { lines: sliced, detectedFenceInfo };
+  }
+
+  return { lines, detectedFenceInfo: '' };
+}
 
 export function stripProtocolScaffolding(rawCode: string, targetPath?: string): string {
-  const lines = rawCode.split('\n');
+  let lines = rawCode.split('\n');
   if (lines.length === 0) return rawCode;
+
+  lines = lines.filter(l => !FILE_START_TOKEN_REGEX.test(l) && !FILE_END_TOKEN_REGEX.test(l));
+  if (lines.length === 0) return '';
 
   const firstNonEmptyIndex = lines.findIndex(l => l.trim().length > 0);
   if (firstNonEmptyIndex === -1) return rawCode;
@@ -54,22 +115,23 @@ export function extractActionAndPath(
 
   const line = firstLine.trim();
 
-  // 1. Explicit Protocol Action Tag matching (preserves hyphens and path characters)
-  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s]+)/i);
-  if (protocolMatch) {
-    actionType = protocolMatch[1].toUpperCase() as FileActionType;
-    let rawPath = protocolMatch[2];
-    rawPath = rawPath
-      .replace(/\s*-->.*$/, '')
-      .replace(/-->$/, '')
-      .replace(/^["'`]|["'`]$/g, '')
-      .replace(/^[./\\]+/, '')
-      .trim();
-    targetPath = rawPath;
+  const tokenMatch = line.match(FILE_START_TOKEN_REGEX);
+  if (tokenMatch) {
+    const rawAction = tokenMatch[1] || tokenMatch[3];
+    if (rawAction) {
+      actionType = rawAction.toUpperCase() as FileActionType;
+    }
+    targetPath = cleanRelativePath(tokenMatch[2]);
     return { actionType, targetPath };
   }
 
-  // 2. Comment-based path detection fallback
+  const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s]+)/i);
+  if (protocolMatch) {
+    actionType = protocolMatch[1].toUpperCase() as FileActionType;
+    targetPath = cleanRelativePath(protocolMatch[2]);
+    return { actionType, targetPath };
+  }
+
   const commentClean = line
     .replace(/^(\/\/|#|<!--|--)\s*/, '')
     .replace(/\s*(-->)$/, '')
@@ -82,15 +144,11 @@ export function extractActionAndPath(
     targetPath = pathCandidateMatch[1].trim();
   }
 
-  // 3. Fence Info String path detection fallback (e.g. ```typescript:path/to/file.ts)
   if (!targetPath && fenceInfo) {
     const infoClean = fenceInfo.replace(/^```+/, '').trim();
     const infoColon = infoClean.split(/[:\s]/);
     if (infoColon.length > 1 && infoColon[1].includes('.')) {
-      targetPath = infoColon[1]
-        .replace(/^["'`]|["'`]$/g, '')
-        .replace(/^[./\\]+/, '')
-        .trim();
+      targetPath = cleanRelativePath(infoColon[1]);
     }
   }
 
@@ -154,6 +212,24 @@ export function inferSessionDescription(
   return 'LLM Batch Work Packet Integration';
 }
 
+function isInnerUnadornedFence(lines: string[], currentIdx: number): boolean {
+  for (let j = currentIdx + 1; j < lines.length; j++) {
+    const l = lines[j];
+    if (
+      l.trim().startsWith('# [WORK PACKET]') ||
+      l.trim().startsWith('### Pre-Code Summary') ||
+      FILE_START_TOKEN_REGEX.test(l)
+    ) {
+      return false;
+    }
+    const fMatch = l.match(/^([`~]{3,})(.*)$/);
+    if (fMatch) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function parseSessionMarkdown(
   rawMarkdown: string,
   workspaceId: string,
@@ -171,6 +247,12 @@ export function parseSessionMarkdown(
   let currentSectionLevel = 2;
   let currentSectionLines: string[] = [];
   let currentSectionKind: SectionKind = 'preamble';
+
+  let inTokenBlock = false;
+  let tokenAction: FileActionType | null = null;
+  let tokenPath: string | null = null;
+  let tokenBuffer: string[] = [];
+  let tokenStartLineIdx = 0;
 
   let inCodeBlock = false;
   let codeFenceChar = '';
@@ -210,18 +292,16 @@ export function parseSessionMarkdown(
     fenceInfo: string, 
     startLine: number, 
     endLine: number, 
-    warning?: string
+    warning?: string,
+    explicitAction?: FileActionType | null,
+    explicitPath?: string | null
   ) => {
     const rawPayloadContent = rawLines.join('\n');
     const firstNonEmpty = rawLines.find(l => l.trim().length > 0) || '';
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
 
-    let targetRelativePath = extractedPath || `unnamed_snippet_${actions.length + 1}.txt`;
-    targetRelativePath = targetRelativePath
-      .replace(/\\/g, '/')
-      .replace(/^["'`]|["'`]$/g, '')
-      .replace(/^[./\\]+/, '')
-      .replace(/^\/+/, '');
+    let targetRelativePath = explicitPath || extractedPath || `unnamed_snippet_${actions.length + 1}.txt`;
+    targetRelativePath = cleanRelativePath(targetRelativePath);
 
     pathCounts[targetRelativePath] = (pathCounts[targetRelativePath] || 0) + 1;
     if (pathCounts[targetRelativePath] > 1) {
@@ -239,12 +319,10 @@ export function parseSessionMarkdown(
     let matchedOriginalContent: string | null = null;
     let resolvedRelPath = targetRelativePath;
 
-    // Multi-Root Content Matcher: First scan for roots with verified non-null content on disk
     for (const root of rootPaths) {
       const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
       const rootBase = cleanRoot.split('/').pop() || '';
 
-      // Direct relative path
       const keyDirect = `${cleanRoot}/${targetRelativePath}`.replace(/\\/g, '/');
       if (existingFilesMap[keyDirect] !== undefined && existingFilesMap[keyDirect] !== null) {
         targetRoot = root;
@@ -253,7 +331,6 @@ export function parseSessionMarkdown(
         break;
       }
 
-      // Root folder name prepended by LLM (e.g. 'xcerpt-app/scripts/run-diagnostics.mjs')
       if (rootBase && targetRelativePath.startsWith(`${rootBase}/`)) {
         const strippedRel = targetRelativePath.slice(rootBase.length + 1);
         const keyStripped = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
@@ -266,7 +343,6 @@ export function parseSessionMarkdown(
       }
     }
 
-    // Fallback: If no non-null content found, locate first root where key was evaluated
     if (matchedOriginalContent === null) {
       for (const root of rootPaths) {
         const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -293,16 +369,16 @@ export function parseSessionMarkdown(
     targetRelativePath = resolvedRelPath;
     const originalContent = matchedOriginalContent;
 
-    let actionType: FileActionType = extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
-    if (firstNonEmpty.includes('[DELETED]')) {
+    let actionType: FileActionType = explicitAction || extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
+    if (firstNonEmpty.includes('[DELETED]') || explicitAction === 'DELETED') {
       actionType = 'DELETED';
-    } else if (firstNonEmpty.includes('[PARTIAL_DIFF]')) {
+    } else if (firstNonEmpty.includes('[PARTIAL_DIFF]') || explicitAction === 'PARTIAL_DIFF') {
       actionType = 'PARTIAL_DIFF';
     }
 
     const warnings: string[] = [];
     if (warning) warnings.push(warning);
-    if (!extractedAction) {
+    if (!explicitAction && !extractedAction) {
       warnings.push(`Action tag omitted in response; inferred as [${actionType}].`);
     }
 
@@ -349,7 +425,98 @@ export function parseSessionMarkdown(
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const startTokenMatch = line.match(FILE_START_TOKEN_REGEX);
+    const endTokenMatch = line.match(FILE_END_TOKEN_REGEX);
     const fenceMatch = line.match(/^([`~]{3,})(.*)$/);
+
+    if (inTokenBlock) {
+      if (endTokenMatch) {
+        inTokenBlock = false;
+        const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+        processCompletedCodeBlock(
+          contentLines,
+          detectedFenceInfo,
+          tokenStartLineIdx,
+          i,
+          undefined,
+          tokenAction,
+          tokenPath
+        );
+        tokenBuffer = [];
+        tokenAction = null;
+        tokenPath = null;
+        continue;
+      }
+
+      if (startTokenMatch) {
+        const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+        processCompletedCodeBlock(
+          contentLines,
+          detectedFenceInfo,
+          tokenStartLineIdx,
+          i - 1,
+          'Auto-closed unterminated file boundary at new FILE_START token.',
+          tokenAction,
+          tokenPath
+        );
+
+        tokenAction = (startTokenMatch[1] || startTokenMatch[3] || null) as FileActionType | null;
+        tokenPath = cleanRelativePath(startTokenMatch[2]);
+        tokenStartLineIdx = i;
+        tokenBuffer = [];
+        continue;
+      }
+
+      const isHeaderBoundary = Boolean(
+        line.trim().startsWith('# [WORK PACKET]') || 
+        line.trim().startsWith('### Pre-Code Summary') || 
+        /^\s*#+\s+\[WORK PACKET/i.test(line)
+      );
+
+      if (isHeaderBoundary) {
+        inTokenBlock = false;
+        const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+        processCompletedCodeBlock(
+          contentLines,
+          detectedFenceInfo,
+          tokenStartLineIdx,
+          i - 1,
+          'Auto-closed unterminated file boundary at primary header boundary.',
+          tokenAction,
+          tokenPath
+        );
+        tokenBuffer = [];
+        tokenAction = null;
+        tokenPath = null;
+
+        const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+        currentSectionLevel = headerMatch ? headerMatch[1].length : 2;
+        currentSectionTitle = headerMatch ? headerMatch[2].trim() : 'Pre-Code Summary';
+        currentSectionKind = actions.length === 0 ? 'preamble' : 'interstitial';
+        continue;
+      }
+
+      tokenBuffer.push(line);
+      continue;
+    }
+
+    if (startTokenMatch) {
+      if (inCodeBlock && codeBuffer.length > 0) {
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i - 1, 'Auto-closed unclosed code fence at FILE_START token.');
+        inCodeBlock = false;
+        codeBuffer = [];
+      }
+      inTokenBlock = true;
+      tokenAction = (startTokenMatch[1] || startTokenMatch[3] || null) as FileActionType | null;
+      tokenPath = cleanRelativePath(startTokenMatch[2]);
+      tokenStartLineIdx = i;
+      tokenBuffer = [];
+      continue;
+    }
+
+    if (endTokenMatch) {
+      continue;
+    }
 
     if (!inCodeBlock) {
       if (fenceMatch) {
@@ -380,14 +547,20 @@ export function parseSessionMarkdown(
 
       if (isTargetMarkdown && codeFenceLength === 3 && fenceMatch && fenceMatch[1].length === 3) {
         const hasInfo = fenceMatch[2].trim().length > 0;
-        if (hasInfo && innerFenceDepth === 0) {
-          innerFenceDepth = 1;
+        if (hasInfo) {
+          innerFenceDepth++;
           codeBuffer.push(line);
           continue;
         } else if (!hasInfo && innerFenceDepth > 0) {
-          innerFenceDepth = 0;
+          innerFenceDepth--;
           codeBuffer.push(line);
           continue;
+        } else if (!hasInfo && innerFenceDepth === 0) {
+          if (isInnerUnadornedFence(lines, i)) {
+            innerFenceDepth = 1;
+            codeBuffer.push(line);
+            continue;
+          }
         }
       }
 
@@ -441,7 +614,18 @@ export function parseSessionMarkdown(
     }
   }
 
-  if (inCodeBlock && codeBuffer.length > 0) {
+  if (inTokenBlock && tokenBuffer.length > 0) {
+    const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+    processCompletedCodeBlock(
+      contentLines,
+      detectedFenceInfo,
+      tokenStartLineIdx,
+      lines.length - 1,
+      'Auto-closed unterminated file boundary at End of Output.',
+      tokenAction,
+      tokenPath
+    );
+  } else if (inCodeBlock && codeBuffer.length > 0) {
     processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, lines.length - 1, 'Auto-closed unterminated code fence at End of Output.');
   }
 

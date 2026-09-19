@@ -6,7 +6,51 @@
 
 ---
 
-## 1. Process Model & Threading Architecture
+## 1. Inbound Dev Session & Boundary Token Engine (`sessionParser.ts`)
+
+`````
+               Incoming LLM Response Stream / Clipboard
+                                   │
+                                   ▼
+                       parseSessionMarkdown()
+                                   │
+         ┌─────────────────────────┴─────────────────────────┐
+         ▼                                                   ▼
+  [Boundary Token Match]                             [Legacy Code Fence]
+  <<<FILE_START: [ACTION] path>>>                    ```markdown / ```typescript
+         │                                                   │
+  Extract Explicit Action & Path                      Check outer fence length N
+         │                                                   │
+  Collect lines until <<<FILE_END>>>                  If N == 3 & markdown:
+         │                                            - Inner with info -> depth++
+  stripOuterCodeFence()                               - Inner unadorned -> lookahead
+  - Strip outer ```` / ``` wrapper                    - Depth == 0 & EOF -> close
+  - Keep internal ``` blocks intact                          │
+         │                                                   ▼
+         └─────────────────────────┬─────────────────────────┘
+                                   ▼
+                       processCompletedCodeBlock()
+                       - Query physical disk across all roots
+                       - Strip line 1 action comment prefix
+                       - Detect skip blocks and no-op files
+                       - Yield ParsedFileAction with reviewStatus
+`````
+
+### 1.1. Explicit File Boundary Tokens
+
+To guarantee consistent parsing of complex markdown documents containing internal code blocks (with or without language tags):
+
+1. The parser defines:
+   - `FILE_START_TOKEN_REGEX = /^\s*(?:<<<|<!--\s*<<<|\[)\s*(?:FILE_START|START_FILE)[:\s]+(?:\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*)?["'`]?([^"'`>\]\n]+?)["'`]?(?:\s+\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\])?\s*(?:>>>|>>>\s*-->|\])\s\*$/i`
+   - `FILE_END_TOKEN_REGEX = /^\s*(?:<<<|<!--\s*<<<|\[)\s*(?:FILE_END|END_FILE)(?:[:\s]+[^\s>\]\n]+)?\s*(?:>>>|>>>\s*-->|\])\s*$/i`
+2. All lines between `FILE_START` and `FILE_END` belong strictly to that file.
+3. `stripOuterCodeFence` strips matching outer fences (e.g. `markdown ... `) while retaining all internal code blocks verbatim.
+
+### 1.2. Legacy 3-Backtick Forward Lookahead
+
+When responses omit boundary tokens, `isInnerUnadornedFence` performs forward scanning across subsequent lines. If another fence appears before the next section header or EOF, the unadorned fence is treated as an inner code block, preventing premature file truncation.
+
+## 2. Process Model & Threading Architecture
 
 Xcerpt adheres to a multi-process Electron architecture that strictly separates OS-level file manipulation from UI rendering via a secure Context Bridge.
 
@@ -46,7 +90,7 @@ Xcerpt adheres to a multi-process Electron architecture that strictly separates 
 +------------------------------------------------------------------------------------------------+
 ```
 
-### 1.1. Main Process Responsibilities (`main.cjs`)
+### 2.1. Main Process Responsibilities (`main.cjs`)
 
 1. **Thread Pool Optimization:** Upon bootstrapping, `UV_THREADPOOL_SIZE` is expanded:
    ```javascript
@@ -60,7 +104,7 @@ Xcerpt adheres to a multi-process Electron architecture that strictly separates 
 3. **Synchronous Export Operations:** Disk payload writes are intentionally handled using `fsSync` (`fsSync.writeFileSync`, `fsSync.mkdirSync`). In desktop environments, blocking the main thread for 10–25ms to generate temporary payloads is preferable to allowing thousands of async microtasks to compete with real-time UI rendering.
 4. **Temporary Directory Lifecycle:** Payloads are written to unique timestamped directories in `os.tmpdir()` (`xcerpt_export_<timestamp>_<rand>` and `xcerpt_ephemeral_<timestamp>_<rand>`). A background garbage collector runs on startup to remove directories older than one hour.
 
-### 1.2. The Context Bridge Interface (`preload.cjs`)
+### 2.2. The Context Bridge Interface (`preload.cjs`)
 
 Communication between Chromium and Node.js is strictly typed and governed by `contextBridge.exposeInMainWorld('api', { ... })`:
 
@@ -73,7 +117,7 @@ Communication between Chromium and Node.js is strictly typed and governed by `co
 
 ---
 
-## 2. State Topology & Store Architecture
+## 3. State Topology & Store Architecture
 
 Xcerpt implements a **Dual-Store Architecture** paired with a **Command-Pattern History Store**.
 
@@ -113,7 +157,7 @@ Xcerpt implements a **Dual-Store Architecture** paired with a **Command-Pattern 
                            +-------------------------------------+
 ```
 
-### 2.1. The AppStore (`src/store/appStore.ts`)
+### 3.1. The AppStore (`src/store/appStore.ts`)
 
 The `AppStore` manages state that persists across workspace switches:
 
@@ -122,7 +166,7 @@ The `AppStore` manages state that persists across workspace switches:
 - **`activeWorkspaceId: string | null`:** Currently loaded workspace identifier.
 - **`workspaceSnapshots: Record<string, Record<string, Preset>>`:** Session snapshots preserved across workspace tab switches, allowing users to revert changes made to any preset.
 
-### 2.2. The WorkspaceStore (`src/store/workspaceStore.ts`)
+### 3.2. The WorkspaceStore (`src/store/workspaceStore.ts`)
 
 Xcerpt utilizes a **Single Re-hydrating Store** pattern for workspaces. Instead of instantiating multiple workspace stores in memory, a single store instance manages the active workspace.
 
@@ -134,7 +178,7 @@ Xcerpt utilizes a **Single Re-hydrating Store** pattern for workspaces. Instead 
 2. **The Flat-State Sync Pattern:**
    Nested configurations inside `Preset` objects (inclusions, exclusions, tree-only rules, and skip compressions) are unpacked into top-level store properties (`includes`, `excludes`, `treeOnly`, `compressions`). This prevents deep selector evaluation from triggering re-renders in virtualized components. Before saving or switching contexts, `getPackedPresets()` reassembles these flat arrays into the preset array.
 
-### 2.3. The HistoryStore (`src/store/historyStore.ts`)
+### 3.3. The HistoryStore (`src/store/historyStore.ts`)
 
 Xcerpt relies on a zero-snapshot, command-driven undo/redo engine:
 
@@ -160,7 +204,7 @@ Xcerpt relies on a zero-snapshot, command-driven undo/redo engine:
 
 ---
 
-## 3. Tree Virtualization & Selection Architecture
+## 4. Tree Virtualization & Selection Architecture
 
 To render repositories with tens of thousands of files at 60fps, Xcerpt pairs `@tanstack/react-virtual` with a custom 1D projection engine.
 
@@ -190,7 +234,7 @@ To render repositories with tens of thousands of files at 60fps, Xcerpt pairs `@
        - Anti-stale flatNodesRef index resolution
 ```
 
-### 3.1. Hierarchical Flattening (`useFlattenedTree.ts`)
+### 4.1. Hierarchical Flattening (`useFlattenedTree.ts`)
 
 Rendering deep recursive DOM nodes degrades performance exponentially. `useFlattenedTree` transforms the nested `FileNode` structure into a linear array (`FlatNode[]`):
 
@@ -198,7 +242,7 @@ Rendering deep recursive DOM nodes degrades performance exponentially. `useFlatt
 2. **Early Branch Pruning:** If a folder is collapsed or hidden by visibility toggles ("Hide Excluded" / "Hide Tree-Only"), its entire sub-tree is excluded from the flattened array.
 3. **Fuzzy Search Integration:** When a search query is active, non-matching branches are mathematically excluded unless they contain matching descendants.
 
-### 3.2. 1D Mathematical Marquee System (`FileTree.tsx`)
+### 4.2. 1D Mathematical Marquee System (`FileTree.tsx`)
 
 DOM-based drag selection (`onMouseEnter` on individual rows) drops frames during rapid cursor sweeps. Xcerpt replaces DOM listeners with a mathematical 1D projection system:
 
@@ -212,7 +256,7 @@ DOM-based drag selection (`onMouseEnter` on individual rows) drops frames during
 
 ---
 
-## 4. Monaco Code Compression Engine (`ContextEditor.tsx`)
+## 5. Monaco Code Compression Engine (`ContextEditor.tsx`)
 
 Xcerpt embeds `@monaco-editor/react` to provide surgical code compression.
 
@@ -256,7 +300,7 @@ interface CompressionRule {
 }
 ```
 
-### 4.2. Drift Reconciliation Algorithm
+### 5.2. Drift Reconciliation Algorithm
 
 When source files are modified outside Xcerpt, stored line coordinates can shift:
 
@@ -278,14 +322,14 @@ When source files are modified outside Xcerpt, stored line coordinates can shift
    ```
 4. If found, coordinates update automatically (`startLine + foundOffset`, `endLine + foundOffset`), realigning skips before rendering.
 
-### 4.3. Multi-Cursor Range Consolidation
+### 5.3. Multi-Cursor Range Consolidation
 
 When a user defines skips with multiple selections active, ranges may overlap or touch:
 
 - New selections are merged with existing skips and sorted by `startLine`.
 - Contiguous and overlapping blocks ($\text{curr.startLine} \le \text{last.endLine} + 1$) are consolidated into a single skip block, preventing corrupted visual markers.
 
-### 4.4. Deferred Draft State (Anti-Thrashing)
+### 5.4. Deferred Draft State (Anti-Thrashing)
 
 Mutating skip blocks directly within the global store would cause the auto-build pipeline to trigger continuous background payload rebuilds. `ContextEditor` maintains an internal `draftCompressions` state. The `isDirty` state is derived purely during the render pass via string comparison:
 
@@ -298,7 +342,7 @@ Only clicking "Save Skips" commits the changes to `WorkspaceStore`, flagging the
 
 ---
 
-## 5. Export Pipeline & Tokenization Engine
+## 6. Export Pipeline & Tokenization Engine
 
 ```
        Root Paths + Raw Trees + Curation Rules
@@ -328,7 +372,7 @@ Only clicking "Save Skips" commits the changes to `WorkspaceStore`, flagging the
   - Exposes drag paths for webContents.startDrag
 ```
 
-### 5.1. The Single-Child Directory Collapsing Algorithm
+### 6.1. The Single-Child Directory Collapsing Algorithm
 
 To optimize visual context for LLMs, `generateExportPayload` in `src/utils/exportEngine.ts` simplifies linear folder hierarchies:
 
@@ -343,7 +387,7 @@ To optimize visual context for LLMs, `generateExportPayload` in `src/utils/expor
   }
   ```
 
-### 5.2. Multi-Root Leaf Disambiguation
+### 6.2. Multi-Root Leaf Disambiguation
 
 If a workspace contains multiple roots with identical folder names (e.g., `/projectA/src` and `/projectB/src`):
 
@@ -351,7 +395,7 @@ If a workspace contains multiple roots with identical folder names (e.g., `/proj
 2. Suffixes are appended to duplicate root identifiers (`src_1`, `src_2`).
 3. Flat filenames reflect this disambiguation (e.g., `src_1_index.ts` vs `src_2_index.ts`), preventing collisions in flattened output chunks.
 
-### 5.3. Extension Override Annotation
+### 6.3. Extension Override Annotation
 
 When a file extension is spoofed via `extensionOverrides`:
 
@@ -362,7 +406,7 @@ When a file extension is spoofed via `extensionOverrides`:
   ```
   This preserves the LLM's spatial awareness of the original project structure despite the modified upload format.
 
-### 5.4. High-Fidelity BPE Token Estimation
+### 6.4. High-Fidelity BPE Token Estimation
 
 1. **UI Fast Path:** During active marquee brushing, token counts are estimated on the renderer thread using an approximate heuristic:
    $$\text{estimatedTokens} = \text{Math.round}(\text{totalBytes} / 4)$$
@@ -370,9 +414,9 @@ When a file extension is spoofed via `extensionOverrides`:
 
 ---
 
-## 6. File Watching & Native OS Integration
+## 7. File Watching & Native OS Integration
 
-### 6.1. Resilient Chokidar Configuration (`main.cjs`)
+### 7.1. Resilient Chokidar Configuration (`main.cjs`)
 
 Watching enterprise repositories can easily exhaust operating system resources. Xcerpt implements three defensive watching patterns:
 
@@ -396,7 +440,7 @@ Watching enterprise repositories can easily exhaust operating system resources. 
    This shields the IPC bridge from thousands of startup `add` notifications.
 3. **Sequential Setup Mutex:** Modifications to watched paths are locked behind `isWatcherUpdating` and `pendingWatcherUpdate` flags, preventing rapid directory changes from spawning orphaned watcher instances.
 
-### 6.2. Native OS Drag-and-Drop
+### 7.2. Native OS Drag-and-Drop
 
 Web browsers reject drag-and-drop operations involving raw folder objects. Xcerpt bridges this by starting drag events directly from the Electron main process via `webContents.startDrag`:
 
@@ -411,9 +455,9 @@ Web browsers reject drag-and-drop operations involving raw folder objects. Xcerp
 
 ---
 
-## 7. Dynamic Theming, Scaling, & Responsive Layout
+## 8. Dynamic Theming, Scaling, & Responsive Layout
 
-### 7.1. CSS Variable Theming
+### 8.1. CSS Variable Theming
 
 Theme customizations are stored in `AppConfig` and injected into `:root` by `App.tsx`:
 
@@ -430,7 +474,7 @@ root.style.setProperty("--theme-accent", colors.accent);
 
 Tailwind CSS v4 maps these properties directly using the `@theme` directive in `src/index.css`, allowing dynamic theme updates across the application without requiring component remounts.
 
-### 7.2. Hardware-Accelerated UI Scaling
+### 8.2. Hardware-Accelerated UI Scaling
 
 Application-wide zoom adjustments bypass CSS recalculations by routing directly through Chromium's rendering engine:
 
@@ -442,7 +486,7 @@ if (window.api && window.api.setZoomFactor) {
 
 To prevent cursor drift while dragging UI scale range sliders, `<input type="range">` components track scale values in local React state during interaction, committing mutations to the global store only on `onMouseUp`, `onTouchEnd`, or `onKeyUp`.
 
-### 7.3. Split-Pane Layouts via Container Queries
+### 8.3. Split-Pane Layouts via Container Queries
 
 Because Xcerpt features user-resizable split panes, traditional viewport media queries (`@media (min-width: 768px)`) fail when applied to interior panels. Sub-components use Tailwind container queries (`@container`):
 

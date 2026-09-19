@@ -21,9 +21,70 @@ const B4 = '`' + '`' + '`' + '`';
 
 const PROTOCOL_TAG_REGEX = /^\s*(\/\/|#|<!--|--)\s*\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*(.*)$/i;
 
+const FILE_START_TOKEN_REGEX = /^\s*(?:<<<|<!--\s*<<<|\[)\s*(?:FILE_START|START_FILE)[:\s]+(?:\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*)?["'`]?([^"'`>\]\n]+?)["'`]?(?:\s+\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\])?\s*(?:>>>|>>>\s*-->|\])\s*$/i;
+
+const FILE_END_TOKEN_REGEX = /^\s*(?:<<<|<!--\s*<<<|\[)\s*(?:FILE_END|END_FILE)(?:[:\s]+[^\s>\]\n]+)?\s*(?:>>>|>>>\s*-->|\])\s*$/i;
+
+function cleanRelativePath(raw) {
+  if (!raw) return '';
+  return raw
+    .replace(/\\/g, '/')
+    .replace(/\s*-->.*$/, '')
+    .replace(/-->$/, '')
+    .replace(/^["'`]|["'`]$/g, '')
+    .replace(/^[./\\]+/, '')
+    .replace(/^\/+/, '')
+    .trim();
+}
+
+function stripOuterCodeFence(lines) {
+  if (!lines || lines.length === 0) return { lines: [], detectedFenceInfo: '' };
+
+  const firstNonEmptyIdx = lines.findIndex(l => l.trim().length > 0);
+  if (firstNonEmptyIdx === -1) return { lines, detectedFenceInfo: '' };
+
+  const firstLine = lines[firstNonEmptyIdx].trim();
+  const openFenceMatch = firstLine.match(/^([`~]{3,})(.*)$/);
+
+  if (!openFenceMatch) {
+    return { lines, detectedFenceInfo: '' };
+  }
+
+  const fenceChar = openFenceMatch[1][0];
+  const fenceLen = openFenceMatch[1].length;
+  const detectedFenceInfo = openFenceMatch[2].trim();
+
+  let lastNonEmptyIdx = -1;
+  for (let i = lines.length - 1; i > firstNonEmptyIdx; i--) {
+    if (lines[i].trim().length > 0) {
+      lastNonEmptyIdx = i;
+      break;
+    }
+  }
+
+  if (lastNonEmptyIdx !== -1) {
+    const lastLine = lines[lastNonEmptyIdx].trim();
+    const closeFenceMatch = lastLine.match(/^([`~]{3,})$/);
+    if (closeFenceMatch && closeFenceMatch[1][0] === fenceChar && closeFenceMatch[1].length >= fenceLen) {
+      const sliced = lines.slice(firstNonEmptyIdx + 1, lastNonEmptyIdx);
+      return { lines: sliced, detectedFenceInfo };
+    }
+  }
+
+  if (detectedFenceInfo.length > 0) {
+    const sliced = lines.slice(firstNonEmptyIdx + 1);
+    return { lines: sliced, detectedFenceInfo };
+  }
+
+  return { lines, detectedFenceInfo: '' };
+}
+
 function stripProtocolScaffolding(rawCode, targetPath) {
-  const lines = rawCode.split('\n');
+  let lines = rawCode.split('\n');
   if (lines.length === 0) return rawCode;
+
+  lines = lines.filter(l => !FILE_START_TOKEN_REGEX.test(l) && !FILE_END_TOKEN_REGEX.test(l));
+  if (lines.length === 0) return '';
 
   const firstNonEmptyIndex = lines.findIndex(l => l.trim().length > 0);
   if (firstNonEmptyIndex === -1) return rawCode;
@@ -60,17 +121,21 @@ function extractActionAndPath(firstLine, fenceInfo) {
   let targetPath = null;
 
   const line = firstLine.trim();
+
+  const tokenMatch = line.match(FILE_START_TOKEN_REGEX);
+  if (tokenMatch) {
+    const rawAction = tokenMatch[1] || tokenMatch[3];
+    if (rawAction) {
+      actionType = rawAction.toUpperCase();
+    }
+    targetPath = cleanRelativePath(tokenMatch[2]);
+    return { actionType, targetPath };
+  }
+
   const protocolMatch = line.match(/\[(NEW|MODIFIED|DELETED|PARTIAL_DIFF)\]\s*([^\s]+)/i);
   if (protocolMatch) {
     actionType = protocolMatch[1].toUpperCase();
-    let rawPath = protocolMatch[2];
-    rawPath = rawPath
-      .replace(/\s*-->.*$/, '')
-      .replace(/-->$/, '')
-      .replace(/^["'`]|["'`]$/g, '')
-      .replace(/^[./\\]+/, '')
-      .trim();
-    targetPath = rawPath;
+    targetPath = cleanRelativePath(protocolMatch[2]);
     return { actionType, targetPath };
   }
 
@@ -90,10 +155,7 @@ function extractActionAndPath(firstLine, fenceInfo) {
     const infoClean = fenceInfo.replace(/^```+/, '').trim();
     const infoColon = infoClean.split(/[:\s]/);
     if (infoColon.length > 1 && infoColon[1].includes('.')) {
-      targetPath = infoColon[1]
-        .replace(/^["'`]|["'`]$/g, '')
-        .replace(/^[./\\]+/, '')
-        .trim();
+      targetPath = cleanRelativePath(infoColon[1]);
     }
   }
 
@@ -150,6 +212,24 @@ function inferSessionDescription(rawMarkdown, explanations) {
   return 'LLM Batch Work Packet Integration';
 }
 
+function isInnerUnadornedFence(lines, currentIdx) {
+  for (let j = currentIdx + 1; j < lines.length; j++) {
+    const l = lines[j];
+    if (
+      l.trim().startsWith('# [WORK PACKET]') ||
+      l.trim().startsWith('### Pre-Code Summary') ||
+      FILE_START_TOKEN_REGEX.test(l)
+    ) {
+      return false;
+    }
+    const fMatch = l.match(/^([`~]{3,})(.*)$/);
+    if (fMatch) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFilesMap = {}) {
   const normalized = rawMarkdown.replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
@@ -162,6 +242,12 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
   let currentSectionLevel = 2;
   let currentSectionLines = [];
   let currentSectionKind = 'preamble';
+
+  let inTokenBlock = false;
+  let tokenAction = null;
+  let tokenPath = null;
+  let tokenBuffer = [];
+  let tokenStartLineIdx = 0;
 
   let inCodeBlock = false;
   let codeFenceChar = '';
@@ -196,17 +282,21 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     }
   };
 
-  const processCompletedCodeBlock = (rawLines, fenceInfo, startLine, endLine, warning) => {
+  const processCompletedCodeBlock = (
+    rawLines, 
+    fenceInfo, 
+    startLine, 
+    endLine, 
+    warning,
+    explicitAction,
+    explicitPath
+  ) => {
     const rawPayloadContent = rawLines.join('\n');
     const firstNonEmpty = rawLines.find(l => l.trim().length > 0) || '';
     const { actionType: extractedAction, targetPath: extractedPath } = extractActionAndPath(firstNonEmpty, fenceInfo);
 
-    let targetRelativePath = extractedPath || `unnamed_snippet_${actions.length + 1}.txt`;
-    targetRelativePath = targetRelativePath
-      .replace(/\\/g, '/')
-      .replace(/^["'`]|["'`]$/g, '')
-      .replace(/^[./\\]+/, '')
-      .replace(/^\/+/, '');
+    let targetRelativePath = explicitPath || extractedPath || `unnamed_snippet_${actions.length + 1}.txt`;
+    targetRelativePath = cleanRelativePath(targetRelativePath);
 
     pathCounts[targetRelativePath] = (pathCounts[targetRelativePath] || 0) + 1;
     if (pathCounts[targetRelativePath] > 1) {
@@ -224,7 +314,6 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     let matchedOriginalContent = null;
     let resolvedRelPath = targetRelativePath;
 
-    // Multi-Root Content Matcher: First scan for roots with verified non-null content on disk
     for (const root of rootPaths) {
       const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
       const rootBase = cleanRoot.split('/').pop() || '';
@@ -275,16 +364,16 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     targetRelativePath = resolvedRelPath;
     const originalContent = matchedOriginalContent;
 
-    let actionType = extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
-    if (firstNonEmpty.includes('[DELETED]')) {
+    let actionType = explicitAction || extractedAction || (originalContent === null ? 'NEW' : 'MODIFIED');
+    if (firstNonEmpty.includes('[DELETED]') || explicitAction === 'DELETED') {
       actionType = 'DELETED';
-    } else if (firstNonEmpty.includes('[PARTIAL_DIFF]')) {
+    } else if (firstNonEmpty.includes('[PARTIAL_DIFF]') || explicitAction === 'PARTIAL_DIFF') {
       actionType = 'PARTIAL_DIFF';
     }
 
     const warnings = [];
     if (warning) warnings.push(warning);
-    if (!extractedAction) {
+    if (!explicitAction && !extractedAction) {
       warnings.push(`Action tag omitted in response; inferred as [${actionType}].`);
     }
 
@@ -331,7 +420,98 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const startTokenMatch = line.match(FILE_START_TOKEN_REGEX);
+    const endTokenMatch = line.match(FILE_END_TOKEN_REGEX);
     const fenceMatch = line.match(/^([`~]{3,})(.*)$/);
+
+    if (inTokenBlock) {
+      if (endTokenMatch) {
+        inTokenBlock = false;
+        const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+        processCompletedCodeBlock(
+          contentLines,
+          detectedFenceInfo,
+          tokenStartLineIdx,
+          i,
+          undefined,
+          tokenAction,
+          tokenPath
+        );
+        tokenBuffer = [];
+        tokenAction = null;
+        tokenPath = null;
+        continue;
+      }
+
+      if (startTokenMatch) {
+        const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+        processCompletedCodeBlock(
+          contentLines,
+          detectedFenceInfo,
+          tokenStartLineIdx,
+          i - 1,
+          'Auto-closed unterminated file boundary at new FILE_START token.',
+          tokenAction,
+          tokenPath
+        );
+
+        tokenAction = (startTokenMatch[1] || startTokenMatch[3] || null);
+        tokenPath = cleanRelativePath(startTokenMatch[2]);
+        tokenStartLineIdx = i;
+        tokenBuffer = [];
+        continue;
+      }
+
+      const isHeaderBoundary = Boolean(
+        line.trim().startsWith('# [WORK PACKET]') || 
+        line.trim().startsWith('### Pre-Code Summary') || 
+        /^\s*#+\s+\[WORK PACKET/i.test(line)
+      );
+
+      if (isHeaderBoundary) {
+        inTokenBlock = false;
+        const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+        processCompletedCodeBlock(
+          contentLines,
+          detectedFenceInfo,
+          tokenStartLineIdx,
+          i - 1,
+          'Auto-closed unterminated file boundary at primary header boundary.',
+          tokenAction,
+          tokenPath
+        );
+        tokenBuffer = [];
+        tokenAction = null;
+        tokenPath = null;
+
+        const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+        currentSectionLevel = headerMatch ? headerMatch[1].length : 2;
+        currentSectionTitle = headerMatch ? headerMatch[2].trim() : 'Pre-Code Summary';
+        currentSectionKind = actions.length === 0 ? 'preamble' : 'interstitial';
+        continue;
+      }
+
+      tokenBuffer.push(line);
+      continue;
+    }
+
+    if (startTokenMatch) {
+      if (inCodeBlock && codeBuffer.length > 0) {
+        processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, i - 1, 'Auto-closed unclosed code fence at FILE_START token.');
+        inCodeBlock = false;
+        codeBuffer = [];
+      }
+      inTokenBlock = true;
+      tokenAction = (startTokenMatch[1] || startTokenMatch[3] || null);
+      tokenPath = cleanRelativePath(startTokenMatch[2]);
+      tokenStartLineIdx = i;
+      tokenBuffer = [];
+      continue;
+    }
+
+    if (endTokenMatch) {
+      continue;
+    }
 
     if (!inCodeBlock) {
       if (fenceMatch) {
@@ -362,14 +542,20 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
 
       if (isTargetMarkdown && codeFenceLength === 3 && fenceMatch && fenceMatch[1].length === 3) {
         const hasInfo = fenceMatch[2].trim().length > 0;
-        if (hasInfo && innerFenceDepth === 0) {
-          innerFenceDepth = 1;
+        if (hasInfo) {
+          innerFenceDepth++;
           codeBuffer.push(line);
           continue;
         } else if (!hasInfo && innerFenceDepth > 0) {
-          innerFenceDepth = 0;
+          innerFenceDepth--;
           codeBuffer.push(line);
           continue;
+        } else if (!hasInfo && innerFenceDepth === 0) {
+          if (isInnerUnadornedFence(lines, i)) {
+            innerFenceDepth = 1;
+            codeBuffer.push(line);
+            continue;
+          }
         }
       }
 
@@ -423,7 +609,18 @@ function parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFiles
     }
   }
 
-  if (inCodeBlock && codeBuffer.length > 0) {
+  if (inTokenBlock && tokenBuffer.length > 0) {
+    const { lines: contentLines, detectedFenceInfo } = stripOuterCodeFence(tokenBuffer);
+    processCompletedCodeBlock(
+      contentLines,
+      detectedFenceInfo,
+      tokenStartLineIdx,
+      lines.length - 1,
+      'Auto-closed unterminated file boundary at End of Output.',
+      tokenAction,
+      tokenPath
+    );
+  } else if (inCodeBlock && codeBuffer.length > 0) {
     processCompletedCodeBlock(codeBuffer, codeFenceInfo, codeStartLineIdx, lines.length - 1, 'Auto-closed unterminated code fence at End of Output.');
   }
 
@@ -776,7 +973,6 @@ console.log('\n\x1b[36m--- Suite 12: Root Path Matching & Multi-Root Disk Diffin
   assert(action.originalContent === 'export const run = true;', 'Correctly populated originalContent from RepoB');
   assert(action.actionType === 'MODIFIED', 'Preserved MODIFIED action type');
 
-  // Test root folder name prepended by model: 'RepoB/scripts/run-diagnostics.mjs'
   const prependedMarkdown = [
     '# [WORK PACKET]: Diff Check 2',
     B3 + 'javascript',
@@ -813,6 +1009,181 @@ console.log('\n\x1b[36m--- Suite 13: PARTIAL_DIFF Action Tag Recognition & Diff 
   assert(action.hasSkipBlocks === true, 'Detected skip blocks in partial diff');
   assert(action.skipBlockCount === 2, `Counted exactly 2 skip blocks (got: ${action.skipBlockCount})`);
   assert(session.summary.actionsCount.PARTIAL_DIFF === 1, 'Summary recorded 1 PARTIAL_DIFF count');
+}
+
+// --- SUITE 14: EXPLICIT BOUNDARY TOKENS (<<<FILE_START>>> & <<<FILE_END>>>) ---
+console.log('\n\x1b[36m--- Suite 14: Explicit Boundary Tokens with Internal Nested Code Blocks ---\x1b[0m');
+{
+  const packetWithExplicitTokens = [
+    '# [WORK PACKET 1]: Architecture Guide Update',
+    '',
+    '### Pre-Code Summary',
+    '- Architectural Intent: Update documentation and export engine.',
+    '',
+    '<<<FILE_START: [MODIFIED] docs/guide.md>>>',
+    B4 + 'markdown',
+    '<!-- [MODIFIED] docs/guide.md -->',
+    '# Developer Setup Guide',
+    '',
+    'Run the setup commands below:',
+    B3 + 'bash',
+    'npm install',
+    'npm run build',
+    B3,
+    '',
+    'Verify sample unadorned output:',
+    B3,
+    'Build succeeded: 0 errors',
+    B3,
+    '',
+    'This concludes the setup instructions.',
+    B4,
+    '<<<FILE_END>>>',
+    '',
+    'Epilogue: Run the test suite after verification.'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(packetWithExplicitTokens, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, `Extracted 1 action via boundary tokens (got ${session.actions.length})`);
+  const act = session.actions[0];
+  assert(act.targetRelativePath === 'docs/guide.md', `Target path accurately identified: "${act.targetRelativePath}"`);
+  assert(act.actionType === 'MODIFIED', `Action type correctly recognized as MODIFIED (got: ${act.actionType})`);
+  assert(act.proposedContent.includes(B3 + 'bash'), 'Inner bash code block preserved with language specifier');
+  assert(act.proposedContent.includes('Build succeeded: 0 errors'), 'Inner unadorned code block content preserved without truncation');
+  assert(act.proposedContent.includes('This concludes the setup instructions.'), 'Trailing markdown prose preserved without premature closing');
+  assert(!act.proposedContent.includes('FILE_START') && !act.proposedContent.includes('FILE_END'), 'Boundary tokens cleanly stripped from proposed content');
+}
+
+// --- SUITE 15: COMPLEX MARKDOWN WITH UNADORNED (```) CODE BLOCKS ---
+console.log('\n\x1b[36m--- Suite 15: Nested Markdown Documentation with Unadorned (```) Code Blocks ---\x1b[0m');
+{
+  const packetUnadornedBlocks = [
+    '<<<FILE_START: [NEW] docs/troubleshooting.md>>>',
+    '<!-- [NEW] docs/troubleshooting.md -->',
+    '# Troubleshooting Guide',
+    '',
+    'When the process hangs, check this output:',
+    B3,
+    'thread 0x1400: blocked on mutex',
+    'stack trace: at main.cjs:42',
+    B3,
+    '',
+    'Follow up with restart command:',
+    B3 + 'sh',
+    'systemctl restart xcerpt',
+    B3,
+    '',
+    'End of troubleshooting.',
+    '<<<FILE_END>>>'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(packetUnadornedBlocks, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, `Parsed unadorned internal code blocks without outer fence (got ${session.actions.length})`);
+  const act = session.actions[0];
+  assert(act.targetRelativePath === 'docs/troubleshooting.md', `Path is accurate: "${act.targetRelativePath}"`);
+  assert(act.actionType === 'NEW', `Action type is NEW`);
+  assert(act.proposedContent.includes('thread 0x1400: blocked on mutex'), 'Unadorned block body preserved');
+  assert(act.proposedContent.includes('systemctl restart xcerpt'), 'Subsequent bash block preserved');
+  assert(act.proposedContent.includes('End of troubleshooting.'), 'End of markdown document reached safely');
+}
+
+// --- SUITE 16: MULTI-FILE BATCH WITH SEQUENTIAL MARKDOWN & INTERSTITIAL REASONING ---
+console.log('\n\x1b[36m--- Suite 16: Multi-File Batch with Sequential Markdown Files & Interstitial Reasoning ---\x1b[0m');
+{
+  const multiFileTokenPacket = [
+    '# [WORK PACKET 1]: Full Stack Docs & Engine',
+    '',
+    '### Pre-Code Summary',
+    '- Intent: Document boundary protocols and export engine adjustments.',
+    '',
+    '<<<FILE_START: [MODIFIED] docs/spec.md>>>',
+    B4 + 'markdown',
+    '# Specification',
+    '```json',
+    '{"protocol": "v2.2"}',
+    '```',
+    B4,
+    '<<<FILE_END>>>',
+    '',
+    'Now we update the main export engine to instruct LLMs on the new boundary format:',
+    '',
+    '<<<FILE_START: [MODIFIED] src/utils/exportEngine.ts>>>',
+    B3 + 'typescript',
+    '// [MODIFIED] src/utils/exportEngine.ts',
+    'export const PROTOCOL_VERSION = "2.2.0";',
+    B3,
+    '<<<FILE_END>>>',
+    '',
+    'Epilogue: Review and commit changes.'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(multiFileTokenPacket, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 2, `Extracted both actions across boundary tokens (got ${session.actions.length})`);
+  assert(session.actions[0].targetRelativePath === 'docs/spec.md', 'First file is docs/spec.md');
+  assert(session.actions[1].targetRelativePath === 'src/utils/exportEngine.ts', 'Second file is src/utils/exportEngine.ts');
+  
+  const interstitial = session.explanations.find(e => e.kind === 'interstitial');
+  assert(Boolean(interstitial), 'Captured interstitial reasoning between files');
+  assert(interstitial.content.includes('update the main export engine'), 'Interstitial text preserved');
+
+  const epilogue = session.explanations.find(e => e.kind === 'epilogue');
+  assert(Boolean(epilogue), 'Captured epilogue section');
+}
+
+// --- SUITE 17: TOKEN-BOUNDED CODE FILES WITHOUT OUTER CODE FENCES ---
+console.log('\n\x1b[36m--- Suite 17: Token-Bounded Code Files Without Outer Code Fences ---\x1b[0m');
+{
+  const rawWithoutFences = [
+    '<<<FILE_START: [NEW] scripts/seed.sql>>>',
+    '-- [NEW] scripts/seed.sql',
+    'INSERT INTO users (id, name) VALUES (1, "Alice");',
+    'INSERT INTO users (id, name) VALUES (2, "Bob");',
+    '<<<FILE_END>>>'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(rawWithoutFences, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, 'Extracted raw file without fences');
+  const act = session.actions[0];
+  assert(act.targetRelativePath === 'scripts/seed.sql', 'Path extracted correctly');
+  assert(act.actionType === 'NEW', 'Action type NEW');
+  assert(act.proposedContent.includes('INSERT INTO users'), 'SQL content preserved verbatim');
+}
+
+// --- SUITE 18: UNTERMINATED BOUNDARY TOKEN AUTO-RECOVERY ---
+console.log('\n\x1b[36m--- Suite 18: Unterminated Boundary Token Auto-Recovery ---\x1b[0m');
+{
+  const missingEndTokens = [
+    '<<<FILE_START: [MODIFIED] docs/part1.md>>>',
+    '# Part 1 Content',
+    '',
+    '<<<FILE_START: [NEW] docs/part2.md>>>',
+    '# Part 2 Content',
+    '',
+    '# [WORK PACKET 2]: Secondary Phase',
+    'Some trailing text'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(missingEndTokens, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 2, `Auto-recovered 2 actions despite omitted FILE_END tokens (got ${session.actions.length})`);
+  assert(session.actions[0].targetRelativePath === 'docs/part1.md', 'First file recovered at new FILE_START');
+  assert(session.actions[0].parseWarnings.some(w => w.includes('Auto-closed')), 'Warning appended for auto-closure');
+  assert(session.actions[1].targetRelativePath === 'docs/part2.md', 'Second file recovered at header boundary');
+}
+
+// --- SUITE 19: DELETED FILE VIA BOUNDARY TOKEN ---
+console.log('\n\x1b[36m--- Suite 19: Deleted File Via Boundary Token ---\x1b[0m');
+{
+  const tombstonePacket = [
+    '<<<FILE_START: [DELETED] public/obsolete.html>>>',
+    '<<<FILE_END>>>'
+  ].join('\n');
+
+  const session = parseSessionMarkdown(tombstonePacket, 'ws-test', ['C:/Repo']);
+  assert(session.actions.length === 1, 'Extracted deletion action');
+  const act = session.actions[0];
+  assert(act.targetRelativePath === 'public/obsolete.html', 'Path matches');
+  assert(act.actionType === 'DELETED', 'Action is DELETED');
+  assert(session.summary.actionsCount.DELETED === 1, 'Summary DELETED count is 1');
 }
 
 console.log('\n' + '='.repeat(70));

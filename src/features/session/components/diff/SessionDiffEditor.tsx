@@ -5,6 +5,8 @@ import { useAppStore } from '../../../../store/appStore';
 import { getLanguageFromFilename } from './languageHelper';
 import { AlertCircle } from 'lucide-react';
 
+type MonacoDiffEditor = Parameters<DiffOnMount>[0];
+
 interface SessionDiffEditorProps {
   originalContent: string | null;
   proposedContent: string;
@@ -26,6 +28,7 @@ export function SessionDiffEditor({
   const config = useAppStore(s => s.config);
   const language = getLanguageFromFilename(filename);
 
+  const diffEditorRef = useRef<MonacoDiffEditor | null>(null);
   const isProgrammaticUpdateRef = useRef(false);
   const actionIdRef = useRef(actionId);
 
@@ -33,7 +36,23 @@ export function SessionDiffEditor({
     actionIdRef.current = actionId;
   }, [actionId]);
 
+  // Guaranteed model release on unmount to prevent:
+  // "TextModel got disposed before DiffEditorWidget model got reset"
+  useEffect(() => {
+    return () => {
+      if (diffEditorRef.current) {
+        try {
+          diffEditorRef.current.setModel(null);
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
   const handleDiffMount: DiffOnMount = (editor, monaco) => {
+    diffEditorRef.current = editor;
+
     const originalEditor = editor.getOriginalEditor();
     const modifiedEditor = editor.getModifiedEditor();
 

@@ -407,3 +407,49 @@ Any user mutation that alters the workspace state pushes an inverse delta closur
 5. `targetScrollY` is restored, snapping the virtualized tree back to the exact pixel coordinate where the original action occurred.
 6. The inverse closure executes, reversing the mutation.
 7. A toast notification slides in at the bottom-right: `Undid: Marked Excluded [Redo]`. Clicking **Redo** reverses the undo command.
+
+
+## Flow 9: Inbound Response Ingestion & Boundary Token Triage
+
+```
+ [User Copies LLM Response with Boundary Tokens]
+                        │
+                        ▼
+ [Click "Dev Studio" in Header] ──> [Open IngestionTriageStudio]
+                        │
+        [Click "Paste from Clipboard" / Ctrl+V]
+                        │
+         ┌──────────────┴──────────────┐
+         ▼                             ▼
+ [Deterministic Boundary Check]   [Live Disk Cache Check]
+ "Boundary Tokens Verified" badge  Queries all workspace roots
+         │                             │
+         └──────────────┬──────────────┘
+                        ▼
+           [Action Manifest Sidebar]
+           - Lists extracted actions with badges
+           - Displays line counts & warnings
+           - AI Copilot Title/Description Generator
+                        │
+           [Click "Initialize Studio"]
+                        │
+           [Mount Monaco Diff Studio]
+```
+
+### 9.1. Ingestion Workflow
+
+1. In any AI chat interface, the model generates code adhering to the embedded protocol:
+   ```markdown
+   <<<FILE_START: [MODIFIED] docs/architecture.md>>>
+   ````markdown
+   # Architecture Guide
+   ```bash
+   npm run build
+   ```
+   ````
+   <<<FILE_END>>>
+   ```
+2. The user copies the text and opens Dev Studio in Xcerpt.
+3. The Ingestion Triage Studio mounts, displaying a green **Boundary Tokens Verified** badge.
+4. The boundary view outlines the exact file boundaries, actions, and internal snippets.
+5. Clicking **Initialize Studio** transfers the parsed session into Monaco Diff review.

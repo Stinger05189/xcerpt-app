@@ -25,7 +25,8 @@ import {
   LayoutTemplate,
   Loader2,
   Settings,
-  GitPullRequest
+  GitPullRequest,
+  Check
 } from 'lucide-react';
 
 interface IngestionTriageStudioProps {
@@ -314,6 +315,12 @@ export function IngestionTriageStudio({
         </div>
 
         <div className="flex items-center gap-2">
+          {rawText.includes('FILE_START') && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-green-500/15 text-green-400 border border-green-500/30 flex items-center gap-1">
+              <Check size={11} /> Boundary Tokens Verified
+            </span>
+          )}
+
           <button
             onClick={handlePasteFromClipboard}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/20 hover:bg-accent text-accent hover:text-white rounded-md text-xs font-semibold transition-all shadow-sm"

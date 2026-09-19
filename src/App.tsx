@@ -16,6 +16,21 @@ function App() {
   const isSettingsOpen = useAppStore(s => s.isSettingsOpen);
   const config = useAppStore(s => s.config);
 
+  // Suppress Monaco internal worker cancellation rejections on rapid tab switches
+  useEffect(() => {
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      if (
+        e.reason &&
+        typeof e.reason === 'object' &&
+        (e.reason.type === 'cancelation' || e.reason.msg === 'operation is manually canceled')
+      ) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => window.removeEventListener('unhandledrejection', handleRejection);
+  }, []);
+
   // Dynamic Theme Engine: Inject CSS Variables to :root
   useEffect(() => {
     const root = document.documentElement;
