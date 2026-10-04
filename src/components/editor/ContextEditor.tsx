@@ -4,10 +4,11 @@ import Editor, { useMonaco, type OnMount } from '@monaco-editor/react';
 import { useWorkspaceStore, type CompressionRule } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { useHistoryStore } from '../../store/historyStore';
-import { toScopedPathKey } from '../../utils/filterEngine';
+import { toScopedPathKey, isBinaryPath } from '../../utils/filterEngine';
 import { FileCode2, Undo2, Trash2, Eye, Code2, BookOpen, Pin } from 'lucide-react';
 import { ImageViewer } from './ImageViewer';
 import { MarkdownViewer } from './MarkdownViewer';
+import { BinaryFileViewer } from './BinaryFileViewer';
 
 type MonacoEditor = Parameters<OnMount>[0];
 type EditorDecorationsCollection = ReturnType<MonacoEditor['createDecorationsCollection']>;
@@ -22,6 +23,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   const [loading, setLoading] = useState<boolean>(true);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isMarkdownRenderMode, setIsMarkdownRenderMode] = useState(true);
+  const [isBinaryError, setIsBinaryError] = useState(false);
 
   const editorRef = useRef<MonacoEditor | null>(null);
   const decorationsCollectionRef = useRef<EditorDecorationsCollection | null>(null);
@@ -84,12 +86,16 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
     };
   }, [content, draftCompressions]);
 
+  const isImage = /\.(png|jpe?g|gif|svg|ico|webp)$/i.test(relativePath);
+  const isBinary = isBinaryPath(relativePath) && !isImage;
+
   useEffect(() => {
     let isMounted = true;
     const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
-    const isImage = /\.(png|jpe?g|gif|svg|ico|webp)$/i.test(relativePath);
 
-    if (isImage) {
+    setIsBinaryError(false);
+
+    if (isImage || isBinary) {
       setTimeout(() => {
         if (isMounted) {
           setContent('');
@@ -142,7 +148,12 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         }
       } catch (err: unknown) {
         if (isMounted) {
-          setContent(`Error reading file:\n${err instanceof Error ? err.message : String(err)}`);
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('Binary file detected') || msg.includes('File exceeds 5MB limit')) {
+            setIsBinaryError(true);
+          } else {
+            setContent(`Error reading file:\n${msg}`);
+          }
           setLoading(false);
         }
       }
@@ -161,7 +172,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
       isMounted = false; 
       cleanupWatcher();
     };
-  }, [rootPath, relativePath, scopedKey]);
+  }, [rootPath, relativePath, scopedKey, isImage, isBinary]);
 
   const previewContent = useMemo(() => {
     if (!isPreviewMode) return content;
@@ -279,8 +290,8 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
   }, [draftCompressions, monaco, isPreviewMode, content]);
 
   const fileName = relativePath.split(/[/\\]/).pop();
-  const isImage = /\.(png|jpe?g|gif|svg|ico|webp)$/i.test(relativePath);
   const isMarkdown = /\.(md|mdx)$/i.test(relativePath);
+  const absolutePath = `${rootPath}/${relativePath}`.replace(/\\/g, '/');
 
   return (
     <div className="h-full flex flex-col">
@@ -307,7 +318,7 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         )}
       </div>
       
-      {!isImage && (
+      {!isImage && !isBinary && !isBinaryError && (
       <div className="h-10 bg-bg-panel flex items-center px-4 border-b border-border-subtle shrink-0 gap-3 text-xs text-text-muted justify-between">
         <div className="flex items-center gap-3">
           <button 
@@ -376,7 +387,9 @@ export function ContextEditor({ rootPath, relativePath }: ContextEditorProps) {
         )}
         
         {isImage ? (
-          <ImageViewer absolutePath={`${rootPath}/${relativePath}`.replace(/\\/g, '/')} />
+          <ImageViewer absolutePath={absolutePath} />
+        ) : (isBinary || isBinaryError) ? (
+          <BinaryFileViewer absolutePath={absolutePath} relativePath={relativePath} />
         ) : (isMarkdown && isMarkdownRenderMode && !isPreviewMode) ? (
           <MarkdownViewer content={content} />
         ) : (

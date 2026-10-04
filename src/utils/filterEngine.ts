@@ -4,6 +4,14 @@ import type { ScopedPathKey, FileNode } from '../types/ipc';
 
 export type FileStatus = 'included' | 'excluded' | 'tree-only';
 
+export const BINARY_OR_TREE_ONLY_REGEX = /\.(lock|png|jpe?g|gif|svg|ico|webp|bmp|tiff?|tga|dds|hdr|exr|psd|ai|raw|cr2|nef|pdf|doc|docx|xls|xlsx|ppt|pptx|odt|epub|mp4|mkv|avi|mov|wmv|flv|webm|m4v|wav|mp3|ogg|flac|aac|m4a|wma|zip|tar|gz|bz2|7z|rar|xz|zst|tgz|iso|dmg|bin|dll|exe|so|dylib|class|jar|war|pyc|pyo|pyd|o|obj|lib|a|wasm|ttf|otf|woff2?|eot|sqlite3?|db3?|s3db|mdb|ldb|uasset|umap|ubulk|uexp|uptnl|pak|asset|unity|prefab|mat|bundle|unitypackage|pck|fbx|blend|blend1|glb|gltf|max|3ds|dae|stl|step|stp|dwg)$/i;
+
+export function isBinaryPath(pathStr: string): boolean {
+  if (!pathStr) return false;
+  const fileName = pathStr.split(/[/\\]/).pop() || '';
+  return BINARY_OR_TREE_ONLY_REGEX.test(fileName);
+}
+
 export function canonicalizePath(p: string): string {
   if (!p) return '';
   let normalized = p.includes('\\') ? p.replace(/\\/g, '/') : p;

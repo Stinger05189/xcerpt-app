@@ -2,6 +2,14 @@
 import { performance } from 'node:perf_hooks';
 import ignore from 'ignore';
 
+const BINARY_OR_TREE_ONLY_REGEX = /\.(lock|png|jpe?g|gif|svg|ico|webp|bmp|tiff?|tga|dds|hdr|exr|psd|ai|raw|cr2|nef|pdf|doc|docx|xls|xlsx|ppt|pptx|odt|epub|mp4|mkv|avi|mov|wmv|flv|webm|m4v|wav|mp3|ogg|flac|aac|m4a|wma|zip|tar|gz|bz2|7z|rar|xz|zst|tgz|iso|dmg|bin|dll|exe|so|dylib|class|jar|war|pyc|pyo|pyd|o|obj|lib|a|wasm|ttf|otf|woff2?|eot|sqlite3?|db3?|s3db|mdb|ldb|uasset|umap|ubulk|uexp|uptnl|pak|asset|unity|prefab|mat|bundle|unitypackage|pck|fbx|blend|blend1|glb|gltf|max|3ds|dae|stl|step|stp|dwg)$/i;
+
+function isBinaryPath(pathStr) {
+  if (!pathStr) return false;
+  const fileName = pathStr.split(/[/\\]/).pop() || '';
+  return BINARY_OR_TREE_ONLY_REGEX.test(fileName);
+}
+
 function canonicalizePath(p) {
   if (!p) return '';
   let normalized = p.includes('\\') ? p.replace(/\\/g, '/') : p;
@@ -958,6 +966,45 @@ console.log('\n\x1b[36m--- Suite 9: Flat Table Extraction, Size Sorting & Export
   // Verify Embed Protocol Default Invariant
   const defaultWorkspaceSettings = { maxFilesPerChunk: 100000, mergeToSingleFile: false, respectGitignore: true, embedProtocol: true };
   assert(defaultWorkspaceSettings.embedProtocol === true, 'Default workspace configuration specifies embedProtocol === true');
+}
+
+// --- SUITE 10: BINARY PATH CLASSIFICATION & ZERO-TOKEN ASSET SHIELDING ---
+console.log('\n\x1b[36m--- Suite 10: Binary Path Classification & Asset Shielding ---\x1b[0m');
+{
+  // 1. Unreal Engine Formats
+  assert(isBinaryPath('Content/Characters/Hero.uasset') === true, 'Identified Unreal Engine .uasset as binary asset');
+  assert(isBinaryPath('Content/Maps/Level_01.umap') === true, 'Identified Unreal Engine .umap as binary asset');
+  assert(isBinaryPath('Content/Textures/Texture_01.ubulk') === true, 'Identified Unreal Engine .ubulk as binary asset');
+  assert(isBinaryPath('Content/Materials/M_Base.uexp') === true, 'Identified Unreal Engine .uexp as binary asset');
+  assert(isBinaryPath('Paks/Game-Windows.pak') === true, 'Identified Unreal Engine .pak as binary asset');
+
+  // 2. Documents, 3D Assets & Media
+  assert(isBinaryPath('docs/architecture.pdf') === true, 'Identified .pdf as binary asset');
+  assert(isBinaryPath('docs/specs.docx') === true, 'Identified .docx as binary asset');
+  assert(isBinaryPath('models/character.fbx') === true, 'Identified .fbx 3D model as binary asset');
+  assert(isBinaryPath('scenes/level.blend') === true, 'Identified .blend scene as binary asset');
+  assert(isBinaryPath('textures/diffuse.dds') === true, 'Identified .dds texture as binary asset');
+  assert(isBinaryPath('textures/artwork.psd') === true, 'Identified .psd Photoshop asset as binary asset');
+  assert(isBinaryPath('audio/music.mp3') === true, 'Identified .mp3 as binary asset');
+  assert(isBinaryPath('video/cutscene.mp4') === true, 'Identified .mp4 as binary asset');
+
+  // 3. Compiled Executables, Libraries & Archives
+  assert(isBinaryPath('bin/app.exe') === true, 'Identified .exe executable as binary asset');
+  assert(isBinaryPath('lib/native.dll') === true, 'Identified .dll dynamic library as binary asset');
+  assert(isBinaryPath('lib/libcore.so') === true, 'Identified .so shared object as binary asset');
+  assert(isBinaryPath('build/module.wasm') === true, 'Identified .wasm compiled WebAssembly as binary asset');
+  assert(isBinaryPath('releases/package.zip') === true, 'Identified .zip archive as binary asset');
+  assert(isBinaryPath('database/app.sqlite') === true, 'Identified .sqlite database as binary asset');
+
+  // 4. Source Code & Text Files (Zero False Positives)
+  assert(isBinaryPath('src/App.tsx') === false, 'TypeScript JSX (.tsx) is identified as text');
+  assert(isBinaryPath('src/utils/filterEngine.ts') === false, 'TypeScript (.ts) is identified as text');
+  assert(isBinaryPath('package.json') === false, 'JSON (.json) is identified as text');
+  assert(isBinaryPath('README.md') === false, 'Markdown (.md) is identified as text');
+  assert(isBinaryPath('scripts/run.py') === false, 'Python (.py) is identified as text');
+  assert(isBinaryPath('include/engine.hpp') === false, 'C++ header (.hpp) is identified as text');
+  assert(isBinaryPath('src/shader.hlsl') === false, 'HLSL Shader (.hlsl) is identified as text');
+  assert(isBinaryPath('scripts/logic.lua') === false, 'Lua script (.lua) is identified as text');
 }
 
 console.log('\n' + '='.repeat(70));

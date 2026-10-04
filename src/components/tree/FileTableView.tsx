@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import type { FileNode } from '../../types/ipc';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
-import { toScopedPathKey, parseScopedPathKey, ScopedRuleIndex } from '../../utils/filterEngine';
+import { toScopedPathKey, parseScopedPathKey, ScopedRuleIndex, isBinaryPath } from '../../utils/filterEngine';
 import { calculateTrueSize } from '../../utils/exportEngine';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
 import { ContextMenu } from './ContextMenu';
@@ -133,7 +133,8 @@ export function FileTableView({ rootPath, node, onToggleView }: FileTableViewPro
         const skippedLines = fileComps.reduce((sum, c) => sum + (c.lineCount || 0), 0);
         const estimatedTotalLines = Math.max(1, Math.round(n.size / 40));
         const trueSize = calculateTrueSize(n.size, estimatedTotalLines, skippedLines);
-        const tokens = Math.round(trueSize / 4);
+        const isBin = isBinaryPath(n.name);
+        const tokens = isBin ? 0 : Math.round(trueSize / 4);
 
         const parts = n.name.split('.');
         const ext = parts.length > 1 ? `.${parts.pop()!.toLowerCase()}` : 'no-ext';
@@ -299,6 +300,7 @@ export function FileTableView({ rootPath, node, onToggleView }: FileTableViewPro
     const calculateStats = (selFiles: Set<string>) => {
       let fileCount = 0;
       let totalBytes = 0;
+      let totalTextBytes = 0;
 
       if (selFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 };
 
@@ -306,6 +308,7 @@ export function FileTableView({ rootPath, node, onToggleView }: FileTableViewPro
         const { rootId, relativePath } = parseScopedPathKey(key);
         if (relativePath.endsWith('/')) return;
         const targetTree = rawTrees[rootId] || node;
+        const isBin = isBinaryPath(relativePath);
         
         const findSize = (n: FileNode, curRel: string): number => {
           if (curRel === relativePath && n.type === 'file') return n.size;
@@ -323,10 +326,13 @@ export function FileTableView({ rootPath, node, onToggleView }: FileTableViewPro
         if (sz > 0) {
           fileCount++;
           totalBytes += sz;
+          if (!isBin) {
+            totalTextBytes += sz;
+          }
         }
       });
 
-      const rawTokens = Math.round(totalBytes / 4);
+      const rawTokens = Math.round(totalTextBytes / 4);
       return {
         fileCount,
         kb: (totalBytes / 1024).toFixed(1),
@@ -378,7 +384,7 @@ export function FileTableView({ rootPath, node, onToggleView }: FileTableViewPro
       const filePaths: string[] = [];
       state.selectedFiles.forEach(k => {
         const { rootId, relativePath } = parseScopedPathKey(k);
-        if (!relativePath.endsWith('/')) {
+        if (!relativePath.endsWith('/') && !isBinaryPath(relativePath)) {
           const r = rootId || rootPath;
           filePaths.push(`${r}/${relativePath}`.replace(/\\/g, '/'));
         }

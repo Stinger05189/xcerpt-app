@@ -6,7 +6,7 @@ import { ContextMenu } from './ContextMenu';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useAppStore } from '../../store/appStore';
 import { generateEphemeralPayload } from '../../utils/exportEngine';
-import { toScopedPathKey, parseScopedPathKey } from '../../utils/filterEngine';
+import { toScopedPathKey, parseScopedPathKey, isBinaryPath } from '../../utils/filterEngine';
 import { 
   Search, 
   Plus, 
@@ -95,6 +95,7 @@ export function FileTree({ node, rootPath, onToggleView }: FileTreeProps) {
     const calculateStats = (selFiles: Set<string>) => {
       let fileCount = 0;
       let totalBytes = 0;
+      let totalTextBytes = 0;
 
       if (selFiles.size === 0) return { fileCount, kb: '0.0', tokens: '0', rawBytes: 0, rawTokens: 0 };
 
@@ -102,6 +103,7 @@ export function FileTree({ node, rootPath, onToggleView }: FileTreeProps) {
         const { rootId, relativePath } = parseScopedPathKey(key);
         if (relativePath.endsWith('/')) return;
         const targetTree = rawTrees[rootId] || node;
+        const isBin = isBinaryPath(relativePath);
         
         const findSize = (n: FileNode, curRel: string): number => {
           if (curRel === relativePath && n.type === 'file') return n.size;
@@ -119,10 +121,13 @@ export function FileTree({ node, rootPath, onToggleView }: FileTreeProps) {
         if (sz > 0) {
           fileCount++;
           totalBytes += sz;
+          if (!isBin) {
+            totalTextBytes += sz;
+          }
         }
       });
 
-      const rawTokens = Math.round(totalBytes / 4);
+      const rawTokens = Math.round(totalTextBytes / 4);
       return {
         fileCount,
         kb: (totalBytes / 1024).toFixed(1),
@@ -173,7 +178,7 @@ export function FileTree({ node, rootPath, onToggleView }: FileTreeProps) {
       const filePaths: string[] = [];
       state.selectedFiles.forEach(k => {
         const { rootId, relativePath } = parseScopedPathKey(k);
-        if (!relativePath.endsWith('/')) {
+        if (!relativePath.endsWith('/') && !isBinaryPath(relativePath)) {
           const r = rootId || rootPath;
           filePaths.push(`${r}/${relativePath}`.replace(/\\/g, '/'));
         }

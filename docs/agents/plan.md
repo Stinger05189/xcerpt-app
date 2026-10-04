@@ -18,35 +18,27 @@
 
 ## Active Queue: Version 2.3.0 (Session 031 Focus)
 
-- None Yet
+- [x] **WP-01: Universal Binary & Tree-Only Extension Matrix (`filterEngine.ts` & `main.cjs`)**
+  - Defined `BINARY_OR_TREE_ONLY_REGEX` and `isBinaryPath` covering Unreal Engine (`.uasset`, `.umap`, `.ubulk`, `.uexp`, `.uptnl`, `.pak`), Unity, 3D models (`.fbx`, `.blend`), documents (`.pdf`), audio/video, archives, executables, and databases.
+  - Automatically classified binary assets into `treeOnlyRules` upon folder scanning in `main.cjs`.
+- [x] **WP-02: Main Process Token Calculation & IPC Read Shielding (`main.cjs`)**
+  - Guarded `fs:calculateTokens` to skip binary files instantly, cap exact BPE tokenization at 2MB with fast proportional approximation, and perform non-blocking 4KB null-byte sniffing.
+  - Guarded `fs:readFile` to immediately reject known binary files with `"Binary file detected. Preview disabled."` before any disk I/O.
+- [x] **WP-03: Frontend Token & Stats Guarding (`FileTree.tsx` & `FileTableView.tsx`)**
+  - Filtered out `isBinaryPath` in `calculateExactTokens` in both tree and table views, avoiding unnecessary IPC roundtrips.
+  - Updated selection statistics to treat binary files as 0 context tokens.
+- [x] **WP-04: High-Performance Binary File Viewer (`BinaryFileViewer.tsx` & `ContextEditor.tsx`)**
+  - Created `BinaryFileViewer.tsx` with asset category icon badges and native OS actions (`Open with Default App`, `Reveal in OS`).
+  - Decoupled `ContextEditor` from calling `readFile` or mounting Monaco on binary assets, loading previews in 0ms.
+- [x] **WP-05: Diagnostic Test Suite Expansion & Validation (`run-diagnostics.mjs`)**
+  - Added Suite 10 covering binary classification across Unreal Engine assets, PDFs, 3D models, archives, and executables, verifying zero false positives on source code files.
 
 ---
 
 ## Completed in Version 2.2.0 (Session 030)
 
 - [x] **WP-01: Explicit File Boundary Token Specification & Manifest Prompt Overhaul**
-  - Updated `CODE_GENERATION_PROTOCOL_INSTRUCTION` in `src/utils/exportEngine.ts` and `Xcerpt_Manifest_xcerpt-app.md`.
-  - Mandated `<<<FILE_START: [ACTION] path/to/file.ext>>>` and `<<<FILE_END>>>` boundary tokens.
-  - Specified 4-backtick wrapping rule for complex markdown documentation containing internal code blocks.
 - [x] **WP-02: Deterministic Boundary Token Parser & Outer Fence Stripping**
-  - Implemented `FILE_START_TOKEN_REGEX` and `FILE_END_TOKEN_REGEX` in `src/features/session/engine/sessionParser.ts`.
-  - Created `stripOuterCodeFence` to strip matching wrapper code fences while preserving internal code blocks and unadorned code snippets.
-  - Updated `stripProtocolScaffolding` and `extractActionAndPath` to support boundary tokens.
-  - Upgraded `parseSessionMarkdown` to a dual-mode token/fence state machine with auto-recovery.
 - [x] **WP-03: Legacy 3-Backtick Markdown Parsing Forward Lookahead**
-  - Added `isInnerUnadornedFence` lookahead helper to resolve unadorned ` ``` ` code blocks inside 3-backtick markdown files.
 - [x] **WP-04: Full Plan Viewer & Ingestion Studio Alignment**
-  - Updated `FullPlanViewer.tsx` to detect boundary tokens and extract code artifacts 1:1 with session actions.
-  - Added a visual verification badge in `IngestionTriageStudio.tsx` when boundary tokens are verified.
 - [x] **WP-05: Comprehensive Parser Diagnostic Test Suite Expansion**
-  - Added Suites 14 through 19 in `scripts/test-session-parser.mjs` verifying boundary tokens, nested code blocks with/without languages, multi-file sequential documentation, raw un-fenced files, and auto-recovery.
-
----
-
-## Completed in Version 2.2.0 (Session 029)
-
-- [x] **Dual-Width State Architecture & Left Pane Infrastructure**
-- [x] **Export Settings Modal & Editor Viewport De-clutter**
-- [x] **Ultra-High-Performance Flat File & Folder Table View**
-- [x] **Keyboard Focus Management & Context Menu Dismissal Hardening**
-- [x] **Session Parser Hyphen Regex Fix & Multi-Root Disk Diffing Resolution**

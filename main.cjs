@@ -27,8 +27,14 @@ let mainWindow = null;
 let isWatcherUpdating = false;
 let pendingWatcherUpdate = false;
 
-const TREE_ONLY_REGEX = /\.(lock|png|jpe?g|gif|svg|ico|webp|pdf|mp4|webm|wav|mp3|zip|tar|gz|bz2|7z|bin|dll|exe|so|dylib|class|jar)$/i;
+const BINARY_OR_TREE_ONLY_REGEX = /\.(lock|png|jpe?g|gif|svg|ico|webp|bmp|tiff?|tga|dds|hdr|exr|psd|ai|raw|cr2|nef|pdf|doc|docx|xls|xlsx|ppt|pptx|odt|epub|mp4|mkv|avi|mov|wmv|flv|webm|m4v|wav|mp3|ogg|flac|aac|m4a|wma|zip|tar|gz|bz2|7z|rar|xz|zst|tgz|iso|dmg|bin|dll|exe|so|dylib|class|jar|war|pyc|pyo|pyd|o|obj|lib|a|wasm|ttf|otf|woff2?|eot|sqlite3?|db3?|s3db|mdb|ldb|uasset|umap|ubulk|uexp|uptnl|pak|asset|unity|prefab|mat|bundle|unitypackage|pck|fbx|blend|blend1|glb|gltf|max|3ds|dae|stl|step|stp|dwg)$/i;
 const TREE_ONLY_EXACT = ['.DS_Store', '.env', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
+
+function isBinaryPath(filePath) {
+  if (!filePath) return false;
+  const fileName = path.basename(filePath);
+  return BINARY_OR_TREE_ONLY_REGEX.test(fileName) || TREE_ONLY_EXACT.includes(fileName);
+}
 
 // --- Background Garbage Collection ---
 async function cleanupOldExports() {
@@ -70,7 +76,7 @@ async function scanDirectory(rootPath, blacklist, respectGitignore = true, curre
   }
 
   if (!isDir) {
-    if (TREE_ONLY_REGEX.test(name) || TREE_ONLY_EXACT.includes(name)) {
+    if (isBinaryPath(name)) {
       context.treeOnlyRules.push(path.posix.join(relativeToRoot.replace(/\\/g, '/')));
     }
     try {
@@ -417,14 +423,18 @@ ipcMain.handle('fs:scanDirectory', async (_, dirPath, blacklist, respectGitignor
 ipcMain.handle('fs:readFile', async (_, filePath) => {
   let fh = null;
   try {
+    if (isBinaryPath(filePath)) {
+      throw new Error("Binary file detected. Preview disabled.");
+    }
+
     const stats = await fs.stat(filePath);
     if (stats.size > 5 * 1024 * 1024) {
       throw new Error(`File exceeds 5MB limit (${(stats.size / (1024 * 1024)).toFixed(2)} MB). Preview disabled.`);
     }
 
     fh = await fs.open(filePath, 'r');
-    const buffer = Buffer.alloc(4096);
-    const { bytesRead } = await fh.read(buffer, 0, 4096, 0);
+    const buffer = Buffer.alloc(Math.min(8192, stats.size));
+    const { bytesRead } = await fh.read(buffer, 0, buffer.length, 0);
 
     for (let i = 0; i < bytesRead; i++) {
       if (buffer[i] === 0) {
@@ -471,6 +481,42 @@ ipcMain.handle('fs:calculateTokens', async (_, filePaths) => {
     
     for (const filePath of filePaths) {
       try {
+        if (isBinaryPath(filePath)) {
+          continue;
+        }
+
+        const stats = await fs.stat(filePath);
+        // Exclude files exceeding 2MB from exact BPE calculation to prevent event loop lockup
+        if (stats.size > 2 * 1024 * 1024) {
+          totalTokens += Math.round(stats.size / 4);
+          continue;
+        }
+
+        // Fast binary sniff: inspect up to first 4KB for null byte (0x00)
+        let fh = null;
+        let isBinary = false;
+        try {
+          fh = await fs.open(filePath, 'r');
+          const buffer = Buffer.alloc(Math.min(4096, stats.size));
+          const { bytesRead } = await fh.read(buffer, 0, buffer.length, 0);
+          for (let i = 0; i < bytesRead; i++) {
+            if (buffer[i] === 0) {
+              isBinary = true;
+              break;
+            }
+          }
+        } finally {
+          if (fh) {
+            try {
+              await fh.close();
+            } catch (e) {}
+          }
+        }
+
+        if (isBinary) {
+          continue;
+        }
+
         const content = await fs.readFile(filePath, 'utf-8');
         totalTokens += enc.encode(content).length;
       } catch (e) {}
