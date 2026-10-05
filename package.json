@@ -1,7 +1,7 @@
 {
   "name": "xcerpt-app",
   "private": false,
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "A premium, desktop-based Context Staging Environment for AI models.",
   "author": "Stinger05189",
   "license": "MIT",
@@ -37,7 +37,8 @@
     "preview": "vite preview",
     "test:diagnostics": "node scripts/run-diagnostics.mjs",
     "test:session": "node scripts/test-session-parser.mjs",
-    "test:llm": "node scripts/test-llm-provider.mjs"
+    "test:llm": "node scripts/test-llm-provider.mjs",
+    "test:browser": "node scripts/test-session-browser.mjs"
   },
   "build": {
     "appId": "com.xcerpt.app",

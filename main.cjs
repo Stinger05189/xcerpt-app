@@ -486,13 +486,11 @@ ipcMain.handle('fs:calculateTokens', async (_, filePaths) => {
         }
 
         const stats = await fs.stat(filePath);
-        // Exclude files exceeding 2MB from exact BPE calculation to prevent event loop lockup
         if (stats.size > 2 * 1024 * 1024) {
           totalTokens += Math.round(stats.size / 4);
           continue;
         }
 
-        // Fast binary sniff: inspect up to first 4KB for null byte (0x00)
         let fh = null;
         let isBinary = false;
         try {
@@ -895,6 +893,84 @@ ipcMain.handle('session:list', async (_, workspaceId) => {
     }
     return results.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   } catch (error) {
+    return [];
+  }
+});
+
+ipcMain.handle('session:getAll', async (_, workspaceId) => {
+  try {
+    const wsDir = path.join(DEV_SESSIONS_DIR, workspaceId);
+    await fs.mkdir(wsDir, { recursive: true });
+    const files = await fs.readdir(wsDir);
+    const sessions = [];
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const data = JSON.parse(await fs.readFile(path.join(wsDir, file), 'utf-8'));
+        sessions.push(data);
+      } catch (e) {}
+    }
+    return sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  } catch (error) {
+    console.error('Failed to get all dev sessions:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('session:getFileLedger', async (_, workspaceId) => {
+  try {
+    const wsDir = path.join(DEV_SESSIONS_DIR, workspaceId);
+    await fs.mkdir(wsDir, { recursive: true });
+    const files = await fs.readdir(wsDir);
+    const sessions = [];
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const data = JSON.parse(await fs.readFile(path.join(wsDir, file), 'utf-8'));
+        sessions.push(data);
+      } catch (e) {}
+    }
+    sessions.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    const ledgerMap = new Map();
+    for (const session of sessions) {
+      if (!session.actions) continue;
+      for (const action of session.actions) {
+        const relPath = action.targetRelativePath;
+        if (!ledgerMap.has(relPath)) {
+          ledgerMap.set(relPath, {
+            targetRelativePath: relPath,
+            targetRootPath: action.targetRootPath,
+            revisionCount: 0,
+            latestActionType: action.actionType,
+            latestUpdatedAt: session.updatedAt || session.createdAt,
+            sessions: []
+          });
+        }
+        const item = ledgerMap.get(relPath);
+        item.revisionCount++;
+        item.latestActionType = action.actionType;
+        item.latestUpdatedAt = session.updatedAt || session.createdAt;
+        item.sessions.push({
+          sessionId: session.id,
+          sessionName: session.name,
+          sessionCreatedAt: session.createdAt,
+          sessionUpdatedAt: session.updatedAt,
+          sessionStatus: session.status,
+          actionId: action.id,
+          actionType: action.actionType,
+          reviewStatus: action.reviewStatus,
+          originalContent: action.originalContent,
+          proposedContent: action.proposedContent,
+          workingContent: action.workingContent,
+          hasSkipBlocks: action.hasSkipBlocks,
+          skipBlockCount: action.skipBlockCount
+        });
+      }
+    }
+    return Array.from(ledgerMap.values());
+  } catch (error) {
+    console.error('Failed to get dev session file ledger:', error);
     return [];
   }
 });

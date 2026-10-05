@@ -73,3 +73,28 @@ export interface DevSession {
   explanations: MarkdownExplanationSection[];
   checkpoint: SessionCheckpoint;
 }
+
+export interface FileSessionOccurrence {
+  sessionId: string;
+  sessionName: string;
+  sessionCreatedAt: string;
+  sessionUpdatedAt: string;
+  sessionStatus?: DevSessionStatus;
+  actionId: string;
+  actionType: FileActionType;
+  reviewStatus: ActionReviewStatus;
+  originalContent: string | null;
+  proposedContent: string;
+  workingContent: string;
+  hasSkipBlocks: boolean;
+  skipBlockCount: number;
+}
+
+export interface DevSessionFileLedgerItem {
+  targetRelativePath: string;
+  targetRootPath: string;
+  revisionCount: number;
+  latestActionType: FileActionType;
+  latestUpdatedAt: string;
+  sessions: FileSessionOccurrence[];
+}

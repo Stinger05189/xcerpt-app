@@ -20,12 +20,23 @@ interface SessionState {
   error: string | null;
   planScrollTop: number;
 
+  // Dual-Mode Session Browser Navigation & Resizable Inspector State
+  browserViewMode: 'sessions' | 'files';
+  selectedLedgerPath: string | null;
+  selectedLedgerSessionId: string | null;
+  inspectorWidth: number;
+
   syncWorkspaceContext: (workspaceId: string) => void;
   setIngestionModalOpen: (open: boolean, workspaceId?: string) => void;
   setStudioOpen: (open: boolean, workspaceId?: string) => void;
   setBrowserModalOpen: (open: boolean) => void;
   setActiveActionId: (id: string | null, workspaceId?: string) => void;
   setPlanScrollTop: (scrollTop: number) => void;
+
+  setBrowserViewMode: (mode: 'sessions' | 'files') => void;
+  setSelectedLedgerPath: (path: string | null) => void;
+  setSelectedLedgerSessionId: (id: string | null) => void;
+  setInspectorWidth: (width: number) => void;
 
   initSessionFromMarkdown: (
     rawMarkdown: string,
@@ -70,6 +81,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   isApplying: false,
   error: null,
   planScrollTop: 0,
+
+  browserViewMode: 'sessions',
+  selectedLedgerPath: null,
+  selectedLedgerSessionId: null,
+  inspectorWidth: typeof window !== 'undefined' 
+    ? Number(localStorage.getItem('xcerpt_session_inspector_width') || 384) 
+    : 384,
 
   syncWorkspaceContext: (workspaceId: string) => {
     const { sessionsByWorkspace, activeActionIdsByWorkspace, openStudioByWorkspace, openIngestionByWorkspace } = get();
@@ -121,7 +139,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }));
     } else {
       set(state => ({ 
-        isStudioOpen: open,
+        isStudioOpen: open, 
         isIngestionModalOpen: open ? false : state.isIngestionModalOpen,
         isBrowserModalOpen: false
       }));
@@ -149,21 +167,29 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setPlanScrollTop: (scrollTop) => set({ planScrollTop: scrollTop }),
 
+  setBrowserViewMode: (mode) => set({ browserViewMode: mode }),
+  setSelectedLedgerPath: (path) => set({ selectedLedgerPath: path }),
+  setSelectedLedgerSessionId: (id) => set({ selectedLedgerSessionId: id }),
+  setInspectorWidth: (width) => {
+    const clamped = Math.max(280, Math.min(800, width));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('xcerpt_session_inspector_width', String(clamped));
+    }
+    set({ inspectorWidth: clamped });
+  },
+
   initSessionFromMarkdown: async (rawMarkdown, workspaceId, rootPaths, customTitle, customDescription) => {
     set({ error: null });
     try {
-      // Step 1: Preliminary pass through parser to extract all exact candidate relative paths
       const preliminarySession = parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, {});
       const existingFilesMap: Record<string, string | null> = {};
 
-      // Step 2: Query physical disk files across all root paths
       for (const action of preliminarySession.actions) {
         const relPath = action.targetRelativePath;
         for (const root of rootPaths) {
           const cleanRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
           const rootBase = cleanRoot.split('/').pop() || '';
 
-          // 2a. Direct path check
           const directAbs = `${cleanRoot}/${relPath}`.replace(/\\/g, '/');
           try {
             const text = await window.api.readFile(directAbs);
@@ -172,7 +198,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             existingFilesMap[directAbs] = null;
           }
 
-          // 2b. Root folder name prepended by LLM check
           if (rootBase && relPath.startsWith(`${rootBase}/`)) {
             const strippedRel = relPath.slice(rootBase.length + 1);
             const strippedAbs = `${cleanRoot}/${strippedRel}`.replace(/\\/g, '/');
@@ -186,7 +211,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
       }
 
-      // Step 3: Final deterministic parse with resolved file contents
       const session = parseSessionMarkdown(rawMarkdown, workspaceId, rootPaths, existingFilesMap);
       if (customTitle && customTitle.trim()) {
         session.name = customTitle.trim();
@@ -322,7 +346,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const updatedActions = activeSession.actions.map(a => 
         a.id === activeActionId ? { 
           ...a, 
-          proposedContent: a.workingContent,
+          proposedContent: a.workingContent, 
           reviewStatus: 'MERGED' as ActionReviewStatus 
         } : a
       );

@@ -207,7 +207,7 @@ export interface ElectronAPI {
   getVersion: () => Promise<string>;
   getGitStatus: (targetPath: string) => Promise<Record<string, string>>;
   getGitBranch: (targetPath: string) => Promise<string | null>;
-  getGitDiff: (dirPath: string, files?: string[]) => Promise<string>;
+  getGitDiff: (dirPath, files?: string[]) => Promise<string>;
   getGitLog: (dirPath: string, count?: number) => Promise<string>;
   commitGit: (dirPath: string, message: string, files?: string[]) => Promise<{ success: boolean; hash?: string; error?: string }>;
 
@@ -241,6 +241,8 @@ export interface ElectronAPI {
     completedAt?: string;
     summary: import('../features/session/types/session').DevSessionSummary 
   }>>;
+  getAllDevSessions: (workspaceId: string) => Promise<import('../features/session/types/session').DevSession[]>;
+  getDevSessionFileLedger: (workspaceId: string) => Promise<import('../features/session/types/session').DevSessionFileLedgerItem[]>;
   deleteDevSession: (workspaceId: string, sessionId: string) => Promise<void>;
   applyFileAction: (absolutePath: string, content: string | null, actionType: 'NEW' | 'MODIFIED' | 'DELETED' | 'PARTIAL_DIFF') => Promise<void>;
   revertCheckpointFiles: (snapshotFiles: Record<string, string | null>) => Promise<void>;

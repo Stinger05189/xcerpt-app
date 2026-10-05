@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('api', {
   saveDevSession: (workspaceId, session) => ipcRenderer.invoke('session:save', workspaceId, session),
   loadDevSession: (workspaceId, sessionId) => ipcRenderer.invoke('session:load', workspaceId, sessionId),
   listDevSessions: (workspaceId) => ipcRenderer.invoke('session:list', workspaceId),
+  getAllDevSessions: (workspaceId) => ipcRenderer.invoke('session:getAll', workspaceId),
+  getDevSessionFileLedger: (workspaceId) => ipcRenderer.invoke('session:getFileLedger', workspaceId),
   deleteDevSession: (workspaceId, sessionId) => ipcRenderer.invoke('session:delete', workspaceId, sessionId),
   applyFileAction: (absolutePath, content, actionType) => ipcRenderer.invoke('session:applyAction', absolutePath, content, actionType),
   revertCheckpointFiles: (snapshotFiles) => ipcRenderer.invoke('session:revertCheckpoint', snapshotFiles),

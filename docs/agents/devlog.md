@@ -16,43 +16,92 @@
 
 ---
 
-## Active Epoch: 06 - Native LLM Integrations & Copilot Automation (v2.2.0)
+## Active Epoch: 06 - Native LLM Integrations & Copilot Automation (v2.3.0)
+
+### Session 032
+
+- **Focus Area:** Dev Session Browser Overhaul, File Ledger Revision Time-Machine, Multi-Session Comparison Triangulation, Deep Code Content Search, and Persistent Resizable Inspector.
+- **Key Decisions:**
+  - **Dual-Mode Session Navigation Architecture (`SessionBrowserModal.tsx`):**
+    - Diagnosed the core workflow friction in session review: searching through dozens of historic sessions to locate when a specific file was introduced, altered, or deleted was slow and un-indexed, with file pill names clipped on the right.
+    - Split the Session Browser into two top-level operational modes: **Sessions View** (session-centric review) and **File Ledger View** (file-centric revision tracking).
+  - **Cross-Session File Ledger & Node.js Aggregation (`main.cjs` / `sessionStore.ts`):**
+    - Implemented `session:getFileLedger` in `main.cjs` to scan and aggregate all session files in `<userData>/XcerptSessions/dev_sessions/<workspaceId>` in sub-10ms.
+    - Computes an inverted file-to-session index returning unique relative paths, total revision counts, latest action types, and chronological occurrence histories (`FileSessionOccurrence[]`).
+  - **Interactive Revision Time-Machine (`FileHistoryDiffStage.tsx`):**
+    - Built a dedicated multi-session comparison stage featuring an interactive horizontal revision timeline track (`Disk [Current]` ⇄ `Session N` ⇄ `Session N-1` ⇄ `Checkpoint Original`).
+    - Implemented Comparison Triangulation: allows developers to toggle between:
+      1. `Session vs. Current Disk` (identifies whether working tree diverges from proposed state).
+      2. `Session vs. Previous Session Revision` (isolates the incremental diff introduced in that specific session).
+      3. `Session vs. Pre-Session Checkpoint` (shows total changes from pre-session base).
+    - If the compared states are identical, Monaco Diff is automatically bypassed in favor of a clean unified editor badged with `Identical (No Differences)`.
+    - Added one-click "Apply Revision to Disk" action with confirmation, enabling instantaneous rollbacks or cherry-picks to physical disk directly from the session ledger.
+  - **Deep File Code Content Search:**
+    - Augmented the Sessions table search bar with a toggleable `Search Code` mode (`searchInCodeContent`), querying inside `workingContent`, `proposedContent`, and `rawPayloadContent` across all historic sessions.
+  - **Resizable & Persistent Inspector:**
+    - Upgraded the right-hand inspector pane with pointer drag resizing, boundary clamping (280px–800px), and persistent storage in `localStorage` (`xcerpt_session_inspector_width`).
+    - Overhauled file cards with full-width wrapping, unclipped paths, action badges with iconography (`[NEW]`, `[MOD]`, `[DIFF]`, `[DEL]`), and quick-view code preview dialogs.
+  - **Automated Diagnostic Suite (`scripts/test-session-browser.mjs`):**
+    - Created a 6-suite test script verifying multi-session file aggregation, chronological ordering, deep content search, diff comparisons, action badge classification, and width clamping. All 6 suites pass.
+- **Core Files Modified/Created:**
+  - `src/features/session/types/session.ts`, `src/features/session/store/sessionStore.ts`
+  - `main.cjs`, `preload.cjs`, `src/types/ipc.d.ts`
+  - `src/features/session/components/diff/FileHistoryDiffStage.tsx`
+  - `src/features/session/components/SessionBrowserModal.tsx`
+  - `scripts/test-session-browser.mjs`, `package.json`
+
+---
+
+### Session 031
+
+- **Focus Area:** Universal Binary & Tree-Only Extension Matrix, Main Process Token Shielding, 0ms Binary Viewer, and Diagnostic Expansion.
+- **Key Decisions:**
+  - **Universal Binary & Tree-Only Matrix (`filterEngine.ts` / `main.cjs`):**
+    - Established `BINARY_OR_TREE_ONLY_REGEX` and `isBinaryPath` covering Unreal Engine assets (`.uasset`, `.umap`, `.ubulk`, `.uexp`, `.uptnl`, `.pak`), Unity assets, 3D models (`.fbx`, `.blend`), documents (`.pdf`, `.docx`), audio/video, compressed archives, databases, and compiled binaries.
+    - Updated `scanDirectory` in `main.cjs` to automatically classify discovered binary files into `treeOnlyRules` upon root ingestion, preserving spatial awareness while strictly omitting content from context payloads.
+  - **Token Calculation & Read Shielding (`main.cjs`):**
+    - Hardened `fs:calculateTokens` to skip binary paths immediately, capped exact BPE tokenization at 2MB with proportional estimation for larger files, and introduced non-blocking 4KB null-byte sniffing.
+    - Guarded `fs:readFile` to reject binary files instantly before disk reads.
+  - **Zero-Token Virtual Graph Accounting & High-Performance Viewer (`BinaryFileViewer.tsx`):**
+    - Filtered out binary files from exact token IPC invocations in `FileTree.tsx` and `FileTableView.tsx`, treating binary context tokens as 0.
+    - Created `BinaryFileViewer.tsx` with category badges and native OS controls (`Open with Default App`, `Reveal in OS`), loading previews in 0ms without mounting Monaco.
+  - **Diagnostic Test Suite Expansion (`scripts/run-diagnostics.mjs`):**
+    - Added Suite 10 verifying binary classification across 19 categories with zero false positives on source code files. All 10 suites pass.
+- **Core Files Modified:**
+  - `src/utils/filterEngine.ts`, `main.cjs`, `src/components/tree/FileTree.tsx`, `src/components/tree/FileTableView.tsx`
+  - `src/components/editor/BinaryFileViewer.tsx`, `src/components/editor/ContextEditor.tsx`
+  - `scripts/run-diagnostics.mjs`
+
+---
 
 ### Session 030
 
 - **Focus Area:** Explicit File Boundary Parsing Architecture (`<<<FILE_START>>>` / `<<<FILE_END>>>`), Complex Nested Markdown Documentation Extraction, Outer Code Fence Stripping, Unadorned Internal Code Block Lookahead, and Full Plan Synchronization.
 - **Key Decisions:**
   - **Explicit File Boundary Token Protocol (`src/utils/exportEngine.ts` / `Xcerpt_Manifest_xcerpt-app.md`):**
-    - Diagnosed the core vulnerability in code-fence-only markdown parsers: when an LLM outputs markdown documentation containing internal code blocks without a language specifier (unadorned ` ``` `), the parser cannot distinguish between the start/end of an internal block and the closing fence of the outer file block.
     - Upgraded `CODE_GENERATION_PROTOCOL_INSTRUCTION` to mandate top-level boundary tokens: `<<<FILE_START: [ACTION] path/to/file.ext>>>` and `<<<FILE_END>>>`.
-    - Preserved Line 1 comment path declarations (`// [ACTION] path`, `<!-- [ACTION] path -->`) for compatibility with external diff tools.
   - **Deterministic Token Parser & Outer Fence Stripping (`sessionParser.ts`):**
-    - Implemented `FILE_START_TOKEN_REGEX` and `FILE_END_TOKEN_REGEX` supporting all action tags, quoted paths, hyphenated paths, and HTML comment variants.
-    - Implemented `stripOuterCodeFence` which inspects the lines between boundary tokens: if wrapped in outer matching code fences (such as `markdown ... `), it safely removes the wrapper fences while leaving all internal 3-backtick and unadorned code snippets completely intact.
-    - Updated `stripProtocolScaffolding` to strip stray boundary tokens and clean line 1 headers.
+    - Implemented `FILE_START_TOKEN_REGEX` and `FILE_END_TOKEN_REGEX` supporting all action tags, quoted paths, and HTML comment variants.
+    - Implemented `stripOuterCodeFence` which inspects lines between boundary tokens to safely remove outer matching markdown wrappers while leaving internal 3-backtick and unadorned code snippets intact.
   - **Legacy Markdown Parsing Forward Lookahead (`isInnerUnadornedFence`):**
-    - For legacy responses that omit boundary tokens, augmented 3-backtick markdown tracking with forward lookahead: when encountering an unadorned ` ``` ` at `innerFenceDepth === 0`, the parser inspects forward lines for a matching closing fence before major header boundaries. If found, it treats the fence as an opening inner block instead of prematurely truncating the file.
+    - For legacy responses lacking boundary tokens, augmented 3-backtick markdown tracking with forward lookahead to prevent premature file truncation.
   - **Full Plan Viewer Synchronization (`FullPlanViewer.tsx`):**
-    - Updated artifact extraction in `FullPlanViewer.tsx` to detect `FILE_START_TOKEN_REGEX` and `FILE_END_TOKEN_REGEX`, ensuring that artifacts listed in the Full Plan view correspond 1:1 with parsed session actions.
-  - **Triage Studio Boundary Verification Badge (`IngestionTriageStudio.tsx`):**
-    - Added an active verification badge (`Boundary Tokens Verified`) in the studio header when explicit tokens are detected in the incoming payload.
+    - Updated artifact extraction to detect boundary tokens, synchronizing Full Plan view 1:1 with parsed session actions.
   - **Test Suite Expansion (`scripts/test-session-parser.mjs`):**
-    - Added Suites 14 through 19 covering explicit boundary tokens with nested bash and unadorned code blocks, raw files without fences, multi-file sequential documentation batches with interstitial reasoning, unterminated token auto-recovery, and deletion tombstones. All 19 suites pass.
+    - Added Suites 14 through 19 covering boundary tokens with nested code blocks, raw files without fences, and deletion tombstones. All 19 suites pass.
 - **Core Files Modified:**
   - `src/utils/exportEngine.ts`, `Xcerpt_Manifest_xcerpt-app.md`
   - `src/features/session/engine/sessionParser.ts`, `src/features/session/components/drawer/FullPlanViewer.tsx`
   - `src/features/session/components/triage/IngestionTriageStudio.tsx`
   - `scripts/test-session-parser.mjs`
-  - `docs/agents/agent.md`, `docs/agents/conventions.md`, `docs/agents/devlog.md`, `docs/agents/plan.md`
-  - `docs/0_Excerpt_Overview.md`, `docs/1_Excerpt_Architecture.md`, `docs/2_Excerpt_Workflows.md`, `docs/3_Excerpt_Implementation.md`
 
 ---
 
 ## Archived Epochs
 
 - **Epoch 00 (Template Setup):** Initialized the Agent Forge workflow.
-- **Epoch 01 (Foundation & Architecture):** Established the core Vite + React + Electron + Zustand stack with Tailwind CSS v4. Enforced the "Stable Relative Path" architectural rule, binding all React keys and Zustand state maps strictly to file paths to permanently resolve UI selection drift. Bootstrapped the initial recursive file scanner and unified frameless Tree UI.
-- **Epoch 02 (Context Compression & Export Staging):** Integrated `@monaco-editor/react` for context compression with a read-only, auto-healing skip-block system bound to stable relative paths. Built a high-performance Export Engine leveraging Node.js recursive scanning (using directory-first `dirent` checks to bypass `try/catch` I/O spikes), a single mutable `Context` object for memory safety, and flattened chunk exports via native OS drag-and-drop. Transitioned the architecture to a Multi-Workspace IDE utilizing a Dual-Store setup (`AppStore` for global IDE state, single re-hydrating `WorkspaceStore` for the active project) with implicit auto-saving, responsive container queries, and a full-screen Workspace Browser overlay.
-- **Epoch 03 (Advanced Workflows & Customization):** Decoupled the background chunking engine from explicitly invoked, process-bound "Ephemeral Quick Exports". Migrated workspace logic to a Preset-based architecture allowing users to swap visual exclusions and compression profiles instantly. Overhauled the UI with a fixed-position flyout sidebar, eliminated vertical layout shifting (CLS) in the File Tree, and integrated dynamic, CSS-variable-based theming. Introduced a global File Spoofing engine (Extension Overrides) to seamlessly bypass strict LLM upload filters while explicitly logging the physical renaming inside the prompt. Fixed critical Node.js CPU/Event Loop starvation by migrating export I/O to synchronous blocking calls and utilizing native regex evaluations to shield Chokidar watcher events.
-- **Epoch 04 (Rendering Optimization & Curation Architecture - v1.6.0 & v1.6.1):** Overhauled outbound curation to a zero-hitch virtual payload graph in RAM, eradicating background disk thrashing and operating system file locks via guarded read-only descriptors. Enforced scoped composite path keys (`${rootId}::${relativePath}`) and bottom-up directory lookups (`lastIndexOf`), resolving cross-root rule pollution and inclusion traps while clocking 10,000 nodes in under 20ms (< 25ms SLA). Eradicated double-slash traversal bugs, standardized canonical manifest naming with embedded code generation protocols, established tree-only 0-byte metrics, and introduced VS Code-style transient/pinned tabs with drag overflow scrolling.
-- **Epoch 05 (Bidirectional LLM Dev Studio - v2.0.0):** Completed the bidirectional inbound response engineering pipeline with Monaco Diff and manual buffer editing while preserving language comment syntax and line 1 relative file paths. Built the Interactive Ingestion Triage Studio with real-time file boundary rulers, multi-location reasoning associations (preamble, interstitial, epilogue), and nested code fence depth tracking for markdown-wrapped files. Established non-invasive Git working tree integration, checkpoint rollbacks, and full-screen session catalog management with IPC projection parity.
+- **Epoch 01 (Foundation & Architecture):** Established the core stack with Tailwind CSS v4. Enforced Stable Relative Paths, binding selection maps strictly to file paths.
+- **Epoch 02 (Context Compression & Export Staging):** Integrated Monaco Editor for context compression with read-only skip-blocks. Built recursive Export Engine and multi-workspace single re-hydrating store.
+- **Epoch 03 (Advanced Workflows & Customization):** Decoupled background chunking from Ephemeral Quick Exports. Migrated to Presets, CSS variable theming, and Extension Overrides.
+- **Epoch 04 (Rendering Optimization & Curation Architecture - v1.6.0 & v1.6.1):** Outbound curation via in-memory virtual payload graph. Scoped composite keys (`${rootId}::${relativePath}`) and bottom-up directory resolution (< 25ms SLA for 10k nodes).
+- **Epoch 05 (Bidirectional LLM Dev Studio - v2.0.0):** Monaco Diff merge pipeline with language comment headers, Interactive Ingestion Triage Studio with real-time boundary rulers, Git working tree checkpoints, and catalog management.

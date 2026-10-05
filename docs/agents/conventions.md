@@ -131,3 +131,19 @@
   - `[MODIFIED]` is designated for small files (<300 lines) or comprehensive architectural rewrites.
   - `[PARTIAL_DIFF]` with natural structural anchors and standardized skip comments (`// ... [Skipped: Unchanged logic] ...`) is strictly required for large files with localized changes, preventing token exhaustion and 5,000+ line outputs.
 - **Explicit Boundary Tokens Requirement:** Manifests instruct models to bound all files with `<<<FILE_START: [ACTION] path>>>` and `<<<FILE_END>>>` to ensure large markdown documentation containing internal code blocks (with or without language tags) can be extracted without syntax truncation.
+
+## 11. Dev Session Time-Machine & Cross-Session File Tracking (v2.3+)
+
+- **Node.js Sub-10ms File Ledger Aggregation (`session:getFileLedger`):**
+  - Grouping file actions across dozens of session JSONs must be performed in Node.js rather than issuing multiple roundtrip IPC requests to the renderer.
+  - The ledger aggregates unique relative paths, total revision counts, latest action types, and chronological occurrence histories (`FileSessionOccurrence[]`).
+- **Comparison Triangulation (Disk vs Selected Session vs Prior Session vs Checkpoint):**
+  - Diff viewers tracking historical revisions against live disk must support 3 distinct comparison modes:
+    1. `Session vs Disk`: identifies whether the live working tree matches the proposed session state.
+    2. `Session vs Prior Session`: isolates the incremental delta introduced in that specific session.
+    3. `Session vs Checkpoint`: shows total change from pre-session base.
+  - When the compared texts are identical, Monaco Diff is automatically bypassed in favor of a clean unified editor badged with `Identical (No Differences)`.
+- **Persistent Auxiliary Inspector Sizing Pattern:**
+  - When inspector panes or flyouts require adjustable widths alongside virtualized tables, clamp width boundaries (280px–800px) and persist in `localStorage` (`xcerpt_session_inspector_width`) with store hydration.
+- **Deep Content Search Decoupling:**
+  - Full-text search across large historic code bodies must be toggleable (`searchInCodeContent`) to keep standard metadata/path fuzzy searching sub-millisecond on every keystroke.

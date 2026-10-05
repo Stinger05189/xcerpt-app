@@ -16,29 +16,30 @@
 
 ---
 
-## Active Queue: Version 2.3.0 (Session 031 Focus)
+## Active Queue: Version 2.4.0 (Session 033 Focus)
 
-- [x] **WP-01: Universal Binary & Tree-Only Extension Matrix (`filterEngine.ts` & `main.cjs`)**
-  - Defined `BINARY_OR_TREE_ONLY_REGEX` and `isBinaryPath` covering Unreal Engine (`.uasset`, `.umap`, `.ubulk`, `.uexp`, `.uptnl`, `.pak`), Unity, 3D models (`.fbx`, `.blend`), documents (`.pdf`), audio/video, archives, executables, and databases.
-  - Automatically classified binary assets into `treeOnlyRules` upon folder scanning in `main.cjs`.
-- [x] **WP-02: Main Process Token Calculation & IPC Read Shielding (`main.cjs`)**
-  - Guarded `fs:calculateTokens` to skip binary files instantly, cap exact BPE tokenization at 2MB with fast proportional approximation, and perform non-blocking 4KB null-byte sniffing.
-  - Guarded `fs:readFile` to immediately reject known binary files with `"Binary file detected. Preview disabled."` before any disk I/O.
-- [x] **WP-03: Frontend Token & Stats Guarding (`FileTree.tsx` & `FileTableView.tsx`)**
-  - Filtered out `isBinaryPath` in `calculateExactTokens` in both tree and table views, avoiding unnecessary IPC roundtrips.
-  - Updated selection statistics to treat binary files as 0 context tokens.
-- [x] **WP-04: High-Performance Binary File Viewer (`BinaryFileViewer.tsx` & `ContextEditor.tsx`)**
-  - Created `BinaryFileViewer.tsx` with asset category icon badges and native OS actions (`Open with Default App`, `Reveal in OS`).
-  - Decoupled `ContextEditor` from calling `readFile` or mounting Monaco on binary assets, loading previews in 0ms.
-- [x] **WP-05: Diagnostic Test Suite Expansion & Validation (`run-diagnostics.mjs`)**
-  - Added Suite 10 covering binary classification across Unreal Engine assets, PDFs, 3D models, archives, and executables, verifying zero false positives on source code files.
+- [ ] **WP-01: Git Branch Switcher & Multi-Branch Session Isolation (`DevStudioModal.tsx` & `main.cjs`)**
+  - Expose Git branch list and branch checkout/switch capabilities via IPC (`git:listBranches`, `git:checkoutBranch`).
+  - Render an interactive branch switcher in the Dev Studio and Session Browser subheaders, showing branch indicators on sessions and filtering sessions by target branch.
+- [ ] **WP-02: Multi-File Stash Rollback & Ephemeral Checkpoint Browser (`checkpointEngine.ts`)**
+  - Allow developers to view pre-session snapshot files as independent browseable trees.
+  - Implement selective file checkpoint rollback without rolling back the entire session.
+- [ ] **WP-03: Visual File Ledger Graph & Revision Heatmap (`SessionBrowserModal.tsx`)**
+  - Add visual frequency indicators and mini revision heatmaps in the File Ledger view to highlight files undergoing the most churn across sessions.
+- [ ] **WP-04: Monaco Minimap Diff Markers & Skip Block Decorators (`SessionDiffEditor.tsx`)**
+  - Render custom color-coded diff hunk markers and skip block indicators on Monaco's overview ruler and minimap tracks during session review.
+- [ ] **WP-05: Comprehensive Diagnostic Suite Expansion (`scripts/test-session-browser.mjs`)**
+  - Expand test suites covering multi-branch session isolation, branch checkout rollbacks, and selective checkpoint file restorations.
 
 ---
 
-## Completed in Version 2.2.0 (Session 030)
+## Completed in Version 2.3.0 (Sessions 031 & 032)
 
-- [x] **WP-01: Explicit File Boundary Token Specification & Manifest Prompt Overhaul**
-- [x] **WP-02: Deterministic Boundary Token Parser & Outer Fence Stripping**
-- [x] **WP-03: Legacy 3-Backtick Markdown Parsing Forward Lookahead**
-- [x] **WP-04: Full Plan Viewer & Ingestion Studio Alignment**
-- [x] **WP-05: Comprehensive Parser Diagnostic Test Suite Expansion**
+- [x] **WP-01: Multi-Session File Indexing, Content Search Engine & IPC Bridge (`main.cjs`, `preload.cjs`, `types/ipc.d.ts`, `sessionStore.ts`)**
+- [x] **WP-02: Enhanced Session Inspector with Resizable Width, File Search, and Action Badges (`SessionBrowserModal.tsx`)**
+- [x] **WP-03: Dual-Mode Session Browser: Sessions View vs. File Timeline Mode (`SessionBrowserModal.tsx`)**
+- [x] **WP-04: Interactive Multi-Session File Diff Viewer & Revision Time-Machine (`FileHistoryDiffStage.tsx`)**
+- [x] **WP-05: Diagnostic Test Suite & Verification (`scripts/test-session-browser.mjs`)**
+- [x] **WP-06: Universal Binary & Tree-Only Extension Matrix (`filterEngine.ts` & `main.cjs`)**
+- [x] **WP-07: Main Process Token Calculation & IPC Read Shielding (`main.cjs`)**
+- [x] **WP-08: High-Performance Binary File Viewer (`BinaryFileViewer.tsx` & `ContextEditor.tsx`)**

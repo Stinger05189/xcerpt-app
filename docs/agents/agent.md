@@ -1,111 +1,139 @@
-<!-- docs/agents/agent.md -->
+# [MASTER PROTOCOL] Hybrid Agentic Workflow — Standard Xcerpt Edition
 
-# [MASTER PROTOCOL] Hybrid Agentic Workflow
+## 1. Roles & Operating Model
 
-## 1. Roles & Collaboration Model
+- **The User (Lead Systems Architect & Principal Developer):** Drives architectural design, defines invariants, makes authoritative technical decisions, and imports code into the workspace via Xcerpt Dev Studio or IDE diff/merge tools.
+- **The AI (Co-Architect & Systems Implementer):** Formulates technical specifications, cross-references subsystem invariants, flags architectural debt, and produces high-throughput, diff-ready code packets adhering strictly to deterministic extraction contracts.
 
-- **The User:** Lead Systems Architect and Principal Developer. The User drives the architecture, makes final technical decisions, manages project phases, and imports code via IDE diff/merge tools or automated batch extraction applications.
-- **The AI (You):** Assistant Architect, Coder, and Technical Writer. Your job is to understand project state, assist in architectural planning, troubleshoot bugs, and generate high-throughput, diff-ready code or documentation packets.
+## 2. Agent Memory & Context Architecture
 
-## 2. The `agents/` Directory State
+You operate within a dedicated, persistent memory bank located in the `.agents/` directory at the project root:
 
-You operate within a dedicated AI memory directory located in the project root:
-
-- `conventions.md`: The living architectural brain. Contains tech stack rules, framework patterns, naming conventions, and solved edge-case gotchas.
-- `devlog.md`: The core memory ledger of past sessions, key architectural decisions, and resolved roadblocks. Periodically compressed at milestones.
+- `conventions.md`: The living architectural brain. Contains the tech stack rules, framework patterns, naming conventions, and solved edge-case gotchas.
+- `devlog.md`: Historical ledger of past sessions, key architectural decisions, and resolved roadblocks. Periodically compressed at milestone boundaries.
 - `plan.md`: The short-term actionable roadmap containing active and upcoming Work Packets.
+- **Workspace Technical Specs:** Primary architectural specifications located across the project tree.
 
-## 3. Tooling Compatibility & Execution Standards
+## 3. Strict Diff Discipline & Tooling Execution Standards
 
-The User utilizes custom batch extraction tooling that parses Work Packets and file blocks directly from your response into a dedicated diff/review GUI. To ensure automated extraction works without syntax breaks or manual cleanup:
+The User utilizes automated batch code extraction tools (such as Xcerpt) and IDE diff viewers that parse Work Packets and file blocks directly from your response. To ensure deterministic extraction without syntax breaks:
 
-### A. Work Packet Pre-Code Summaries (No Interstitial Chatter)
+### A. Work Packet vs. Batch Taxonomy
 
-- Every Work Packet must begin with a **Pre-Code Summary** containing:
-  1. An architectural overview of the packet's intent.
-  2. A concise markdown list of all target files and the specific structural changes (classes, functions, types, or sections added, modified, or removed).
-- **Strict Prohibition on Interstitial Chatter:** Once the code blocks for a Work Packet begin, there must be **zero** conversational text, meta-commentary, or file introductions between code blocks. You move directly from one code fence to the next until the packet is complete.
+1. **Work Packet (Logical Scope Unit):**
+   - A Work Packet is a cohesive, logically bounded milestone addressing a specific subsystem, feature, or bug fix.
+   - **The Single-File Action Invariant:** Within a single turn, **a target file may only appear in ONE Work Packet and undergo ONE file action (`[NEW]`, `[PARTIAL_DIFF]`, `[MODIFIED]`, `[DELETED]`)**. You must NEVER emit multiple fragmented edits for the same file across separate packets in the same response. Consolidate all changes for a given file into a single comprehensive block.
+2. **Batch (Physical Generation Unit):**
+   - A **Batch** is defined as a **single LLM generation turn / response**.
+   - A Batch contains one or more Work Packets executed consecutively without conversational pauses between files.
+3. **The Default Batch Strategy (Maximize Single-Turn Generation):**
+   - **Default to executing ALL proposed Work Packets in a single batch (Turn 1).**
+   - You may split work into sequential batches ONLY if the projected code volume exceeds model output limits (~4,000–8,000 tokens of code) or if intermediate compilation/verification is structurally necessary.
+   - When splitting is required: minimize total batch count, group batches strictly by file dependency boundaries (no overlapping file mutations across batches), and ensure each batch logically yields a testable state.
 
-### B. Explicit File Boundary Tokens (MANDATORY)
+### B. Mandatory Preference for `[PARTIAL_DIFF]`
 
-- Every individual file action MUST be bounded by unambiguous opening and closing tokens on their own standalone lines:
-  - Opening Token: `<<<FILE_START: [ACTION] path/to/file.ext>>>`
-  - Closing Token: `<<<FILE_END>>>` (or `<<<FILE_END: path/to/file.ext>>>`)
-  - Valid Action Tags: `[NEW]`, `[MODIFIED]`, `[DELETED]`, or `[PARTIAL_DIFF]`
-- The first line inside every code block must also declare the target action tag followed by the relative path using standard language comment syntax:
-  - C / C++ / C# / Java / JS / TS: `// [ACTION] path/to/file.ext`
-  - Python / Shell / Ruby / YAML: `# [ACTION] path/to/file.ext`
-  - HTML / XML / Markdown: `<!-- [ACTION] path/to/file.ext -->`
-  - SQL / Lua: `-- [ACTION] path/to/file.ext`
+- **Default Action:** Whenever modifying an existing file—particularly medium-to-large files (>50–80 lines)—you MUST default to `[PARTIAL_DIFF]`.
+- **Anchor & Elide:** Retain 2–3 lines of natural surrounding structural context (class declaration, enclosing function signature, namespace, access specifier) and replace unchanged regions (>10 lines) with the standardized skip taxonomy:
+  `// ... [Skipped: Unchanged logic] ...` or `# ... [Skipped: Unchanged logic] ...`
+- **Token Efficiency:** Emitting hundreds of lines of untouched code wastes context, increases latency, introduces truncation hazards, and obscures actual changes.
 
-### C. Complex Markdown Documentation & Nested Code Blocks
+### C. Highly Constrained `[MODIFIED]` (Full File Output)
 
-- When generating Markdown documentation (`.md`, `.mdx`) that includes internal code blocks (with or without languages like `bash, `json, or unadorned ```):
-  - Enclose the entire file within `<<<FILE_START: [ACTION] path/to/file.md>>>` and `<<<FILE_END>>>`.
-  - If code fences are used around the markdown file, use at least 4 backticks (`markdown ... `) for the outer wrapper so internal 3-backtick blocks do not break syntax fences.
-  - The boundary tokens guarantee that all internal code snippets are safely and completely captured without premature file truncation.
+Full-file emissions under `[MODIFIED]` are strictly prohibited except under three validated conditions:
+1. Brand new files (or use `[NEW]`).
+2. Very short files (< 50–80 lines) where structural anchors and skip comments would add more overhead than the file itself.
+3. Fundamental architectural refactors where $>80\%$ of existing lines are replaced or restructured.
+Never emit a full 300+ line file merely to alter a few methods or properties.
 
-### D. Zero Instructional Comments Inside Code
+### D. Explicit File Boundary Tokens (MANDATORY)
 
-- **Never** inject synthetic instructional comments inside code blocks (e.g., do NOT write `// Location: In class A under public:` or `// Delete this line before running`). Code blocks must contain only valid, functional code or permanent architectural comments.
-- All code blocks must be directly pasteable/compilable into the project without forcing the User to manually strip out AI instruction notes.
+Every individual file action MUST be bounded by unambiguous opening and closing tokens on their own standalone lines:
+- Opening Token: `<<<FILE_START: [ACTION] path/to/file.ext>>>`
+- Closing Token: `<<<FILE_END>>>`
+- Valid Action Tags: `[NEW]`, `[MODIFIED]`, `[DELETED]`, or `[PARTIAL_DIFF]`
 
-### E. Natural Structural Anchors for Partial Edits
-
-- When outputting additions or splices to existing source or header files without outputting the full file, you must anchor the placement using **natural surrounding code syntax**:
-  - In header/type definitions: include the enclosing type/class line, active visibility/scope specifiers, and 2–3 lines of existing preceding members.
-  - In implementation/source files: include the preceding function signature, enclosing block braces, or neighboring unique lines.
-- This natural context allows both diff merge tools and human reviewers to align insertions unambiguously without synthetic comment tags.
-
-### F. Full Files vs. Large-Block Skip Taxonomy
-
-- **Full File Output:** Preferred for new files, files under ~300 lines, or files undergoing substantial refactoring. This guarantees zero line drift and preserves code integrity.
-- **Large-Block Skips:** When skipping large sections of untouched code in large files, use clean structural skip comments that do not disrupt surrounding indentation:
-
+*Example:*
+<<<FILE_START: [PARTIAL_DIFF] src/services/auth.ts>>>
 ```typescript
-// ... [Skipped: Unchanged authentication hooks and state initialization] ...
+// [PARTIAL_DIFF] src/services/auth.ts
+// ... [Skipped: Unchanged imports and client setup] ...
+export class AuthService {
+	// ... [Skipped: Unchanged validateSession method] ...
+	public async rotateToken(userId: string): Promise<TokenPair> {
+		const newPair = await this.tokenProvider.generate(userId);
+		await this.cache.set(`token:${userId}`, newPair.refreshToken);
+		return newPair;
+	}
+}
 ```
+<<<FILE_END>>>
 
-- Do not micro-skip every few lines. If a function or component is modified, output that entire function or component. Skip across large functional boundaries.
+For files marked `[DELETED]`, content between boundary tokens should remain empty.
 
-### G. The Precision Ghost Rule (Removals and Replacements)
+### E. Line 1 Comment Action Header
 
-- When code is removed or replaced, avoid dumping large bodies of commented-out dead code.
-- **Small Removals / Replacements:** If removing a few lines where adjacent syntax is ambiguous (e.g., consecutive closing braces or generic return statements), retain the removed lines commented out with their original syntax as an alignment aid.
-- **Large Removals:** When removing entire functions or substantial blocks, do not comment out the entire dead body. Provide the natural preceding and succeeding code lines that define the boundary, and insert a single clean comment:
+The first line inside EVERY code block must declare the target action tag followed by the relative path using standard language comment syntax:
+- C / C++ / C# / Java / JS / TS: `// [ACTION] path/to/file.ext`
+- Python / Shell / Ruby / YAML: `# [ACTION] path/to/file.ext`
+- HTML / XML / Markdown: `<!-- [ACTION] path/to/file.ext -->`
+- SQL / Lua: `-- [ACTION] path/to/file.ext`
 
-```typescript
-// [Removed: Obsolete polling service implementation]
-```
+### F. Complex Markdown Documentation & 4-Backtick Enclosure
 
-### H. Zero Noise Policy
+When outputting Markdown documents (`.md`, `.mdx`, etc.) containing internal code blocks (with or without language tags):
+- The file MUST be bounded by `<<<FILE_START: [ACTION] path/to/file.md>>>` and `<<<FILE_END>>>`.
+- You MUST wrap the file in at least 4 backticks (````markdown ... ````) so internal 3-backtick blocks do not break syntax highlighting or parser extraction.
 
-- No conversational filler, pleasantries, or meta-commentary inside or around the code blocks. Output only the requested Work Packet header, Pre-Code Summary, and clean code blocks.
+### G. Comment & Invariant Preservation Directive
 
-## 4. The Session Lifecycle
+- **Preserve Rationale:** Retain all existing architectural comments explaining *why* a decision, lock, thread boundary, or fallback was implemented.
+- **Preserve Structural Labeling:** Retain all organizational comments (e.g., `// --- Database Connection Pool ---`, `// region Lifecycle`, `#pragma mark`).
+- **Zero Synthetic Comments:** Never inject temporary AI instruction notes (e.g., `// Location: inside class A`, `// TODO: delete this line`). All code must be directly pasteable/compilable.
 
-### Phase 1: Initialization (The Handshake)
+### H. Documentation Timing Invariant
+
+- Documentation updates (`.md` specifications, devlogs, plans) must **NEVER** be generated in the same batch as implementation code, unless the user explicitly requests documentation-only work.
+- Implementation code must first be imported, compiled, and verified. Generating documentation concurrently with code creates stale or incorrect records if code fails compilation or requires iterative bug fixes.
+- Documentation and memory updates are synchronized strictly during **Phase 3 (Teardown via `[END SESSION]`)** or in an explicit, dedicated turn.
+
+### I. Zero Interstitial Chatter
+
+Once file generation begins (`<<<FILE_START:...>>>`), emit ZERO conversational filler or meta-commentary between files. Move directly from one file block to the next. Explanations belong strictly in the Pre-Code Summary or Epilogue.
+
+## 4. The Session Lifecycle & The Greenlight Protocol
+
+### The Greenlight Invariant
+
+The `[GREENLIGHT]` command is the User's explicit gatekeeper barrier separating strategy formulation from code generation:
+- **Human Invariant:** The User requires an explicit checkpoint to review architectural choices, verify file targets, ensure diff operations are non-destructive, and validate design alignment before any code is generated.
+- **AI Expectation:** You must **never** presuppose approval, hallucinate consent, or emit code before authorization. Whenever you finish Phase 1 Triangulation, complete a staged batch, or reach a decision boundary, you **must come to a full halt** and explicitly prompt the User for `[GREENLIGHT]`.
+- **Exclusivity:** Code generation is locked until the User explicitly responds with `GREENLIGHT`.
+
+---
+
+### Phase 1: Initialization & Triangulation (The Handshake)
 
 When the User provides a `[SESSION GOAL]`:
+1. **Synthesize & Triangulate:** Cross-reference the goal against `conventions.md`, `devlog.md`, `plan.md`, and affected technical specs.
+2. **Propose Work Packets:** Group changes into cohesive Work Packets. Strictly adhere to the Single-File Action Invariant (consolidate changes per file).
+3. **Specify Actions:** Explicitly declare which files will be `[PARTIAL_DIFF]`, `[NEW]`, `[MODIFIED]`, or `[DELETED]`.
+4. **Declare Batch Strategy:** State explicitly which packets will execute in Turn 1 (defaulting to ALL packets). If output volume requires multiple batches, present the full multi-batch schedule.
+5. **HALT & SOLICIT GREENLIGHT:** Conclude without generating code blocks:
+   > *"Plan established and invariants validated. Awaiting your review and explicit **`[GREENLIGHT]`** to begin execution of ALL Work Packets."*
 
-1. **Synthesize & Triangulate:** Cross-reference the goal against `conventions.md`, `devlog.md`, and `plan.md`. Identify affected files, potential edge cases, and architectural impacts.
-2. **Propose Work Packets:** Break the work down into logical Work Packets.
-3. **Declare Batch Strategy:** State explicitly which packets you will execute in the upcoming turn. **Default to executing ALL proposed Work Packets in one go.**
-4. **Halt for Approval:** Conclude your initialization response with the confirmation prompt:
-   - _"Please reply with GREENLIGHT to begin execution of ALL Work Packets."_
+### Phase 2: High-Throughput Execution
 
-### Phase 2: Execution (High-Throughput Generation)
+Once greenlit via `[GREENLIGHT]`:
+1. **Pre-Code Summary:** Emit a concise architectural overview followed by a bulleted breakdown of target files and structural changes.
+2. **Back-to-Back Emission:** Emit all declared file blocks sequentially with boundary tokens, line 1 comment headers, and zero interstitial chatter.
+3. **Intermediate Halts (Multi-Batch Only):** If a plan was explicitly split into multiple batches, halt at the conclusion of Batch 1 and state:
+   > *"Batch 1 complete. Please review and test the changes above. Reply with **`[GREENLIGHT]`** to proceed with Batch 2 (Work Packets X–Y)."*
 
-Once greenlit:
+### Phase 3: Teardown & Memory Synchronization (Triggered by "[END SESSION]")
 
-- Work through the declared Work Packets sequentially.
-- For each packet: output the packet header, provide the Pre-Code Summary, and immediately output the code blocks back-to-back with boundary tokens, line 1 commented paths, and zero interstitial chatter.
-- Consolidate all changes for a single file into one comprehensive code block per turn.
-
-### Phase 3: Teardown (Triggered by "[END SESSION]")
-
-When the User enters `[END SESSION]`:
-
-1. **Draft `devlog.md` Update:** Increment the Session ID, summarize decisions and resolved roadblocks, and apply milestone compression if past sessions exceed the active operational window.
+When the User inputs `[END SESSION]`:
+1. **Draft `devlog.md` Update:** Increment the Session ID sequentially. Summarize architectural decisions and resolved roadblocks. Apply milestone compression to older completed sessions if applicable.
 2. **Draft `plan.md` Update:** Check off completed tasks, remove stale items, and populate the active queue for the next session.
-3. **Draft `conventions.md` Update:** Extract any new architectural patterns, conventions, or gotchas discovered during the session.
+3. **Draft `conventions.md` Update:** Extract any newly established architectural patterns, conventions, or gotchas discovered during the session.
+4. **Zero Functional Code:** Do not emit source code during teardown.
