@@ -192,6 +192,34 @@ export interface WorkspacePayload {
   };
 }
 
+// --- Agent Forge Types ---
+export type AgentForgeProfile = 'Standard' | 'Unreal' | 'SourceMiner';
+export type AgentForgeToolingMode = 'Xcerpt' | 'NativeIDE';
+
+export interface AgentForgeCheckResult {
+  exists: boolean;
+  hasAgentFiles: boolean;
+  existingFiles: string[];
+  resolvedPath: string;
+}
+
+export interface AgentForgeScaffoldOptions {
+  targetDirectory: string;
+  profile: AgentForgeProfile;
+  toolingMode: AgentForgeToolingMode;
+  scaffoldVault?: boolean;
+  forceRefresh?: boolean;
+}
+
+export interface AgentForgeScaffoldResult {
+  success: boolean;
+  resolvedDirectory: string;
+  writtenFiles: string[];
+  vaultDirectories: string[];
+  fromCache: boolean;
+  error?: string;
+}
+
 export interface ElectronAPI {
   ping: () => Promise<string>;
   selectDirectory: () => Promise<string | null>;
@@ -207,7 +235,7 @@ export interface ElectronAPI {
   getVersion: () => Promise<string>;
   getGitStatus: (targetPath: string) => Promise<Record<string, string>>;
   getGitBranch: (targetPath: string) => Promise<string | null>;
-  getGitDiff: (dirPath, files?: string[]) => Promise<string>;
+  getGitDiff: (dirPath: string, files?: string[]) => Promise<string>;
   getGitLog: (dirPath: string, count?: number) => Promise<string>;
   commitGit: (dirPath: string, message: string, files?: string[]) => Promise<{ success: boolean; hash?: string; error?: string }>;
 
@@ -246,6 +274,11 @@ export interface ElectronAPI {
   deleteDevSession: (workspaceId: string, sessionId: string) => Promise<void>;
   applyFileAction: (absolutePath: string, content: string | null, actionType: 'NEW' | 'MODIFIED' | 'DELETED' | 'PARTIAL_DIFF') => Promise<void>;
   revertCheckpointFiles: (snapshotFiles: Record<string, string | null>) => Promise<void>;
+
+  // Agent Forge Workspace Scaffolder
+  agentForgeCheckDirectory: (targetPath: string) => Promise<AgentForgeCheckResult>;
+  agentForgeScaffold: (options: AgentForgeScaffoldOptions) => Promise<AgentForgeScaffoldResult>;
+  agentForgeClearCache: () => Promise<{ success: boolean; error?: string }>;
 
   // Native LLM Integrations
   llmComplete: (options: LLMCompletionOptions) => Promise<LLMCompletionResult>;

@@ -19,6 +19,7 @@ elMonitor.enable();
 
 const SESSIONS_DIR = path.join(app.getPath('userData'), 'XcerptSessions');
 const DEV_SESSIONS_DIR = path.join(SESSIONS_DIR, 'dev_sessions');
+const AGENT_FORGE_CACHE_DIR = path.join(SESSIONS_DIR, 'agent_forge_cache');
 
 let fileWatcher = null;
 let watchedPaths = new Set();
@@ -333,6 +334,183 @@ async function setupWatcher() {
     }
   }
 }
+
+// --- Agent Forge Remote Template Fetching & Caching Subsystem ---
+const AGENT_FORGE_REPO_BASE = 'https://raw.githubusercontent.com/Stinger05189/agent-forge/master/template/.agents';
+
+async function fetchOrGetCachedTemplate(remoteFileName, forceRefresh = false) {
+  const cacheKey = remoteFileName.replace(/[\/\\]/g, '_');
+  const cacheFilePath = path.join(AGENT_FORGE_CACHE_DIR, cacheKey);
+
+  if (!forceRefresh) {
+    try {
+      const cached = await fs.readFile(cacheFilePath, 'utf-8');
+      return { content: cached, fromCache: true };
+    } catch (e) {
+      // Not yet cached, proceed to live network fetch
+    }
+  }
+
+  const url = `${AGENT_FORGE_REPO_BASE}/${remoteFileName}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`GitHub returned HTTP ${response.status} for ${url}`);
+    }
+    const content = await response.text();
+    await fs.mkdir(AGENT_FORGE_CACHE_DIR, { recursive: true });
+    await fs.writeFile(cacheFilePath, content, 'utf-8');
+    return { content, fromCache: false };
+  } catch (fetchErr) {
+    // If live fetch fails but stale cache exists, fallback gracefully
+    try {
+      const cached = await fs.readFile(cacheFilePath, 'utf-8');
+      return { content: cached, fromCache: true, fallbackWarning: true };
+    } catch {
+      throw new Error(`Could not fetch template "${remoteFileName}" from GitHub and no local cache was found: ${fetchErr.message}`);
+    }
+  }
+}
+
+ipcMain.handle('agentForge:checkDirectory', async (_, targetPath) => {
+  if (!targetPath) return { exists: false, hasAgentFiles: false, existingFiles: [], resolvedPath: '' };
+  const resolved = path.resolve(targetPath);
+  try {
+    const stats = await fs.stat(resolved);
+    if (!stats.isDirectory()) {
+      return { exists: true, hasAgentFiles: false, existingFiles: [], resolvedPath: resolved };
+    }
+    const files = await fs.readdir(resolved);
+    const agentFiles = files.filter(f => ['agent.md', 'conventions.md', 'devlog.md', 'plan.md'].includes(f));
+    return {
+      exists: true,
+      hasAgentFiles: agentFiles.length > 0,
+      existingFiles: files,
+      resolvedPath: resolved
+    };
+  } catch (e) {
+    return {
+      exists: false,
+      hasAgentFiles: false,
+      existingFiles: [],
+      resolvedPath: resolved
+    };
+  }
+});
+
+ipcMain.handle('agentForge:scaffold', async (_, options) => {
+  const {
+    targetDirectory,
+    profile = 'Standard',
+    toolingMode = 'Xcerpt',
+    scaffoldVault = true,
+    forceRefresh = false
+  } = options || {};
+
+  if (!targetDirectory) {
+    throw new Error('Target directory path is required for Agent Forge initialization.');
+  }
+
+  const resolvedTarget = path.resolve(targetDirectory);
+  await fs.mkdir(resolvedTarget, { recursive: true });
+
+  const writtenFiles = [];
+  const vaultDirectories = [];
+  let usedCache = false;
+
+  // 1. Resolve remote filenames based on profile and tooling configuration
+  let agentRemoteFile = '';
+  const baseFiles = [];
+  const skillFiles = [];
+
+  if (profile === 'SourceMiner') {
+    agentRemoteFile = 'agent.miner.md';
+    baseFiles.push(
+      { remote: 'conventions.miner.md', local: 'conventions.md' },
+      { remote: 'devlog.miner.md', local: 'devlog.md' },
+      { remote: 'plan.miner.md', local: 'plan.md' }
+    );
+    skillFiles.push('extract-subsystem.md', 'extract-primitive.md', 'triangulate-source.md');
+  } else if (profile === 'Unreal') {
+    agentRemoteFile = toolingMode === 'NativeIDE' ? 'agent.unreal.native.md' : 'agent.unreal.md';
+    baseFiles.push(
+      { remote: 'conventions.md', local: 'conventions.md' },
+      { remote: 'devlog.md', local: 'devlog.md' },
+      { remote: 'plan.md', local: 'plan.md' }
+    );
+  } else {
+    agentRemoteFile = toolingMode === 'NativeIDE' ? 'agent.native.md' : 'agent.md';
+    baseFiles.push(
+      { remote: 'conventions.md', local: 'conventions.md' },
+      { remote: 'devlog.md', local: 'devlog.md' },
+      { remote: 'plan.md', local: 'plan.md' }
+    );
+  }
+
+  // 2. Fetch and write agent.md protocol
+  const agentTemplate = await fetchOrGetCachedTemplate(agentRemoteFile, forceRefresh);
+  if (agentTemplate.fromCache) usedCache = true;
+  const agentDest = path.join(resolvedTarget, 'agent.md');
+  await fs.writeFile(agentDest, agentTemplate.content, 'utf-8');
+  writtenFiles.push(agentDest);
+
+  // 3. Fetch and write state files (conventions, devlog, plan)
+  for (const item of baseFiles) {
+    const template = await fetchOrGetCachedTemplate(item.remote, forceRefresh);
+    if (template.fromCache) usedCache = true;
+    const dest = path.join(resolvedTarget, item.local);
+    await fs.writeFile(dest, template.content, 'utf-8');
+    writtenFiles.push(dest);
+  }
+
+  // 4. If Source Miner profile, fetch and write skills suite
+  if (profile === 'SourceMiner' && skillFiles.length > 0) {
+    const skillsDir = path.join(resolvedTarget, 'skills');
+    await fs.mkdir(skillsDir, { recursive: true });
+    for (const skill of skillFiles) {
+      const template = await fetchOrGetCachedTemplate(`skills/${skill}`, forceRefresh);
+      if (template.fromCache) usedCache = true;
+      const skillDest = path.join(skillsDir, skill);
+      await fs.writeFile(skillDest, template.content, 'utf-8');
+      writtenFiles.push(skillDest);
+    }
+  }
+
+  // 5. If Source Miner profile and vault scaffolding enabled, scaffold vault/ alongside or above .agents
+  if (profile === 'SourceMiner' && scaffoldVault) {
+    const parentDir = path.basename(resolvedTarget) === '.agents' 
+      ? path.dirname(resolvedTarget) 
+      : resolvedTarget;
+
+    const vaultDir = path.join(parentDir, 'vault');
+    const subDirs = ['subsystems', 'primitives', 'forensics'];
+    await fs.mkdir(vaultDir, { recursive: true });
+    vaultDirectories.push(vaultDir);
+
+    for (const sub of subDirs) {
+      const p = path.join(vaultDir, sub);
+      await fs.mkdir(p, { recursive: true });
+      vaultDirectories.push(p);
+    }
+  }
+
+  return {
+    success: true,
+    resolvedDirectory: resolvedTarget,
+    writtenFiles,
+    vaultDirectories,
+    fromCache: usedCache
+  };
+});
+
+ipcMain.handle('agentForge:clearCache', async () => {
+  try {
+    await fs.rm(AGENT_FORGE_CACHE_DIR, { recursive: true, force: true });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 
 // --- Window Management ---
 function createWindow() {

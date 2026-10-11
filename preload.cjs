@@ -52,6 +52,11 @@ contextBridge.exposeInMainWorld('api', {
   applyFileAction: (absolutePath, content, actionType) => ipcRenderer.invoke('session:applyAction', absolutePath, content, actionType),
   revertCheckpointFiles: (snapshotFiles) => ipcRenderer.invoke('session:revertCheckpoint', snapshotFiles),
 
+  // Agent Forge Workspace Scaffolder
+  agentForgeCheckDirectory: (targetPath) => ipcRenderer.invoke('agentForge:checkDirectory', targetPath),
+  agentForgeScaffold: (options) => ipcRenderer.invoke('agentForge:scaffold', options),
+  agentForgeClearCache: () => ipcRenderer.invoke('agentForge:clearCache'),
+
   // Native LLM Integrations
   llmComplete: (options) => ipcRenderer.invoke('llm:complete', options),
   llmTestConnection: (providerId, apiKey, model, baseUrl) => ipcRenderer.invoke('llm:testConnection', providerId, apiKey, model, baseUrl),

@@ -8,12 +8,14 @@ import { WorkspaceBrowser } from './components/layout/WorkspaceBrowser';
 import { SettingsModal } from './components/layout/SettingsModal';
 import { ToastContainer } from './components/layout/ToastContainer';
 import { DevStudioModal } from './features/session/components/DevStudioModal';
+import { AgentForgeModal } from './components/layout/AgentForgeModal';
 import { useAppStore } from './store/appStore';
 import { useHistoryStore } from './store/historyStore';
 
 function App() {
   const isBrowserOpen = useAppStore(s => s.isBrowserOpen);
   const isSettingsOpen = useAppStore(s => s.isSettingsOpen);
+  const isAgentForgeModalOpen = useAppStore(s => s.isAgentForgeModalOpen);
   const config = useAppStore(s => s.config);
 
   // Suppress Monaco internal worker cancellation rejections on rapid tab switches
@@ -99,13 +101,14 @@ function App() {
       <div className="relative z-10 flex flex-col h-full w-full">
         <TitleBar />
         <Bootstrapper>
-          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
+          <div className={`flex-1 flex overflow-hidden relative transition-opacity duration-200 ${(isBrowserOpen || isSettingsOpen || isAgentForgeModalOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
             <Sidebar />
             <MainStage />
           </div>
           {isBrowserOpen && <WorkspaceBrowser />}
           <DevStudioModal />
           {isSettingsOpen && <SettingsModal />}
+          {isAgentForgeModalOpen && <AgentForgeModal />}
           <ToastContainer />
         </Bootstrapper>
       </div>

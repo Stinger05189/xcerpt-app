@@ -90,6 +90,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 interface AppState {
   config: AppConfig;
   isSettingsOpen: boolean;
+  isAgentForgeModalOpen: boolean;
   appVersion: string | null;
   updateProgress: number | null;
 
@@ -101,6 +102,7 @@ interface AppState {
   loadConfig: () => Promise<void>;
   updateConfig: (newConfig: Partial<AppConfig> | ((prev: AppConfig) => AppConfig)) => void;
   setSettingsOpen: (isOpen: boolean) => void;
+  setAgentForgeModalOpen: (isOpen: boolean) => void;
   setUpdateProgress: (progress: number | null) => void;
 
   setActiveWorkspace: (id: string | null) => void;
@@ -118,6 +120,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   config: DEFAULT_CONFIG,
   isSettingsOpen: false,
+  isAgentForgeModalOpen: false,
   appVersion: null,
   updateProgress: null,
 
@@ -165,6 +168,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSettingsOpen: (isOpen) => set({ isSettingsOpen: isOpen }),
+  setAgentForgeModalOpen: (isOpen) => set({ isAgentForgeModalOpen: isOpen }),
   setUpdateProgress: (progress) => set({ updateProgress: progress }),
 
   setActiveWorkspace: (id) => set({ activeWorkspaceId: id }),

@@ -1,12 +1,26 @@
 // src/components/layout/TitleBar.tsx
 import { useEffect, useState } from 'react';
-import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee, Undo2, Redo2 } from 'lucide-react';
+import { Minus, Square, X, Plus, PanelLeft, Settings, DownloadCloud, RefreshCw, Coffee, Undo2, Redo2, Flame } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useHistoryStore } from '../../store/historyStore';
 
 export function TitleBar() {
-  const { activeWorkspaceId, openTabs, setActiveWorkspace, removeWorkspaceTab, isBrowserOpen, setBrowserOpen, isSettingsOpen, setSettingsOpen, updateProgress, appVersion, reorderWorkspaceTabs } = useAppStore();
+  const { 
+    activeWorkspaceId, 
+    openTabs, 
+    setActiveWorkspace, 
+    removeWorkspaceTab, 
+    isBrowserOpen, 
+    setBrowserOpen, 
+    isSettingsOpen, 
+    setSettingsOpen, 
+    isAgentForgeModalOpen,
+    setAgentForgeModalOpen,
+    updateProgress, 
+    appVersion, 
+    reorderWorkspaceTabs 
+  } = useAppStore();
   const { isSidebarOpen, setSidebarOpen } = useWorkspaceStore();
   const { undoStack, redoStack, undo, redo } = useHistoryStore();
 
@@ -40,7 +54,7 @@ export function TitleBar() {
     >
       
       {/* Locked Container for Header Tools when Overlays are Open */}
-      <div className={`flex items-end h-full flex-1 overflow-x-hidden ${(isBrowserOpen || isSettingsOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
+      <div className={`flex items-end h-full flex-1 overflow-x-hidden ${(isBrowserOpen || isSettingsOpen || isAgentForgeModalOpen) ? 'opacity-30 pointer-events-none' : ''}`}>
         
         {/* Sidebar Toggle */}
         <div 
@@ -60,6 +74,16 @@ export function TitleBar() {
           title="Workspace Browser"
         >
           <img src="./icon.svg" alt="Xcerpt" className="w-5 h-5 drop-shadow-sm" />
+        </div>
+
+        {/* Agent Forge Initializer Launcher */}
+        <div 
+          className={`flex items-center justify-center h-full px-2.5 mb-1 rounded-md cursor-pointer transition-colors ${isAgentForgeModalOpen ? 'text-orange-400 bg-orange-500/15' : 'text-text-muted hover:text-orange-400 hover:bg-orange-500/10'}`}
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          onClick={() => setAgentForgeModalOpen(!isAgentForgeModalOpen)}
+          title="Agent Forge: Initialize Agent Documentation Workspace"
+        >
+          <Flame size={16} />
         </div>
         
         {/* Version & Updater Component */}
